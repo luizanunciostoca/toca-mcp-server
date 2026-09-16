@@ -9,8 +9,12 @@ const workflow = readFileSync(
 describe('Instagram Direct canary opportunity watch', () => {
   it('is a bounded read-only watch with no reply authority', () => {
     expect(workflow).toContain("cron: '*/10 * * * *'");
-    expect(workflow).toContain('PRODUCTION AUTHORIZATION — Instagram DIRECT canary opportunity watch READONLY AUTO');
-    expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_DIRECT_CANARY_OPPORTUNITY_WATCH=AUTHORIZED');
+    expect(workflow).toContain(
+      'PRODUCTION AUTHORIZATION — Instagram DIRECT canary opportunity watch READONLY AUTO',
+    );
+    expect(workflow).toContain(
+      'INSTAGRAM_ENGAGEMENT_DIRECT_CANARY_OPPORTUNITY_WATCH=AUTHORIZED',
+    );
     expect(workflow).toContain('WATCH_MODE=READ_ONLY');
     expect(workflow).toContain('WATCH_INTERVAL_MINUTES=10');
     expect(workflow).toContain('WATCH_MAX_LIFETIME_HOURS=12');
@@ -34,8 +38,12 @@ describe('Instagram Direct canary opportunity watch', () => {
     expect(workflow).toContain(
       '--command node --args dist/src/ops/instagram-engagement-canary-eligibility-readonly.js',
     );
-    expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_CANARY_MAX_AGE_MINUTES=30');
-    expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_MINUTES=120');
+    expect(workflow).toContain(
+      'INSTAGRAM_ENGAGEMENT_CANARY_MAX_AGE_MINUTES=30',
+    );
+    expect(workflow).toContain(
+      'INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_MINUTES=120',
+    );
     expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false');
     expect(workflow).toContain('--max-retries 0');
     expect(workflow).toContain('for attempt in 1 2; do');
@@ -57,7 +65,9 @@ describe('Instagram Direct canary opportunity watch', () => {
   });
 
   it('keeps no-target watches active and only creates a sanitized opportunity for one target', () => {
-    expect(workflow).toContain("if [[ \"$STATUS\" = 'BLOCKED_LOG_PROPAGATION' || \"$STATUS\" = 'NO_ELIGIBLE_TARGET' ]]");
+    expect(workflow).toContain(
+      "if [[ \"$STATUS\" = 'BLOCKED_LOG_PROPAGATION' || \"$STATUS\" = 'NO_ELIGIBLE_TARGET' ]]",
+    );
     expect(workflow).toContain('WATCH_REMAINS_ACTIVE=true');
     expect(workflow).toContain('DIRECT_CANARY_OPPORTUNITY_STATUS=READY');
     expect(workflow).toContain('ELIGIBLE_TARGET_SHA256=$TARGET_SHA');
@@ -73,8 +83,12 @@ describe('Instagram Direct canary opportunity watch', () => {
     expect(workflow).toContain("close_watch 'STALE_MAIN'");
     expect(workflow).toContain("close_watch 'EXPIRED'");
     expect(workflow).toContain("close_watch 'READY_FOUND'");
-    expect(workflow).toContain("close_watch 'BLOCKED_DUPLICATE_OPPORTUNITY'");
-    expect(workflow).toContain('DIRECT_CANARY_OPPORTUNITY_WATCH_STATUS=PROBE_OR_CONTROLLER_FAILURE');
+    expect(workflow).toContain(
+      "close_watch 'BLOCKED_DUPLICATE_OPPORTUNITY'",
+    );
+    expect(workflow).toContain(
+      'DIRECT_CANARY_OPPORTUNITY_WATCH_STATUS=PROBE_OR_CONTROLLER_FAILURE',
+    );
     expect(workflow).toContain('AUTHORIZATION_STATE=CONSUMED_AND_CLOSED');
     expect(workflow).toContain('-f state=closed -f state_reason=completed');
   });
