@@ -177,6 +177,14 @@ function canonicalRoute(normalized: string): CanonicalRoute | undefined {
     };
   }
 
+  if (isTodayOperatingHoursQuestion(normalized)) {
+    return {
+      intent: 'LOCATION_HOURS',
+      topic: 'LOCATION_HOURS',
+      addConversationIntents: ['INFORMATION'],
+    };
+  }
+
   // Keep ambiguous generic "today" aliases exact so a phrase such as
   // "o que tem hoje para comer?" cannot be widened into EVENT_INFO.
   if (
@@ -222,6 +230,13 @@ function canonicalRoute(normalized: string): CanonicalRoute | undefined {
   }
 
   return undefined;
+}
+
+function isTodayOperatingHoursQuestion(value: string): boolean {
+  if (!value.includes('hoje')) return false;
+  return /\b(?:abre|abrem|abrir|aberto|aberta|abertos|abertas|funciona|funcionam|funcionar|funcionando)\b/.test(
+    value,
+  );
 }
 
 function mergeConversationIntents(
