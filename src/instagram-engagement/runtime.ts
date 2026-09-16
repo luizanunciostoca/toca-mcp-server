@@ -22,8 +22,10 @@ import {
 } from './knowledge.js';
 import { PostgresInstagramEngagementKnowledgeBaseSource } from './postgres-knowledge-base.js';
 import { PostgresInstagramEngagementKnowledgeSource } from './postgres-knowledge.js';
+import { PostgresInstagramSalesFunnelStore } from './postgres-sales-funnel-store.js';
 import { InstagramEngagementProcessor } from './processor.js';
 import { InstagramSalesFunnelCoordinator } from './sales-funnel-coordinator.js';
+import { InstagramSalesFunnelDispatcher } from './sales-funnel-dispatcher.js';
 import { TieredInstagramEngagementKnowledgeSource } from './tiered-knowledge.js';
 import {
   claimInstagramEngagementEvents,
@@ -100,13 +102,32 @@ export function createInstagramEngagementBatchRuntime(
       theParty: env.INSTAGRAM_ENGAGEMENT_THE_PARTY_SERIES_KEY?.trim() || 'the-party',
     },
   });
-  const salesFunnel = isTrue(env.INSTAGRAM_SALES_FUNNEL_ENABLED)
+  const salesFunnelEnabled = isTrue(env.INSTAGRAM_SALES_FUNNEL_ENABLED);
+  const salesFunnel = salesFunnelEnabled
     ? new InstagramSalesFunnelCoordinator({ sales })
     : undefined;
 
   const provider: InstagramEngagementProvider = config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED
     ? createLiveProvider(config, env)
     : disabledProvider();
+  const salesFunnelDispatcher = salesFunnelEnabled
+    ? new InstagramSalesFunnelDispatcher({
+        store: new PostgresInstagramSalesFunnelStore(options.pool),
+        sales,
+        provider,
+        pageId,
+        instagramUserId,
+        writesEnabled:
+          config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED &&
+          isTrue(env.INSTAGRAM_SALES_FUNNEL_WRITES_ENABLED),
+      })
+    : undefined;
+  const salesFunnelBatchSize = boundedInteger(
+    env.INSTAGRAM_SALES_FUNNEL_BATCH_SIZE,
+    1,
+    1,
+    5,
+  );
   const processor = new InstagramEngagementProcessor({
     pool: options.pool,
     knowledge: knowledgeRuntime.source,
@@ -167,6 +188,21 @@ export function createInstagramEngagementBatchRuntime(
           );
         }
       }
+
+      if (salesFunnelDispatcher) {
+        try {
+          const dispatch = await salesFunnelDispatcher.runDue(now, salesFunnelBatchSize);
+          if (dispatch.claimed > 0) {
+            console.log('Instagram sales funnel dispatch', JSON.stringify(dispatch));
+          }
+        } catch (error) {
+          console.error(
+            'Instagram sales funnel dispatcher failed',
+            JSON.stringify({ errorCode: safeErrorCode(error) }),
+          );
+        }
+      }
+
       return { claimed: claimed.length, succeeded, failed };
     },
   };
