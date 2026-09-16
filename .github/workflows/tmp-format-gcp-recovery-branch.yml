@@ -1,0 +1,46 @@
+name: Temporary GCP Recovery Formatter
+
+on:
+  push:
+    branches:
+      - ops/restore-gcp-instagram-publication-20260916
+    paths:
+      - '.github/workflows/tmp-format-gcp-recovery-branch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ops/restore-gcp-instagram-publication-20260916
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Format exact recovery files and remove this temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm prettier --write \
+            infra/control-plane/instagram-gcp-publication-recovery-policy.json \
+            test/instagram-gcp-publication-recovery-preflight.test.ts
+          git rm .github/workflows/tmp-format-gcp-recovery-branch.yml
+          git config user.name 'toca-recovery-formatter[bot]'
+          git config user.email 'toca-recovery-formatter[bot]@users.noreply.github.com'
+          git add infra/control-plane/instagram-gcp-publication-recovery-policy.json test/instagram-gcp-publication-recovery-preflight.test.ts
+          git diff --cached --quiet && exit 0
+          git commit -m 'style(instagram): apply canonical Prettier formatting'
+          git push origin HEAD:ops/restore-gcp-instagram-publication-20260916
