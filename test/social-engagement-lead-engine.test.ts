@@ -169,7 +169,7 @@ function input(interactionId: string, text: string) {
 }
 
 describe('social engagement lead engine', () => {
-  it('resolves a contact and EventRecord, creates one lead and reuses it on retry', async () => {
+  it('preserves the commercial lead for a ticket purchase while routing response knowledge through TICKET_INFO', async () => {
     const harness = createHarness();
     const first = await harness.engine.process(
       input('event-1', 'Quero comprar ingresso para o sunset hoje, quanto custa?'),
@@ -179,7 +179,7 @@ describe('social engagement lead engine', () => {
     );
 
     expect(first.classification).toMatchObject({
-      intent: 'COMMERCIAL_LEAD',
+      intent: 'TICKET_INFO',
       commercialIntent: 'HIGH',
       eventInterest: 'SUNSET',
       productEvent: 'SUNSET',
@@ -305,10 +305,12 @@ describe('social interaction normalization', () => {
   it('classifies Sunset and The Party interest separately', () => {
     expect(classifySocialEngagement('Quero ir no sunset')).toMatchObject({
       eventInterest: 'SUNSET',
+      commercialIntent: 'NONE',
     });
     expect(classifySocialEngagement('Quanto custa a The Party?')).toMatchObject({
       eventInterest: 'THE_PARTY',
-      commercialIntent: 'MEDIUM',
+      intent: 'TICKET_INFO',
+      commercialIntent: 'NONE',
     });
   });
 });
