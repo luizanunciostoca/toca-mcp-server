@@ -1,0 +1,193 @@
+name: Temporary GCP Recovery Capability Patcher
+
+on:
+  push:
+    branches:
+      - fix/gcp-recovery-capability-preflight-20260916
+    paths:
+      - '.github/workflows/tmp-gcp-recovery-capability-patcher.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/gcp-recovery-capability-preflight-20260916
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Convert recovery to capability-based external-bootstrap preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          workflow_path = Path('.github/workflows/instagram-gcp-publication-recovery-preflight.yml')
+          test_path = Path('test/instagram-gcp-publication-recovery-preflight.test.ts')
+          workflow = workflow_path.read_text()
+
+          env_line = '    environment: infrastructure-admin\n'
+          if workflow.count(env_line) != 1:
+              raise SystemExit('EXPECTED_INFRA_ADMIN_ENVIRONMENT_NOT_FOUND_EXACTLY_ONCE')
+          workflow = workflow.replace(env_line, '', 1)
+
+          start_marker = '      - name: Authenticate infrastructure administrator\n'
+          end_marker = '  provider-read-preflight:\n'
+          if workflow.count(start_marker) != 1 or workflow.count(end_marker) != 1:
+              raise SystemExit('EXPECTED_RECOVERY_MUTATION_BOUNDARY_NOT_FOUND_EXACTLY_ONCE')
+          start = workflow.index(start_marker)
+          end = workflow.index(end_marker)
+          replacement = '''      - name: Record external bootstrap boundary without IAM mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p gcp-recovery-evidence
+          jq -n \\
+            --arg sourceSha "$GITHUB_SHA" \\
+            --arg project "$GCP_PROJECT_ID" \\
+            --arg region "$GCP_REGION" \\
+            --arg runtime "$GCP_RUNTIME_SERVICE_ACCOUNT" \\
+            --arg deploy "$GCP_DEPLOY_SERVICE_ACCOUNT" \\
+            '{schemaVersion:1,sourceSha:$sourceSha,projectId:$project,region:$region,runtimeServiceAccount:$runtime,deployServiceAccount:$deploy,requiredApisExternalBootstrap:true,iamBindingsExternalBootstrap:true,iamMutationAttempted:false,iamPolicyInspectionAttempted:false,result:"PASS"}' \\
+            > gcp-recovery-evidence/bootstrap-boundary.json
+          echo 'GCP_PUBLICATION_EXTERNAL_BOOTSTRAP_BOUNDARY=VERIFIED'
+
+      - name: Upload sanitized bootstrap-boundary evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-gcp-bootstrap-boundary-${{ github.run_id }}
+          path: gcp-recovery-evidence/bootstrap-boundary.json
+          if-no-files-found: error
+          retention-days: 90
+
+'''
+          workflow = workflow[:start] + replacement + workflow[end:]
+
+          replacements = [
+              ('          const databaseUrl = process.env.DATABASE_URL;\n', ''),
+              (' || !databaseUrl', ''),
+              ('            runtimeSecretsPresent: true,', '            metaRuntimeSecretsPresent: true,'),
+              ('META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest,META_APP_SECRET=$APP_SECRET_ID:1,DATABASE_URL=$DATABASE_SECRET_ID:latest', 'META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest,META_APP_SECRET=$APP_SECRET_ID:1'),
+              ('              .runtimeSecretsPresent == true and', '              .metaRuntimeSecretsPresent == true and'),
+          ]
+          for old, new in replacements:
+              if workflow.count(old) != 1:
+                  raise SystemExit(f'EXPECTED_PROVIDER_TRANSFORM_NOT_FOUND_EXACTLY_ONCE: {old}')
+              workflow = workflow.replace(old, new, 1)
+
+          forbidden_runtime_tokens = [
+              'gcloud secrets add-iam-policy-binding',
+              'gcloud secrets get-iam-policy',
+              'gcloud projects add-iam-policy-binding',
+              'gcloud iam service-accounts add-iam-policy-binding',
+              'gcloud artifacts repositories add-iam-policy-binding',
+              'gcloud storage buckets add-iam-policy-binding',
+          ]
+          for token in forbidden_runtime_tokens:
+              if token in workflow:
+                  raise SystemExit(f'FORBIDDEN_IAM_MUTATION_OR_INSPECTION_REMAINS: {token}')
+          workflow_path.write_text(workflow)
+
+          test = test_path.read_text()
+          old_block = '''    expect(workflow).not.toContain('gcloud services enable');
+    expect(workflow).not.toContain('gcloud services list --enabled');
+    expect(workflow).toContain('requiredApisExternalBootstrap:true');
+    expect(workflow).toContain('GCP_PUBLICATION_RECOVERY_FORBIDDEN_PROJECT_ROLE');
+    expect(workflow).toContain(
+      'GCP_PUBLICATION_RECOVERY_FORBIDDEN_RUNTIME_PROJECT_SECRET_ACCESSOR',
+    );
+'''
+          new_block = '''    expect(workflow).not.toContain('gcloud services enable');
+    expect(workflow).not.toContain('gcloud services list --enabled');
+    expect(workflow).not.toContain('add-iam-policy-binding');
+    expect(workflow).not.toContain('get-iam-policy');
+    expect(workflow).toContain('requiredApisExternalBootstrap:true');
+    expect(workflow).toContain('iamBindingsExternalBootstrap:true');
+    expect(workflow).toContain('iamMutationAttempted:false');
+    expect(workflow).toContain('iamPolicyInspectionAttempted:false');
+    expect(workflow).toContain('GCP_PUBLICATION_EXTERNAL_BOOTSTRAP_BOUNDARY=VERIFIED');
+'''
+          if test.count(old_block) != 1:
+              raise SystemExit('EXPECTED_LEAST_AUTHORITY_TEST_BLOCK_NOT_FOUND_EXACTLY_ONCE')
+          test = test.replace(old_block, new_block, 1)
+
+          old_db_assert = "    expect(workflow).toContain('DATABASE_URL=$DATABASE_SECRET_ID:latest');\n"
+          new_db_assert = "    expect(workflow).not.toContain('DATABASE_URL=$DATABASE_SECRET_ID:latest');\n"
+          if test.count(old_db_assert) != 1:
+              raise SystemExit('EXPECTED_DATABASE_ASSERTION_NOT_FOUND_EXACTLY_ONCE')
+          test = test.replace(old_db_assert, new_db_assert, 1)
+
+          credential_anchor = "    expect(workflow).toContain('META_APP_SECRET=$APP_SECRET_ID:1');\n"
+          credential_extra = (
+              "    expect(workflow).toContain('metaRuntimeSecretsPresent: true');\n"
+              "    expect(workflow).not.toContain('const databaseUrl = process.env.DATABASE_URL');\n"
+          )
+          if test.count(credential_anchor) != 1:
+              raise SystemExit('EXPECTED_META_CREDENTIAL_ANCHOR_NOT_FOUND_EXACTLY_ONCE')
+          test = test.replace(credential_anchor, credential_anchor + credential_extra, 1)
+          test_path.write_text(test)
+          PY
+          pnpm prettier --write \
+            .github/workflows/instagram-gcp-publication-recovery-preflight.yml \
+            test/instagram-gcp-publication-recovery-preflight.test.ts
+          git diff --check
+      - name: Upload corrected blobs and publish SHA manifest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          upload_blob() {
+            local path="$1"
+            jq -Rs '{content: ., encoding: "utf-8"}' "$path" > /tmp/blob-payload.json
+            curl --fail --silent --show-error \
+              --request POST \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header 'Accept: application/vnd.github+json' \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              --header 'Content-Type: application/json' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/blobs" \
+              --data-binary @/tmp/blob-payload.json \
+              | jq -r '.sha'
+          }
+          workflow_blob="$(upload_blob .github/workflows/instagram-gcp-publication-recovery-preflight.yml)"
+          test_blob="$(upload_blob test/instagram-gcp-publication-recovery-preflight.test.ts)"
+          [[ "$workflow_blob" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$test_blob" =~ ^[0-9a-f]{40}$ ]]
+
+          jq -n \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg workflowBlobSha "$workflow_blob" \
+            --arg testBlobSha "$test_blob" \
+            '{schemaVersion:1,sourceSha:$sourceSha,workflowBlobSha:$workflowBlobSha,testBlobSha:$testBlobSha}' \
+            > /tmp/blob-shas.json
+          manifest_b64="$(base64 -w 0 /tmp/blob-shas.json)"
+          jq -n \
+            --arg message 'chore(ci): record capability preflight blob SHAs' \
+            --arg content "$manifest_b64" \
+            --arg branch 'fix/gcp-recovery-capability-preflight-20260916' \
+            '{message:$message,content:$content,branch:$branch}' \
+            > /tmp/manifest-put.json
+          curl --fail --silent --show-error \
+            --request PUT \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --header 'Content-Type: application/json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/control/tmp-gcp-recovery-capability-blob-shas.json" \
+            --data-binary @/tmp/manifest-put.json \
+            > /tmp/manifest-response.json
+          jq -e '.content.path == "control/tmp-gcp-recovery-capability-blob-shas.json"' /tmp/manifest-response.json >/dev/null
+          echo 'CAPABILITY_PREFLIGHT_BLOB_MANIFEST=CREATED'
