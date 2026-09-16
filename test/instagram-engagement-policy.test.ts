@@ -50,11 +50,28 @@ describe('Instagram engagement risk policy', () => {
     ).toBe('AUTO_REPLY_ALLOWED');
   });
 
-  it('keeps commercial pricing intent in suggest-only handoff', () => {
+  it('allows verified informational ticket price and official purchase-channel facts', () => {
+    for (const text of ['Quanto custa o ingresso?', 'Onde compro ingresso?']) {
+      const classification = classifySocialEngagement(text);
+      expect(classification.intent).toBe('TICKET_INFO');
+      expect(classification.commercialIntent).toBe('NONE');
+      const decision = evaluateEngagementPolicy({
+        channel: 'DIRECT',
+        intent: classification.intent,
+        factsVerified: true,
+        writesEnabled: true,
+      });
+      expect(decision.autonomy).toBe('AUTO_REPLY_ALLOWED');
+      expect(decision.risk).toBe('LOW');
+    }
+  });
+
+  it('keeps explicit purchase intent in suggest-only handoff', () => {
     const classification = classifySocialEngagement(
-      'Quanto custa e como faço para comprar ingresso?',
+      'Quero comprar ingresso para a The Party, tem disponibilidade?',
     );
     expect(classification.intent).toBe('COMMERCIAL_LEAD');
+    expect(classification.commercialIntent).toBe('HIGH');
     const decision = evaluateEngagementPolicy({
       channel: 'DIRECT',
       intent: classification.intent,
