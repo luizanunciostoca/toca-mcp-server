@@ -9,8 +9,8 @@ const fail = (message) => {
 };
 
 if (!ag01) fail('runtime registration missing');
-if (ag01.lifecycleStatus !== 'PRODUCTION_VERIFIED_DEGRADED') {
-  fail('lifecycle must distinguish historical verification from current degradation');
+if (ag01.lifecycleStatus !== 'PRODUCTION_VERIFIED') {
+  fail('lifecycle must reflect current production verification');
 }
 if (ag01.historicalVerification?.status !== 'PRODUCTION_VERIFIED') {
   fail('historical production verification missing');
@@ -22,21 +22,33 @@ if (
   ag01.historicalVerification?.canonicalProductionRevision !==
   'toca-ag01-orchestrator-vtx-d2c85284-2'
 ) {
-  fail('historical production revision drift');
+  fail('production revision drift');
 }
 if (
   ag01.historicalVerification?.canonicalRuntimeSourceSha !==
   'd2c85284f3f67d017ee800e4c4b772f5418542d6'
 ) {
-  fail('historical runtime source drift');
+  fail('runtime source drift');
+}
+if (
+  ag01.historicalVerification?.canonicalImageDigest !==
+  'sha256:491c0f4e05c8b02bd030080e9ab3d92fbc61a2252f2983fe582b619cbb222e96'
+) {
+  fail('canonical image digest drift');
+}
+if (ag01.historicalVerification?.productionClosureRun !== 33204846117) {
+  fail('production closure evidence drift');
 }
 
-if (ag01.currentOperationalStatus !== 'DEGRADED') fail('current degraded status missing');
-if (ag01.deploymentAuthorized !== false) fail('deployment must fail closed while degraded');
-if (ag01.executionAuthorized !== false) fail('execution must fail closed while degraded');
+if (ag01.currentOperationalStatus !== 'HEALTHY') fail('current healthy status missing');
+if (ag01.deploymentAuthorized !== false) {
+  fail('deployment must remain separately exact-SHA authorized');
+}
+if (ag01.executionAuthorized !== true) fail('healthy AG-01 execution must be authorized');
 if (ag01.executionAuthority !== 'CORE_POLICY_APPROVAL_ONLY') fail('execution authority widened');
-if (ag01.directProviderWriteAuthorized !== false)
+if (ag01.directProviderWriteAuthorized !== false) {
   fail('direct provider write must remain forbidden');
+}
 if (ag01.resourceType !== 'cloud-run-service') fail('unexpected resource type');
 if (ag01.resourceName !== 'toca-ag01-orchestrator') fail('unexpected Cloud Run service');
 if (ag01.runtimeServiceAccount !== 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com') {
@@ -83,41 +95,64 @@ const readback = ag01.cloudPlatformReadback;
 if (readback?.projectBillingEnabled !== true || readback?.billingAccountLinked !== true) {
   fail('project billing attachment evidence missing');
 }
-if (readback?.artifactRegistryServiceEnabled !== false) {
-  fail('Artifact Registry Service Usage observation drift');
-}
-if (readback?.artifactRegistryRepositoryReadback !== 'BILLING_DISABLED') {
-  fail('Artifact Registry repository failure evidence drift');
+if (
+  readback?.artifactRegistryServiceEnabled !== true ||
+  readback?.artifactRegistryServiceState !== 'ENABLED' ||
+  readback?.artifactRegistryRepositoryReadback !== 'READABLE'
+) {
+  fail('Artifact Registry healthy readback missing');
 }
 if (
-  readback?.baseHealthHttpStatus !== 500 ||
-  readback?.baseReadyHttpStatus !== 503 ||
-  readback?.taggedHealthHttpStatus !== 503 ||
-  readback?.taggedReadyHttpStatus !== 503 ||
-  readback?.failedRequestLatency !== '0s' ||
-  readback?.containerSystemEventCount !== 0
+  readback?.baseHealthHttpStatus !== 200 ||
+  readback?.baseReadyHttpStatus !== 200 ||
+  readback?.taggedHealthHttpStatus !== 200 ||
+  readback?.taggedReadyHttpStatus !== 200
 ) {
-  fail('fresh Cloud Run degradation evidence drift');
+  fail('Cloud Run health/readiness evidence is not fully healthy');
 }
+if (readback?.runtimeCapabilityCount !== 42) fail('runtime capability count drift');
+if (readback?.networkProbeResult !== 'APPLICATION_READY_BASE_AND_TAG') {
+  fail('network readiness result drift');
+}
+if (readback?.productionRevision !== 'toca-ag01-orchestrator-vtx-d2c85284-2') {
+  fail('serving revision readback drift');
+}
+if (readback?.runtimeSourceSha !== 'd2c85284f3f67d017ee800e4c4b772f5418542d6') {
+  fail('serving runtime source readback drift');
+}
+if (
+  readback?.imageDigest !==
+  'sha256:491c0f4e05c8b02bd030080e9ab3d92fbc61a2252f2983fe582b619cbb222e96'
+) {
+  fail('serving image digest readback drift');
+}
+if (readback?.trafficPercent !== 100) fail('serving traffic must remain 100 percent');
 
 const evidence = new Set(ag01.freshnessEvidence ?? []);
 for (const marker of [
-  'github-actions:35012288857:attempt-2',
-  'github-actions:35015095866:attempt-1',
-  'github-actions:35015308326:attempt-1',
+  'github-actions:33204846117:attempt-1',
+  'github-actions:35141511500:attempt-1',
+  'github-actions:35144684629:attempt-1',
 ]) {
   if (!evidence.has(marker)) fail(`missing freshness evidence ${marker}`);
 }
 
-const repair = new Set(ag01.repairRequirements ?? []);
-for (const requirement of [
-  'ARTIFACT_REGISTRY_SERVICE_ENABLED',
-  'IMMUTABLE_IMAGE_READBACK_VERIFIED',
-  'HEALTH_200',
-  'READY_200',
-  'EXACT_HEAD_DEPLOYMENT_CERTIFIED',
-]) {
-  if (!repair.has(requirement)) fail(`missing repair requirement ${requirement}`);
+if (!Array.isArray(ag01.repairRequirements) || ag01.repairRequirements.length !== 0) {
+  fail('repair requirements must be empty after restoration');
+}
+
+const restoration = ag01.restorationEvidence;
+if (
+  restoration?.status !== 'PASS' ||
+  restoration?.trackingIssue !== '#932' ||
+  restoration?.artifactRegistryServiceEnabled !== true ||
+  restoration?.immutableImageReadbackVerified !== true ||
+  restoration?.health200 !== true ||
+  restoration?.ready200 !== true ||
+  restoration?.exactHeadDeploymentCertified !== true ||
+  restoration?.providerWriteAuthorityWidened !== false
+) {
+  fail('restoration evidence incomplete');
 }
 
 console.log('AG01_CONTROL_PLANE_STATE_CHECK_PASS=1');
