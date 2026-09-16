@@ -1,0 +1,83 @@
+name: Instagram GCP Recovery Owner Command Gateway
+
+on:
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+
+concurrency:
+  group: instagram-gcp-recovery-owner-command-gateway
+  cancel-in-progress: false
+
+jobs:
+  authorize-and-dispatch:
+    if: >-
+      github.event.issue.number == 862 &&
+      github.actor == 'luizanunciostoca' &&
+      github.event.comment.user.login == 'luizanunciostoca' &&
+      github.event.comment.author_association == 'OWNER'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Guard exact owner command and protected main SHA
+        shell: bash
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          COMMENT_ASSOCIATION: ${{ github.event.comment.author_association }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
+          AUTHORIZED_SOURCE_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = 'issue_comment'
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$EVENT_ACTION" = 'created'
+          test "$EVENT_ISSUE_NUMBER" = '862'
+          test "$GITHUB_ACTOR" = 'luizanunciostoca'
+          test "$COMMENT_AUTHOR" = 'luizanunciostoca'
+          test "$COMMENT_ASSOCIATION" = 'OWNER'
+          [[ "$AUTHORIZED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          expected_command="AUTHORIZE_GCP_INSTAGRAM_RECOVERY_PREFLIGHT ${AUTHORIZED_SOURCE_SHA}"
+          test "$COMMENT_BODY" = "$expected_command"
+
+          live_main_sha="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/heads/main" \
+            | jq -r '.object.sha')"
+          test "$live_main_sha" = "$AUTHORIZED_SOURCE_SHA"
+          echo "AUTHORIZED_SOURCE_SHA=$AUTHORIZED_SOURCE_SHA" >> "$GITHUB_ENV"
+          echo 'OWNER_COMMAND_AUTHORIZATION=VERIFIED'
+
+      - name: Dispatch allowlisted read-only recovery preflight
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          payload="$(jq -nc \
+            --arg ref 'main' \
+            --arg authorization 'AUTHORIZE_GCP_INSTAGRAM_RECOVERY_PREFLIGHT' \
+            --arg sha "$AUTHORIZED_SOURCE_SHA" \
+            '{ref:$ref,inputs:{authorization:$authorization,expected_source_sha:$sha}}')"
+          http_status="$(curl --silent --show-error \
+            --output /tmp/dispatch-response \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --header 'Content-Type: application/json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/instagram-gcp-publication-recovery-preflight.yml/dispatches" \
+            --data "$payload")"
+          test "$http_status" = '204'
+          echo 'OWNER_COMMAND_DISPATCH=ACCEPTED'
