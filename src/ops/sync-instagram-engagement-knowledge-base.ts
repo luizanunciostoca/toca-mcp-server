@@ -20,7 +20,13 @@ import { GoogleDriveReadOnlyTextClient } from '../providers/google-drive/read-on
 import { GoogleSheetsRestClient } from '../providers/google-sheets/client.js';
 
 const GOOGLE_DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
-const DEFAULT_SOURCE_IDS = ['SRC-OPS-001', 'SRC-MENU-002', 'SRC-LOC-001'] as const;
+const DEFAULT_SOURCE_IDS = [
+  'SRC-OPS-001',
+  'SRC-MENU-002',
+  'SRC-LOC-001',
+  'SRC-BRAND-001',
+  'SRC-PROD-001',
+] as const;
 const MIGRATION = '037_instagram_engagement_tiered_knowledge.sql';
 
 const config = loadConfig();
