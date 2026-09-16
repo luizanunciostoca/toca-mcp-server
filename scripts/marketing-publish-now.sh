@@ -121,6 +121,39 @@ validate_command() {
   write_run_evidence "COMMAND_VALIDATED" "$(jq -n --arg issuedAt "$ISSUED_AT" '{issuedAt:$issuedAt}')"
 }
 
+enforce_scheduler_publication_window() {
+  local source not_before expires_at now_epoch not_before_epoch expires_epoch
+  source="$(jq -r '.schedulerBinding.source // ""' "$COMMAND_FILE")"
+  if [ "$source" != "MARKETING_AUTOPILOT_GCP" ]; then
+    return 0
+  fi
+
+  jq -e '
+    .orchestrationIntent == "SCHEDULED_PUBLICATION" and
+    .schedulerBinding.source == "MARKETING_AUTOPILOT_GCP" and
+    (.schedulerBinding.notBefore | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}-03:00$")) and
+    (.schedulerBinding.expiresAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}-03:00$")) and
+    (.schedulerBinding.registrySnapshotSha256 | test("^[a-f0-9]{64}$"))
+  ' "$COMMAND_FILE" >/dev/null
+
+  not_before="$(jq -r .schedulerBinding.notBefore "$COMMAND_FILE")"
+  expires_at="$(jq -r .schedulerBinding.expiresAt "$COMMAND_FILE")"
+  now_epoch="$(date +%s)"
+  not_before_epoch="$(date -d "$not_before" +%s)"
+  expires_epoch="$(date -d "$expires_at" +%s)"
+
+  if [ "$now_epoch" -lt "$not_before_epoch" ]; then
+    write_run_evidence "SCHEDULER_WINDOW_NOT_OPEN" "$(jq -n --arg notBefore "$not_before" --arg expiresAt "$expires_at" '{sideEffectAttempted:false,notBefore:$notBefore,expiresAt:$expiresAt}')"
+    return 1
+  fi
+  if [ "$now_epoch" -gt "$expires_epoch" ]; then
+    write_run_evidence "SCHEDULER_WINDOW_EXPIRED_BEFORE_PROVIDER_WRITE" "$(jq -n --arg notBefore "$not_before" --arg expiresAt "$expires_at" '{sideEffectAttempted:false,notBefore:$notBefore,expiresAt:$expiresAt}')"
+    return 1
+  fi
+
+  write_run_evidence "SCHEDULER_WINDOW_REVALIDATED" "$(jq -n --arg notBefore "$not_before" --arg expiresAt "$expires_at" '{sideEffectAttempted:false,notBefore:$notBefore,expiresAt:$expiresAt}')"
+}
+
 authenticate_docker() {
   test -n "${GOOGLE_ACCESS_TOKEN:-}"
   printf '%s' "$GOOGLE_ACCESS_TOKEN" | \
@@ -364,6 +397,10 @@ execute_and_reconcile() {
   local disable_rc=0
   local readback_rc=0
   local final_disable_rc=0
+
+  if ! enforce_scheduler_publication_window; then
+    return 1
+  fi
   EXECUTE_ATTEMPTED=1
 
   set +e
