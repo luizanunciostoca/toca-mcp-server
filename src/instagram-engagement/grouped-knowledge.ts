@@ -18,6 +18,9 @@ const HUMAN_REQUIRED_INTENTS = new Set<EngagementIntent>([
   'UNKNOWN',
 ]);
 
+const MAX_KNOWLEDGE_SEGMENTS = 8;
+const MAX_SPLIT_RESULTS = MAX_KNOWLEDGE_SEGMENTS + 1;
+
 const UNRESOLVED_NOTICE =
   `Não encontrei informação canônica suficiente para confirmar todos os outros pontos agora. ` +
   `Para a informação oficial mais atualizada, acesse: ${TOCA_OFFICIAL_INFORMATION_URL}`;
@@ -53,6 +56,20 @@ export async function resolveGroupedKnowledge(input: {
       resolvedSegmentCount: 0,
       autoReplySafe: false,
       hasUnresolvedSafeSegment: false,
+    };
+  }
+
+  // Fail closed before any delegated knowledge lookup. This prevents a single
+  // inbound message from multiplying into an unbounded number of serial DB or
+  // Sheets reads and, critically, avoids silently dropping a later risky clause.
+  if (segments.length > MAX_KNOWLEDGE_SEGMENTS) {
+    return {
+      classification,
+      knowledge: null,
+      segmentCount: segments.length,
+      resolvedSegmentCount: 0,
+      autoReplySafe: false,
+      hasUnresolvedSafeSegment: true,
     };
   }
 
@@ -97,15 +114,24 @@ export function splitMessageSegments(groupedText: string, messageCount: number):
     .split(/\r?\n+/g)
     .map((value) => value.trim())
     .filter(Boolean);
-  const chunks = lines.flatMap((line) =>
-    line
-      .split(/(?<=\?)\s+/g)
-      .map((value) => value.trim())
-      .filter(Boolean),
-  );
+  const chunks = lines
+    .flatMap((line) =>
+      line
+        .split(/(?<=\?)\s+/g)
+        .flatMap((questionChunk) => splitConjunctionQuestions(questionChunk))
+        .map((value) => value.trim())
+        .filter(Boolean),
+    )
+    .slice(0, MAX_SPLIT_RESULTS);
 
   if (messageCount <= 1 && chunks.length <= 1) return [normalized];
   return chunks.length > 0 ? chunks : [normalized];
+}
+
+function splitConjunctionQuestions(value: string): readonly string[] {
+  return value.split(
+    /\s+e\s+(?=(?:qual|quais|quanto|quantos|quanta|quantas|como|onde|quando|que|o que|tem)\b)/giu,
+  );
 }
 
 function isUnsafeForAutonomousReply(classification: SocialEngagementClassification): boolean {
