@@ -24,11 +24,15 @@ text = text.replace(legacy, fixed, 1)
 legacy_database_secret = 'DATABASE_URL=$DATABASE_SECRET_ID:latest'
 fixed_database_secret = 'DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION'
 legacy_database_secret_count = text.count(legacy_database_secret)
-if legacy_database_secret_count != 1:
+if legacy_database_secret_count != 2:
     raise SystemExit(
-        f"FAIL_CLOSED: expected exactly one unpinned database secret reference, found {legacy_database_secret_count}"
+        f"FAIL_CLOSED: expected exactly two unpinned database secret references, found {legacy_database_secret_count}"
     )
-text = text.replace(legacy_database_secret, fixed_database_secret, 1)
+text = text.replace(legacy_database_secret, fixed_database_secret)
+if legacy_database_secret in text:
+    raise SystemExit("FAIL_CLOSED: unpinned database secret reference remained after patch")
+if text.count(fixed_database_secret) != 2:
+    raise SystemExit("FAIL_CLOSED: expected exactly two pinned database secret references after patch")
 
 sequence = '''validate_command
 authenticate_docker
@@ -66,7 +70,8 @@ echo "P1_WRAPPER_PHASE=PATCH_GENERATED" >&2
 chmod 0700 "$PATCHED"
 bash -n "$PATCHED"
 grep -Fq 'local extra_json="${2:-}"' "$PATCHED"
-grep -Fq 'DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION' "$PATCHED"
+test "$(grep -Fc 'DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION' "$PATCHED")" -eq 2
+! grep -Fq 'DATABASE_URL=$DATABASE_SECRET_ID:latest' "$PATCHED"
 grep -Fq 'P1_PHASE=VALIDATE_COMMAND' "$PATCHED"
 echo "P1_COMPAT_PATCH=PASS" >&2
 
