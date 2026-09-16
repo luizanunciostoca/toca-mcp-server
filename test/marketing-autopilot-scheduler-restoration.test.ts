@@ -77,6 +77,15 @@ function parseOutput(value: string): unknown {
   return JSON.parse(value) as unknown;
 }
 
+function readStringPath(value: unknown, path: string[]): string | undefined {
+  let current: unknown = value;
+  for (const key of path) {
+    if (typeof current !== 'object' || current === null || Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return typeof current === 'string' ? current : undefined;
+}
+
 describe('Marketing Autopilot scheduler restoration', () => {
   it('pins manual workflow dispatch to PRECHECK and enforces ephemeral-NOOP policy', () => {
     expect(workflow).toContain('workflow_dispatch:');
@@ -93,16 +102,17 @@ describe('Marketing Autopilot scheduler restoration', () => {
   it('prepares inside the bounded lead window without declaring the item due early', () => {
     const result = runScheduler({ now: '2026-09-17T08:58:00-03:00' });
     expect(result.status, result.stderr).toBe(0);
-    expect(parseOutput(result.stdout)).toMatchObject({
+    const output = parseOutput(result.stdout);
+    expect(output).toMatchObject({
       status: 'READY',
       candidate: {
         contentItemId,
         scheduledAt: '2026-09-17T09:00:00-03:00',
         waitSeconds: 120,
         expectedAssetSha256: expectedSha,
-        registrySnapshotSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
       },
     });
+    expect(readStringPath(output, ['candidate', 'registrySnapshotSha256'])).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it('treats an unqualified Sheets clock as America/Bahia wall time, never runner UTC', () => {
@@ -132,7 +142,8 @@ describe('Marketing Autopilot scheduler restoration', () => {
       },
     });
     expect(result.status, result.stderr).toBe(0);
-    expect(parseOutput(result.stdout)).toMatchObject({
+    const output = parseOutput(result.stdout);
+    expect(output).toMatchObject({
       status: 'COMMAND_READY',
       command: {
         action: 'PUBLISH_NOW',
@@ -152,10 +163,12 @@ describe('Marketing Autopilot scheduler restoration', () => {
           rolloutPhase: 'CANARY',
           notBefore: '2026-09-17T09:00:00-03:00',
           expiresAt: '2026-09-17T09:30:00-03:00',
-          registrySnapshotSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
         },
       },
     });
+    expect(readStringPath(output, ['command', 'schedulerBinding', 'registrySnapshotSha256'])).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
     expect(result.stdout).not.toContain('GITHUB_NATIVE');
   });
 
