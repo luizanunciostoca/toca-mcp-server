@@ -10,9 +10,7 @@ export interface MultiIntentInstagramEngagementKnowledgeOptions {
   readonly now?: () => Date;
 }
 
-export class MultiIntentInstagramEngagementKnowledgeSource
-  implements InstagramEngagementKnowledgeSource
-{
+export class MultiIntentInstagramEngagementKnowledgeSource implements InstagramEngagementKnowledgeSource {
   private readonly now: () => Date;
 
   constructor(
