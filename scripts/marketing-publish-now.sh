@@ -147,6 +147,46 @@ validate_command() {
     '{issuedAt:$issuedAt,policyMode:$policyMode} + (if $scheduledAt == "" then {} else {scheduledAt:$scheduledAt} end)')"
 }
 
+revalidate_side_effect_authority() {
+  local now_epoch issued_epoch age_seconds cleared_at cleared_epoch expires_at expires_epoch
+  local scheduled_epoch scheduled_delta scheduled_max_delay_seconds
+
+  now_epoch="$(date +%s)"
+  issued_epoch="$(date -d "$ISSUED_AT" +%s)"
+  age_seconds=$((now_epoch - issued_epoch))
+  test "$age_seconds" -ge -120
+  test "$age_seconds" -le 1800
+
+  jq -e --arg asset "$EXPECTED_ASSET_SHA256" '
+    .rightsClearance.status == "CLEARED" and
+    .rightsClearance.scope == "INSTAGRAM_ORGANIC_PUBLICATION" and
+    (.rightsClearance.evidenceRef | type == "string" and length > 0) and
+    (.rightsClearance.authority | type == "string" and length > 0) and
+    .rightsClearance.assetSha256 == $asset and
+    (.rightsClearance.clearedAt | type == "string" and length > 0)
+  ' "$COMMAND_FILE" >/dev/null
+
+  cleared_at="$(jq -r '.rightsClearance.clearedAt' "$COMMAND_FILE")"
+  cleared_epoch="$(date -d "$cleared_at" +%s)"
+  test "$cleared_epoch" -le "$now_epoch"
+
+  expires_at="$(jq -r '.rightsClearance.expiresAt // empty' "$COMMAND_FILE")"
+  if [ -n "$expires_at" ]; then
+    expires_epoch="$(date -d "$expires_at" +%s)"
+    test "$expires_epoch" -gt "$now_epoch"
+  fi
+
+  if [ "$PUBLICATION_POLICY_MODE" = "SCHEDULED" ]; then
+    test -n "$SCHEDULED_AT"
+    scheduled_epoch="$(date -d "$SCHEDULED_AT" +%s)"
+    scheduled_delta=$((now_epoch - scheduled_epoch))
+    scheduled_max_delay_seconds="${SCHEDULED_MAX_DELAY_SECONDS:-1800}"
+    printf '%s' "$scheduled_max_delay_seconds" | grep -Eq '^[0-9]+$'
+    test "$scheduled_delta" -ge 0
+    test "$scheduled_delta" -le "$scheduled_max_delay_seconds"
+  fi
+}
+
 authenticate_docker() {
   test -n "${GOOGLE_ACCESS_TOKEN:-}"
   printf '%s' "$GOOGLE_ACCESS_TOKEN" | \
@@ -286,6 +326,7 @@ prepare_request() {
 }
 
 deploy_execute_job() {
+  revalidate_side_effect_authority
   gcloud run jobs deploy "$EXECUTE_JOB_NAME" \
     --image "$APP_IMAGE" \
     --project "$PROJECT_ID" \
@@ -390,6 +431,15 @@ execute_and_reconcile() {
   local disable_rc=0
   local readback_rc=0
   local final_disable_rc=0
+  if ! revalidate_side_effect_authority; then
+    set +e
+    disable_writes
+    disable_rc=$?
+    set -e
+    write_run_evidence "AUTHORITY_REVALIDATION_FAILED" "$(jq -n --argjson disableExitCode "$disable_rc" '{sideEffectAttempted:false,disableExitCode:$disableExitCode}')"
+    return 1
+  fi
+
   EXECUTE_ATTEMPTED=1
 
   set +e

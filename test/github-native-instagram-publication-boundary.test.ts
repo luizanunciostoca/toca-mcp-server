@@ -87,12 +87,14 @@ describe('GitHub-native Instagram publication boundary', () => {
     );
   });
 
-  it('keeps the command-file GCP autopilot lane retired with no cloud or provider side effects', () => {
-    expect(legacyAutopilot).toContain('LEGACY_GCP_MARKETING_AUTOPILOT_PUBLICATION=RETIRED');
-    expect(legacyAutopilot).not.toContain('google-github-actions/');
-    expect(legacyAutopilot).not.toContain('gcloud ');
-    expect(legacyAutopilot).not.toContain('id-token: write');
-    expect(legacyAutopilot).not.toContain('META_ACCESS_TOKEN');
-    expect(legacyAutopilot).not.toContain('Cloud Run jobs deploy');
+  it('keeps GitHub-native writes retired while the governed GCP scheduler uses the single writer', () => {
+    expect(legacyAutopilot).toContain('Marketing Autopilot Publication — GCP Governed Scheduler');
+    expect(legacyAutopilot).toContain("cron: '*/15 * * * *'");
+    expect(legacyAutopilot).toContain('id-token: write');
+    expect(legacyAutopilot).toContain('google-github-actions/auth@');
+    expect(legacyAutopilot).toContain('PUBLICATION_POLICY_MODE: SCHEDULED');
+    expect(legacyAutopilot).toContain('bash scripts/marketing-publish-now-fixed.sh');
+    expect(legacyAutopilot).not.toContain('github-native-instagram-publish-controlled');
+    expect(legacyAutopilot).not.toContain('repository_dispatch');
   });
 });

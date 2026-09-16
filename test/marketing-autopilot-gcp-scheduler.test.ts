@@ -39,7 +39,7 @@ function item(overrides: Record<string, unknown> = {}) {
     caption,
     captionSha256: sha256(caption),
     correlationId: 'CORR-MKT-TEST-SUNSET-FEED-0900-V1',
-    idempotencyKey: 'GCP_SCHEDULED:MKT-TEST-SUNSET-FEED-0900:V1',
+    idempotencyKey: 'GCP_SCHEDULED_MKT-TEST-SUNSET-FEED-0900_V1',
     targetCodeSha: 'b'.repeat(40),
     creativeTruthBinding: {
       policyId: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
@@ -68,6 +68,7 @@ function item(overrides: Record<string, unknown> = {}) {
       approvalStatus: 'APPROVED',
       scheduledState: 'SCHEDULED',
       publicationStatus: 'NOT_PUBLISHED',
+      scheduledAt: '2026-09-17T09:00:00-03:00',
       assetSha256: assetSha,
       captionSha256: sha256(caption),
     },
@@ -211,13 +212,77 @@ describe('GCP scheduled Instagram publication controller', () => {
     expect(result.stderr).toContain('SCHEDULED_PUBLICATION_WINDOW_EXPIRED');
   });
 
+  it('fails closed when LIMITED queue identities are reused', () => {
+    const duplicate = item({
+      commandId: 'scheduled-gcp-test-v2',
+      contentItemId: 'MKT-TEST-SUNSET-FEED-0910',
+      registrySnapshot: {
+        ...(item().registrySnapshot as Record<string, unknown>),
+        contentItemId: 'MKT-TEST-SUNSET-FEED-0910',
+        row: 7,
+      },
+    });
+    const { result } = runController(
+      {
+        schemaVersion: 1,
+        mode: 'LIMITED',
+        enabled: true,
+        timezone: 'America/Bahia',
+        maxDelayMinutes: 30,
+        items: [item({ canary: false }), duplicate],
+      },
+      '2026-09-17T09:00:30-03:00',
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('SCHEDULED_PUBLICATION_DUPLICATE_CORRELATIONID');
+  });
+
+  it('fails closed if queue timing differs from the registry-approved time', () => {
+    const changed = item({ scheduledAt: '2026-09-17T08:45:00-03:00' });
+    const { result } = runController(
+      {
+        schemaVersion: 1,
+        mode: 'CANARY',
+        enabled: true,
+        timezone: 'America/Bahia',
+        maxDelayMinutes: 30,
+        items: [changed],
+      },
+      '2026-09-17T08:45:30-03:00',
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('SCHEDULED_PUBLICATION_REGISTRY_SCHEDULE_TIME_MISMATCH');
+  });
+
+  it('fails closed when Creative Truth standard scope does not match the operation', () => {
+    const changed = item({
+      creativeTruthBinding: {
+        ...(item().creativeTruthBinding as Record<string, unknown>),
+        standardId: 'THE_PARTY_HYBRID_NETWORKS_V1',
+      },
+    });
+    const { result } = runController(
+      {
+        schemaVersion: 1,
+        mode: 'CANARY',
+        enabled: true,
+        timezone: 'America/Bahia',
+        maxDelayMinutes: 30,
+        items: [changed],
+      },
+      '2026-09-17T09:00:30-03:00',
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('SCHEDULED_PUBLICATION_CREATIVE_STANDARD_OPERATION_MISMATCH');
+  });
+
   it('fails closed when more than one publication is due in the same cycle', () => {
     const second = item({
       commandId: 'scheduled-gcp-test-v2',
       contentItemId: 'MKT-TEST-SUNSET-FEED-0910',
       scheduledAt: '2026-09-17T09:00:00-03:00',
       correlationId: 'CORR-MKT-TEST-SUNSET-FEED-0910-V1',
-      idempotencyKey: 'GCP_SCHEDULED:MKT-TEST-SUNSET-FEED-0910:V1',
+      idempotencyKey: 'GCP_SCHEDULED_MKT-TEST-SUNSET-FEED-0910_V1',
       registrySnapshot: {
         ...(item().registrySnapshot as Record<string, unknown>),
         contentItemId: 'MKT-TEST-SUNSET-FEED-0910',
@@ -259,12 +324,51 @@ describe('GCP scheduled Instagram publication workflow', () => {
     expect(workflow).not.toContain('repository_dispatch');
   });
 
+  it('verifies code provenance and canonical command binding before minting GCP credentials', () => {
+    const bind = workflow.indexOf(
+      'Bind execution to the approved audited code snapshot before cloud authentication',
+    );
+    const auth = workflow.indexOf(
+      'Authenticate to Google Cloud and Drive only after provenance is verified',
+    );
+    expect(bind).toBeGreaterThan(-1);
+    expect(auth).toBeGreaterThan(bind);
+    expect(workflow).toContain(
+      'cp /tmp/marketing-scheduled-publication-command.json control/marketing-publish-now-command.json',
+    );
+    expect(workflow).toContain(
+      'cmp -s /tmp/marketing-scheduled-publication-command.json control/marketing-publish-now-command.json',
+    );
+  });
+
   it('pins execution code to an ancestor of the exact protected-main queue snapshot', () => {
     expect(workflow).toContain('git merge-base --is-ancestor "$TARGET_CODE_SHA" "$GITHUB_SHA"');
     expect(workflow).toContain('git checkout --detach "$TARGET_CODE_SHA"');
     expect(workflow).toContain(
       'GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh',
     );
+  });
+
+  it('revalidates rights and schedule immediately before write capability and provider execution', () => {
+    expect(publicationScript).toContain('revalidate_side_effect_authority()');
+    const deploy = publicationScript.indexOf('deploy_execute_job()');
+    const deployGuard = publicationScript.indexOf('revalidate_side_effect_authority', deploy);
+    const deployCommand = publicationScript.indexOf(
+      'gcloud run jobs deploy "$EXECUTE_JOB_NAME"',
+      deploy,
+    );
+    const reconcile = publicationScript.indexOf('execute_and_reconcile()');
+    const executeGuard = publicationScript.indexOf('revalidate_side_effect_authority', reconcile);
+    const execute = publicationScript.indexOf(
+      'gcloud run jobs execute "$EXECUTE_JOB_NAME"',
+      reconcile,
+    );
+    expect(deployGuard).toBeGreaterThan(deploy);
+    expect(deployCommand).toBeGreaterThan(deployGuard);
+    expect(executeGuard).toBeGreaterThan(reconcile);
+    expect(execute).toBeGreaterThan(executeGuard);
+    expect(publicationScript).toContain('.rightsClearance.status == "CLEARED"');
+    expect(publicationScript).toContain('expires_epoch');
   });
 
   it('keeps fast-path caption policy separate from scheduled approved-caption policy', () => {

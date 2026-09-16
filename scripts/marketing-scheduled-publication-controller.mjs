@@ -44,10 +44,7 @@ if (expired.length > 0) {
   fail(false, `SCHEDULED_PUBLICATION_WINDOW_EXPIRED:${expired.join(',')}`);
 }
 if (due.length > 1) {
-  fail(
-    false,
-    `SCHEDULED_PUBLICATION_AMBIGUOUS:${due.map((item) => item.contentItemId).join(',')}`,
-  );
+  fail(false, `SCHEDULED_PUBLICATION_AMBIGUOUS:${due.map((item) => item.contentItemId).join(',')}`);
 }
 if (due.length === 0) {
   writeSummary({ due: false, reason: 'NO_ITEM_DUE', mode: queue.mode, now: nowIso });
@@ -105,10 +102,7 @@ function validateQueue(value) {
     'SCHEDULED_PUBLICATION_QUEUE_INVALID',
   );
   fail(value.schemaVersion === 1, 'SCHEDULED_PUBLICATION_QUEUE_SCHEMA_INVALID');
-  fail(
-    value.mode === 'CANARY' || value.mode === 'LIMITED',
-    'SCHEDULED_PUBLICATION_MODE_INVALID',
-  );
+  fail(value.mode === 'CANARY' || value.mode === 'LIMITED', 'SCHEDULED_PUBLICATION_MODE_INVALID');
   fail(typeof value.enabled === 'boolean', 'SCHEDULED_PUBLICATION_ENABLED_INVALID');
   fail(value.timezone === 'America/Bahia', 'SCHEDULED_PUBLICATION_TIMEZONE_INVALID');
   fail(Number.isInteger(value.maxDelayMinutes), 'SCHEDULED_PUBLICATION_MAX_DELAY_INVALID');
@@ -131,10 +125,7 @@ function validateUniqueIdentities(items) {
         typeof value === 'string' && value.length > 0,
         `SCHEDULED_PUBLICATION_${field.toUpperCase()}_REQUIRED`,
       );
-      fail(
-        !seen.has(value),
-        `SCHEDULED_PUBLICATION_DUPLICATE_${field.toUpperCase()}:${value}`,
-      );
+      fail(!seen.has(value), `SCHEDULED_PUBLICATION_DUPLICATE_${field.toUpperCase()}:${value}`);
       seen.add(value);
     }
   }
@@ -161,7 +152,13 @@ function validateItem(item, mode, currentMs) {
       `SCHEDULED_PUBLICATION_${field.toUpperCase()}_REQUIRED`,
     );
   }
-  for (const field of ['commandId', 'contentItemId', 'assetId', 'correlationId', 'idempotencyKey']) {
+  for (const field of [
+    'commandId',
+    'contentItemId',
+    'assetId',
+    'correlationId',
+    'idempotencyKey',
+  ]) {
     fail(
       writerIdentityPattern.test(item[field]),
       `SCHEDULED_PUBLICATION_${field.toUpperCase()}_INVALID`,
@@ -291,12 +288,12 @@ function validateItem(item, mode, currentMs) {
     snapshot.captionSha256 === item.captionSha256,
     'SCHEDULED_PUBLICATION_REGISTRY_CAPTION_MISMATCH',
   );
-  fail(/^[a-f0-9]{64}$/.test(item.captionSha256 ?? ''), 'SCHEDULED_PUBLICATION_CAPTION_SHA_INVALID');
-  const actualCaptionSha256 = createHash('sha256').update(item.caption).digest('hex');
   fail(
-    actualCaptionSha256 === item.captionSha256,
-    'SCHEDULED_PUBLICATION_CAPTION_HASH_MISMATCH',
+    /^[a-f0-9]{64}$/.test(item.captionSha256 ?? ''),
+    'SCHEDULED_PUBLICATION_CAPTION_SHA_INVALID',
   );
+  const actualCaptionSha256 = createHash('sha256').update(item.caption).digest('hex');
+  fail(actualCaptionSha256 === item.captionSha256, 'SCHEDULED_PUBLICATION_CAPTION_HASH_MISMATCH');
 }
 
 function validateCreativeStandardScope(item, truth) {
@@ -326,7 +323,8 @@ function validateCreativeStandardScope(item, truth) {
     standard.scope?.channel === item.channel || standard.scope?.channel === 'ALL',
     'SCHEDULED_PUBLICATION_CREATIVE_STANDARD_CHANNEL_MISMATCH',
   );
-  const allowedFormats = item.format === 'FEED_IMAGE' ? ['SINGLE_IMAGE', 'ALL'] : ['STORIES', 'ALL'];
+  const allowedFormats =
+    item.format === 'FEED_IMAGE' ? ['SINGLE_IMAGE', 'ALL'] : ['STORIES', 'ALL'];
   fail(
     allowedFormats.includes(standard.scope?.format),
     'SCHEDULED_PUBLICATION_CREATIVE_STANDARD_FORMAT_MISMATCH',
