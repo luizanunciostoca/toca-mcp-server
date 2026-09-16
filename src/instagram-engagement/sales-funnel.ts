@@ -81,7 +81,12 @@ export function planInstagramSalesFunnel(
   const instagramWindowOpen = nowMs >= lastInboundMs && nowMs < windowClosesMs;
 
   if (input.explicitOptOut) {
-    return { version: INSTAGRAM_SALES_FUNNEL_VERSION, windowClosesAt, instagramWindowOpen, actions: [] };
+    return {
+      version: INSTAGRAM_SALES_FUNNEL_VERSION,
+      windowClosesAt,
+      instagramWindowOpen,
+      actions: [],
+    };
   }
 
   if (input.humanRequired || input.journeyStage === 'HUMAN_HANDOFF') {
@@ -113,7 +118,6 @@ export function planInstagramSalesFunnel(
     if (input.product === 'SUNSET' || input.product === 'BOTH') {
       actions.push(
         buildChannelAwareAction({
-          input,
           nowMs,
           windowClosesMs,
           alternateChannel,
@@ -129,7 +133,6 @@ export function planInstagramSalesFunnel(
       if (input.saturdaySambaPagodeVerified === true) {
         actions.push(
           buildChannelAwareAction({
-            input,
             nowMs,
             windowClosesMs,
             alternateChannel,
@@ -148,7 +151,6 @@ export function planInstagramSalesFunnel(
     if (input.product === 'THE_PARTY' || input.product === 'BOTH') {
       actions.push(
         buildChannelAwareAction({
-          input,
           nowMs,
           windowClosesMs,
           alternateChannel,
@@ -164,7 +166,6 @@ export function planInstagramSalesFunnel(
     }
     actions.push(
       buildChannelAwareAction({
-        input,
         nowMs,
         windowClosesMs,
         alternateChannel,
@@ -195,7 +196,6 @@ export function planInstagramSalesFunnel(
     if (noResponseCount < 1) {
       actions.push(
         buildChannelAwareAction({
-          input,
           nowMs,
           windowClosesMs,
           alternateChannel,
@@ -215,7 +215,6 @@ export function planInstagramSalesFunnel(
     if (noResponseCount < 2) {
       actions.push(
         buildChannelAwareAction({
-          input,
           nowMs,
           windowClosesMs,
           alternateChannel,
@@ -277,7 +276,6 @@ export function salesFunnelMessage(contentKey: InstagramSalesFunnelContentKey): 
 }
 
 function buildChannelAwareAction(input: {
-  readonly input: InstagramSalesFunnelPlanInput;
   readonly nowMs: number;
   readonly windowClosesMs: number;
   readonly alternateChannel: InstagramSalesFunnelChannel;
@@ -290,7 +288,7 @@ function buildChannelAwareAction(input: {
   readonly factsVerified: boolean;
 }): InstagramSalesFunnelAction {
   const safeInstagramDeadlineMs = input.windowClosesMs - INSTAGRAM_WINDOW_BUFFER_MS;
-  if (input.dueMs <= safeInstagramDeadlineMs) {
+  if (input.nowMs <= safeInstagramDeadlineMs && input.dueMs <= safeInstagramDeadlineMs) {
     return {
       actionType: input.actionType,
       channel: 'INSTAGRAM',
