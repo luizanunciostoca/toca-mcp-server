@@ -39,9 +39,7 @@ try {
   if (action === 'INSPECT') {
     const present = await backupTablesPresent();
     const active = await activeScopedCounts();
-    const backup = present
-      ? await backupCounts()
-      : { faq: 0, documents: 0, chunks: 0 };
+    const backup = present ? await backupCounts() : { faq: 0, documents: 0, chunks: 0 };
     printInspection(present, backup, active);
   } else if (action === 'BACKUP') {
     await client.query('begin');
