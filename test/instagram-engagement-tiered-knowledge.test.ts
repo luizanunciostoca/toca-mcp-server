@@ -74,8 +74,11 @@ describe('TieredInstagramEngagementKnowledgeSource', () => {
 
     const match = await source.resolve('Quanto custa o ingresso?', 'TICKET_INFO');
 
+    expect(TOCA_OFFICIAL_INFORMATION_URL).toBe('https://linktr.ee/tocadomorcegooficial');
     expect(match?.answer).toBe(TOCA_TICKET_INFORMATION_REPLY);
     expect(match?.answer).toContain(TOCA_OFFICIAL_INFORMATION_URL);
+    expect(match?.answer).not.toContain('utm_');
+    expect(match?.answer).not.toContain('fbclid');
     expect(match?.answer).toContain('variam de acordo com a data');
   });
 
