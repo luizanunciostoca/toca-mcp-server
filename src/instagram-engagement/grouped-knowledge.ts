@@ -80,13 +80,20 @@ export async function resolveGroupedKnowledge(input: {
     const match = unsafe
       ? null
       : await input.knowledge.resolve(text, segmentClassification.intent);
-    resolved.push({ text, classification: segmentClassification, knowledge: match, unsafe });
+    resolved.push({
+      text,
+      classification: segmentClassification,
+      knowledge: match,
+      unsafe,
+    });
   }
 
   const hasUnsafe = resolved.some((item) => item.unsafe);
   const verified = resolved
     .map((item) => item.knowledge)
-    .filter((match): match is InstagramEngagementKnowledgeMatch => match?.factsVerified === true);
+    .filter(
+      (match): match is InstagramEngagementKnowledgeMatch => match?.factsVerified === true,
+    );
   const unique = uniqueMatches(verified);
   const safeCount = resolved.filter((item) => !item.unsafe).length;
   const resolvedSegmentCount = resolved.filter(
@@ -106,7 +113,10 @@ export async function resolveGroupedKnowledge(input: {
   };
 }
 
-export function splitMessageSegments(groupedText: string, messageCount: number): readonly string[] {
+export function splitMessageSegments(
+  groupedText: string,
+  messageCount: number,
+): readonly string[] {
   const normalized = groupedText.trim();
   if (!normalized) return [];
 
@@ -134,7 +144,9 @@ function splitConjunctionQuestions(value: string): readonly string[] {
   );
 }
 
-function isUnsafeForAutonomousReply(classification: SocialEngagementClassification): boolean {
+function isUnsafeForAutonomousReply(
+  classification: SocialEngagementClassification,
+): boolean {
   return (
     HUMAN_REQUIRED_INTENTS.has(classification.intent) ||
     classification.containsPotentialSensitiveData ||
@@ -163,10 +175,16 @@ function composeKnowledge(
   fallbackIntent: EngagementIntent,
 ): InstagramEngagementKnowledgeMatch | null {
   if (matches.length === 0) return null;
-  const answers = [...new Set(matches.map((match) => match.answer.trim()).filter(Boolean))];
+  const answers = [
+    ...new Set(matches.map((match) => match.answer.trim()).filter(Boolean)),
+  ];
   if (hasUnresolvedSafeSegment) answers.push(UNRESOLVED_NOTICE);
-  const sources = [...new Set(matches.map((match) => match.source.trim()).filter(Boolean))];
-  const ids = [...new Set(matches.map((match) => match.faqId.trim()).filter(Boolean))];
+  const sources = [
+    ...new Set(matches.map((match) => match.source.trim()).filter(Boolean)),
+  ];
+  const ids = [
+    ...new Set(matches.map((match) => match.faqId.trim()).filter(Boolean)),
+  ];
 
   return {
     faqId: ids.length === 1 ? ids[0]! : `MULTI:${ids.join('+').slice(0, 180)}`,
