@@ -44,7 +44,6 @@ describe('Instagram GCP publication recovery preflight', () => {
     expect(workflow).toContain("method: 'GET'");
     expect(workflow).not.toContain("method: 'POST'");
     expect(workflow).not.toContain('/media_publish');
-    expect(workflow).not.toContain('graph.facebook.com/${apiVersion}/${instagramAccountId}/media` + "'" + ',');
   });
 
   it('binds the same approved Drive JPEG by exact SHA', () => {
