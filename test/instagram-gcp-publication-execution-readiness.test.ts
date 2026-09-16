@@ -31,7 +31,7 @@ describe('Instagram GCP execution-runtime readiness', () => {
     expect(workflow).not.toContain('schedule:');
   });
 
-  it('uses Cloud Run with the production runtime identity, Cloud SQL and only the DB secret', () => {
+  it('uses Cloud Run with the production runtime identity, exact Cloud SQL and pinned DB secret', () => {
     expect(workflow).toContain(
       'GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com',
     );
@@ -39,9 +39,17 @@ describe('Instagram GCP execution-runtime readiness', () => {
       'CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db',
     );
     expect(workflow).toContain('DATABASE_SECRET_ID: toca-database-url');
+    expect(workflow).toContain("DATABASE_SECRET_VERSION: '1'");
+    expect(workflow).toContain("test \"$DATABASE_SECRET_VERSION\" = '1'");
     expect(workflow).toContain('--service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"');
     expect(workflow).toContain('--set-cloudsql-instances "$CLOUD_SQL_INSTANCE"');
-    expect(workflow).toContain('--set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest"');
+    expect(workflow).toContain(
+      '--set-env-vars "SOURCE_SHA=$GITHUB_SHA,EXPECTED_CLOUD_SQL_INSTANCE=$CLOUD_SQL_INSTANCE"',
+    );
+    expect(workflow).toContain(
+      '--set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION"',
+    );
+    expect(workflow).not.toContain('DATABASE_URL=$DATABASE_SECRET_ID:latest');
     expect(workflow).not.toContain('META_ACCESS_TOKEN');
     expect(workflow).not.toContain('META_APP_SECRET');
     expect(workflow).not.toContain('/media_publish');
@@ -82,6 +90,14 @@ describe('Instagram GCP execution-runtime readiness', () => {
     expect(probe).not.toContain("client.query('commit')");
   });
 
+  it('proves the audit serial sequence privilege required by the historical audit insert', () => {
+    expect(probe).toContain("pg_get_serial_sequence('public.audit_events', 'id')");
+    expect(probe).toContain('has_sequence_privilege(');
+    expect(probe).toContain("'USAGE'");
+    expect(probe).toContain('audit_id_sequence_usage');
+    expect(probe).toContain('auditSequencePrivilegePresent: true');
+  });
+
   it('proves the real single-column idempotency index is unique, valid and ready', () => {
     expect(probe).toContain('from pg_index i');
     expect(probe).toContain('i.indisunique = true');
@@ -104,6 +120,16 @@ describe('Instagram GCP execution-runtime readiness', () => {
     expect(probe).not.toContain("includes('toca')");
   });
 
+  it('verifies DATABASE_URL targets the exact attached production Cloud SQL socket', () => {
+    expect(probe).toContain(
+      "const PRODUCTION_CLOUD_SQL_INSTANCE = 'toca-mcp-production:southamerica-east1:toca-mcp-db'",
+    );
+    expect(probe).toContain('const expectedSocket = `/cloudsql/${expectedCloudSqlInstance}`');
+    expect(probe).toContain("parsedDatabaseUrl.searchParams.get('host') !== expectedSocket");
+    expect(probe).toContain('GCP_PUBLICATION_EXECUTION_READINESS_DATABASE_TARGET_MISMATCH');
+    expect(probe).toContain('databaseTargetVerified: true');
+  });
+
   it('verifies the schema and privileges required by the historical execute path without exercising writes', () => {
     for (const required of [
       'provider_publications',
@@ -113,14 +139,28 @@ describe('Instagram GCP execution-runtime readiness', () => {
       'provider_insert',
       'provider_update',
       'audit_insert',
+      'audit_id_sequence_usage',
       'provider_tenant_default_toca',
       'audit_tenant_default_toca',
       'databaseRoleNonSuperuser: true',
     ]) {
       expect(probe).toContain(required);
     }
-    expect(workflow).toContain('GCP_PUBLICATION_EXECUTION_RUNTIME_READINESS=VERIFIED');
+    expect(workflow).toContain('GCP_PUBLICATION_EXECUTION_RUNTIME_DATABASE=VERIFIED');
     expect(workflow).toContain('retention-days: 90');
+  });
+
+  it('proves deletion of the temporary Cloud Run job and prevents rerun name reuse', () => {
+    expect(workflow).toContain('JOB_NAME=toca-instagram-exec-ready-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}');
+    expect(workflow).toContain('gcloud run jobs delete "$JOB_NAME"');
+    expect(workflow).toContain('gcloud run jobs list');
+    expect(workflow).toContain('--filter="metadata.name=$JOB_NAME"');
+    expect(workflow).toContain('cleanup_verified=true');
+    expect(workflow).toContain('cloudRunJobCleanupVerified:true');
+    expect(workflow).toContain('GCP_PUBLICATION_EXECUTION_READINESS_CLOUD_RUN_CLEANUP=VERIFIED');
+    expect(workflow).toContain(
+      'name: instagram-gcp-execution-runtime-readiness-${{ github.run_id }}-${{ github.run_attempt }}',
+    );
   });
 
   it('keeps owner authorization credentialless and invokes only the reusable readiness gate', () => {
