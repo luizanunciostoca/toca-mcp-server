@@ -83,20 +83,7 @@ jobs:
             echo "content_item_id=$item" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Authenticate to Google Cloud and Drive only when due
-        if: steps.selection.outputs.due == 'true'
-        id: auth
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
-        with:
-          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
-          token_format: access_token
-          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
-
-      - if: steps.selection.outputs.due == 'true'
-        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-
-      - name: Bind execution to the approved audited code snapshot
+      - name: Bind execution to the approved audited code snapshot before cloud authentication
         if: steps.selection.outputs.due == 'true'
         shell: bash
         env:
@@ -110,7 +97,23 @@ jobs:
           test "$(git rev-parse HEAD)" = "$TARGET_CODE_SHA"
           grep -Fq 'PUBLICATION_POLICY_MODE="${PUBLICATION_POLICY_MODE:-FAST_PATH}"' scripts/marketing-publish-now.sh
           grep -Fq '.schedulingPolicy == "SCHEDULED_GCP"' scripts/marketing-publish-now.sh
+          grep -Fq 'revalidate_side_effect_authority' scripts/marketing-publish-now.sh
+          cp /tmp/marketing-scheduled-publication-command.json control/marketing-publish-now-command.json
+          cmp -s /tmp/marketing-scheduled-publication-command.json control/marketing-publish-now-command.json
           echo "AUDITED_CODE_SHA=$TARGET_CODE_SHA" >> "$GITHUB_ENV"
+
+      - name: Authenticate to Google Cloud and Drive only after provenance is verified
+        if: steps.selection.outputs.due == 'true'
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - if: steps.selection.outputs.due == 'true'
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Execute exact scheduled GCP publication
         if: steps.selection.outputs.due == 'true'
@@ -122,6 +125,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$AUDITED_CODE_SHA"
+          cmp -s "$COMMAND_FILE" control/marketing-publish-now-command.json
           GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh
 
       - name: Upload scheduled publication evidence
