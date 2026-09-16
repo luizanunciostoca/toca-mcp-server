@@ -1,14 +1,10 @@
 name: Instagram GCP Publication Execution Runtime Readiness
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      authorization:
-        description: Exact owner authorization phrase
-        required: true
-        type: string
       expected_source_sha:
-        description: Exact protected main SHA
+        description: Exact protected main SHA authorized by the owner event
         required: true
         type: string
 
@@ -43,20 +39,30 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Guard exact owner authorization and non-mutating boundary
+      - name: Revalidate exact owner issue event and non-mutating boundary
         shell: bash
         env:
-          READINESS_AUTHORIZATION: ${{ inputs.authorization }}
           EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          COMMENT_ASSOCIATION: ${{ github.event.comment.author_association }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
           set -euo pipefail
-          test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
+          test "$GITHUB_EVENT_NAME" = 'issue_comment'
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
           test "$GITHUB_REF" = 'refs/heads/main'
+          test "$EVENT_ACTION" = 'created'
+          test "$EVENT_ISSUE_NUMBER" = '869'
+          test "$GITHUB_ACTOR" = 'luizanunciostoca'
+          test "$COMMENT_AUTHOR" = 'luizanunciostoca'
+          test "$COMMENT_ASSOCIATION" = 'OWNER'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$EXPECTED_SOURCE_SHA" = "$GITHUB_SHA"
-          test "$READINESS_AUTHORIZATION" = 'AUTHORIZE_GCP_INSTAGRAM_EXECUTION_RUNTIME_READINESS'
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          expected_command="AUTHORIZE_GCP_INSTAGRAM_EXECUTION_RUNTIME_READINESS ${GITHUB_SHA}"
+          test "$COMMENT_BODY" = "$expected_command"
 
           probe=src/instagram-publication-execution-readiness.ts
           test -f "$probe"
@@ -68,6 +74,7 @@ jobs:
             echo 'GCP_PUBLICATION_EXECUTION_READINESS_MUTATING_SQL_FORBIDDEN'
             exit 1
           fi
+          echo 'GCP_PUBLICATION_EXECUTION_READINESS_OWNER_EVENT=VERIFIED'
           echo 'GCP_PUBLICATION_EXECUTION_READINESS_BOUNDARY=VERIFIED'
 
       - name: Authenticate production deployer
@@ -79,23 +86,30 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Build and push exact application image by immutable digest
+      - name: Build and push exact application image by verified immutable digest
         shell: bash
         run: |
           set -euo pipefail
           gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
           IMAGE_REPOSITORY="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/instagram-gcp-execution-readiness"
           IMAGE_TAG="${IMAGE_REPOSITORY}:${GITHUB_SHA}"
-          docker build -t "$IMAGE_TAG" .
-          docker push "$IMAGE_TAG"
-          IMAGE_DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" --format='value(image_summary.digest)')"
-          case "$IMAGE_DIGEST" in
-            sha256:*) ;;
-            *) echo 'GCP_PUBLICATION_EXECUTION_READINESS_IMAGE_DIGEST_INVALID'; exit 1 ;;
-          esac
+          docker buildx build \
+            --pull \
+            --push \
+            --provenance=mode=max \
+            --sbom=true \
+            --metadata-file /tmp/build-metadata.json \
+            -t "$IMAGE_TAG" .
+          IMAGE_DIGEST="$(jq -r '."containerimage.digest" // empty' /tmp/build-metadata.json)"
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          REMOTE_DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" \
+            --project "$GCP_PROJECT_ID" \
+            --format='value(image_summary.digest)')"
+          test "$REMOTE_DIGEST" = "$IMAGE_DIGEST"
           echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
           echo "IMMUTABLE_IMAGE=${IMAGE_REPOSITORY}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
           echo "JOB_NAME=toca-instagram-exec-ready-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+          echo 'GCP_PUBLICATION_EXECUTION_READINESS_IMAGE_BINDING=VERIFIED'
 
       - name: Execute Cloud SQL readiness under production runtime identity
         shell: bash
