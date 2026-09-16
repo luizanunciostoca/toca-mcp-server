@@ -1,0 +1,152 @@
+name: Temporary Fix PR 874 Review
+
+on:
+  push:
+    branches:
+      - ops/restore-gcp-instagram-scheduler-20260916
+    paths:
+      - .github/workflows/tmp-fix-pr874-review.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ops/restore-gcp-instagram-scheduler-20260916
+          persist-credentials: true
+          fetch-depth: 1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply review hardening patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          script_path = Path('scripts/marketing-publish-now.sh')
+          text = script_path.read_text()
+          anchor = '''authenticate_docker() {\n'''
+          assert text.count(anchor) == 1
+          guard = r'''revalidate_side_effect_authority() {
+            local now_epoch issued_epoch age_seconds cleared_at cleared_epoch expires_at expires_epoch
+            local scheduled_epoch scheduled_delta scheduled_max_delay_seconds
+
+            now_epoch="$(date +%s)"
+            issued_epoch="$(date -d "$ISSUED_AT" +%s)"
+            age_seconds=$((now_epoch - issued_epoch))
+            test "$age_seconds" -ge -120
+            test "$age_seconds" -le 1800
+
+            jq -e --arg asset "$EXPECTED_ASSET_SHA256" '
+              .rightsClearance.status == "CLEARED" and
+              .rightsClearance.scope == "INSTAGRAM_ORGANIC_PUBLICATION" and
+              (.rightsClearance.evidenceRef | type == "string" and length > 0) and
+              (.rightsClearance.authority | type == "string" and length > 0) and
+              .rightsClearance.assetSha256 == $asset and
+              (.rightsClearance.clearedAt | type == "string" and length > 0)
+            ' "$COMMAND_FILE" >/dev/null
+
+            cleared_at="$(jq -r '.rightsClearance.clearedAt' "$COMMAND_FILE")"
+            cleared_epoch="$(date -d "$cleared_at" +%s)"
+            test "$cleared_epoch" -le "$now_epoch"
+
+            expires_at="$(jq -r '.rightsClearance.expiresAt // empty' "$COMMAND_FILE")"
+            if [ -n "$expires_at" ]; then
+              expires_epoch="$(date -d "$expires_at" +%s)"
+              test "$expires_epoch" -gt "$now_epoch"
+            fi
+
+            if [ "$PUBLICATION_POLICY_MODE" = "SCHEDULED" ]; then
+              test -n "$SCHEDULED_AT"
+              scheduled_epoch="$(date -d "$SCHEDULED_AT" +%s)"
+              scheduled_delta=$((now_epoch - scheduled_epoch))
+              scheduled_max_delay_seconds="${SCHEDULED_MAX_DELAY_SECONDS:-1800}"
+              printf '%s' "$scheduled_max_delay_seconds" | grep -Eq '^[0-9]+$'
+              test "$scheduled_delta" -ge 0
+              test "$scheduled_delta" -le "$scheduled_max_delay_seconds"
+            fi
+          }
+
+          '''
+          text = text.replace(anchor, guard + anchor, 1)
+          deploy_anchor = '''deploy_execute_job() {\n  gcloud run jobs deploy "$EXECUTE_JOB_NAME" \\\n'''
+          assert text.count(deploy_anchor) == 1
+          text = text.replace(
+              deploy_anchor,
+              '''deploy_execute_job() {\n  revalidate_side_effect_authority\n  gcloud run jobs deploy "$EXECUTE_JOB_NAME" \\\n''',
+              1,
+          )
+          execute_anchor = '''  EXECUTE_ATTEMPTED=1\n\n  set +e\n  gcloud run jobs execute "$EXECUTE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet\n'''
+          assert text.count(execute_anchor) == 1
+          execute_replacement = '''  if ! revalidate_side_effect_authority; then\n    set +e\n    disable_writes\n    disable_rc=$?\n    set -e\n    write_run_evidence "AUTHORITY_REVALIDATION_FAILED" "$(jq -n --argjson disableExitCode "$disable_rc" '{sideEffectAttempted:false,disableExitCode:$disableExitCode}')"\n    return 1\n  fi\n\n  EXECUTE_ATTEMPTED=1\n\n  set +e\n  gcloud run jobs execute "$EXECUTE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet\n'''
+          text = text.replace(execute_anchor, execute_replacement, 1)
+          script_path.write_text(text)
+
+          boundary_path = Path('test/github-native-instagram-publication-boundary.test.ts')
+          boundary = boundary_path.read_text()
+          old = '''  it('keeps the command-file GCP autopilot lane retired with no cloud or provider side effects', () => {\n    expect(legacyAutopilot).toContain('LEGACY_GCP_MARKETING_AUTOPILOT_PUBLICATION=RETIRED');\n    expect(legacyAutopilot).not.toContain('google-github-actions/');\n    expect(legacyAutopilot).not.toContain('gcloud ');\n    expect(legacyAutopilot).not.toContain('id-token: write');\n    expect(legacyAutopilot).not.toContain('META_ACCESS_TOKEN');\n    expect(legacyAutopilot).not.toContain('Cloud Run jobs deploy');\n  });\n'''
+          new = '''  it('keeps GitHub-native writes retired while the governed GCP scheduler uses the single writer', () => {\n    expect(legacyAutopilot).toContain('Marketing Autopilot Publication — GCP Governed Scheduler');\n    expect(legacyAutopilot).toContain("cron: '*/15 * * * *'");\n    expect(legacyAutopilot).toContain('id-token: write');\n    expect(legacyAutopilot).toContain('google-github-actions/auth@');\n    expect(legacyAutopilot).toContain('PUBLICATION_POLICY_MODE: SCHEDULED');\n    expect(legacyAutopilot).toContain('bash scripts/marketing-publish-now-fixed.sh');\n    expect(legacyAutopilot).not.toContain('github-native-instagram-publish-controlled');\n    expect(legacyAutopilot).not.toContain('repository_dispatch');\n  });\n'''
+          assert boundary.count(old) == 1
+          boundary_path.write_text(boundary.replace(old, new, 1))
+
+          test_path = Path('test/marketing-autopilot-gcp-scheduler.test.ts')
+          tests = test_path.read_text()
+          tests = tests.replace(
+              "idempotencyKey: 'GCP_SCHEDULED:MKT-TEST-SUNSET-FEED-0900:V1',",
+              "idempotencyKey: 'GCP_SCHEDULED_MKT-TEST-SUNSET-FEED-0900_V1',",
+          )
+          tests = tests.replace(
+              "      publicationStatus: 'NOT_PUBLISHED',\n      assetSha256: assetSha,",
+              "      publicationStatus: 'NOT_PUBLISHED',\n      scheduledAt: '2026-09-17T09:00:00-03:00',\n      assetSha256: assetSha,",
+              1,
+          )
+          tests = tests.replace(
+              "idempotencyKey: 'GCP_SCHEDULED:MKT-TEST-SUNSET-FEED-0910:V1',",
+              "idempotencyKey: 'GCP_SCHEDULED_MKT-TEST-SUNSET-FEED-0910_V1',",
+          )
+          insertion = '''\n  it('fails closed when LIMITED queue identities are reused', () => {\n    const duplicate = item({\n      commandId: 'scheduled-gcp-test-v2',\n      contentItemId: 'MKT-TEST-SUNSET-FEED-0910',\n      registrySnapshot: {\n        ...(item().registrySnapshot as Record<string, unknown>),\n        contentItemId: 'MKT-TEST-SUNSET-FEED-0910',\n        row: 7,\n      },\n    });\n    const { result } = runController(\n      {\n        schemaVersion: 1,\n        mode: 'LIMITED',\n        enabled: true,\n        timezone: 'America/Bahia',\n        maxDelayMinutes: 30,\n        items: [item({ canary: false }), duplicate],\n      },\n      '2026-09-17T09:00:30-03:00',\n    );\n    expect(result.status).not.toBe(0);\n    expect(result.stderr).toContain('SCHEDULED_PUBLICATION_DUPLICATE_CORRELATIONID');\n  });\n\n  it('fails closed if queue timing differs from the registry-approved time', () => {\n    const changed = item({ scheduledAt: '2026-09-17T08:45:00-03:00' });\n    const { result } = runController(\n      {\n        schemaVersion: 1,\n        mode: 'CANARY',\n        enabled: true,\n        timezone: 'America/Bahia',\n        maxDelayMinutes: 30,\n        items: [changed],\n      },\n      '2026-09-17T08:45:30-03:00',\n    );\n    expect(result.status).not.toBe(0);\n    expect(result.stderr).toContain('SCHEDULED_PUBLICATION_REGISTRY_SCHEDULE_TIME_MISMATCH');\n  });\n\n  it('fails closed when Creative Truth standard scope does not match the operation', () => {\n    const changed = item({\n      creativeTruthBinding: {\n        ...(item().creativeTruthBinding as Record<string, unknown>),\n        standardId: 'THE_PARTY_HYBRID_NETWORKS_V1',\n      },\n    });\n    const { result } = runController(\n      {\n        schemaVersion: 1,\n        mode: 'CANARY',\n        enabled: true,\n        timezone: 'America/Bahia',\n        maxDelayMinutes: 30,\n        items: [changed],\n      },\n      '2026-09-17T09:00:30-03:00',\n    );\n    expect(result.status).not.toBe(0);\n    expect(result.stderr).toContain('SCHEDULED_PUBLICATION_CREATIVE_STANDARD_OPERATION_MISMATCH');\n  });\n'''
+          marker = "\n  it('fails closed when more than one publication is due in the same cycle', () => {"
+          assert tests.count(marker) == 1
+          tests = tests.replace(marker, insertion + marker, 1)
+
+          workflow_test_anchor = '''  it('pins execution code to an ancestor of the exact protected-main queue snapshot', () => {\n'''
+          assert tests.count(workflow_test_anchor) == 1
+          order_test = '''  it('verifies code provenance and canonical command binding before minting GCP credentials', () => {\n    const bind = workflow.indexOf('Bind execution to the approved audited code snapshot before cloud authentication');\n    const auth = workflow.indexOf('Authenticate to Google Cloud and Drive only after provenance is verified');\n    expect(bind).toBeGreaterThan(-1);\n    expect(auth).toBeGreaterThan(bind);\n    expect(workflow).toContain('cp /tmp/marketing-scheduled-publication-command.json control/marketing-publish-now-command.json');\n    expect(workflow).toContain('cmp -s /tmp/marketing-scheduled-publication-command.json control/marketing-publish-now-command.json');\n  });\n\n'''
+          tests = tests.replace(workflow_test_anchor, order_test + workflow_test_anchor, 1)
+
+          revalidation_anchor = '''  it('keeps fast-path caption policy separate from scheduled approved-caption policy', () => {\n'''
+          assert tests.count(revalidation_anchor) == 1
+          revalidation_test = '''  it('revalidates rights and schedule immediately before write capability and provider execution', () => {\n    expect(publicationScript).toContain('revalidate_side_effect_authority()');\n    const deploy = publicationScript.indexOf('deploy_execute_job()');\n    const deployGuard = publicationScript.indexOf('revalidate_side_effect_authority', deploy);\n    const deployCommand = publicationScript.indexOf('gcloud run jobs deploy "$EXECUTE_JOB_NAME"', deploy);\n    const reconcile = publicationScript.indexOf('execute_and_reconcile()');\n    const executeGuard = publicationScript.indexOf('revalidate_side_effect_authority', reconcile);\n    const execute = publicationScript.indexOf('gcloud run jobs execute "$EXECUTE_JOB_NAME"', reconcile);\n    expect(deployGuard).toBeGreaterThan(deploy);\n    expect(deployCommand).toBeGreaterThan(deployGuard);\n    expect(executeGuard).toBeGreaterThan(reconcile);\n    expect(execute).toBeGreaterThan(executeGuard);\n    expect(publicationScript).toContain('.rightsClearance.status == "CLEARED"');\n    expect(publicationScript).toContain('expires_epoch');\n  });\n\n'''
+          tests = tests.replace(revalidation_anchor, revalidation_test + revalidation_anchor, 1)
+          test_path.write_text(tests)
+          PY
+
+      - name: Format and validate patched files
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec prettier --write scripts/marketing-scheduled-publication-controller.mjs test/marketing-autopilot-gcp-scheduler.test.ts test/github-native-instagram-publication-boundary.test.ts
+          bash -n scripts/marketing-publish-now.sh
+          pnpm vitest run test/marketing-autopilot-gcp-scheduler.test.ts test/github-native-instagram-publication-boundary.test.ts test/marketing-publish-now-hardening.test.ts
+
+      - name: Remove patcher and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/tmp-fix-pr874-review.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/marketing-publish-now.sh scripts/marketing-scheduled-publication-controller.mjs test/marketing-autopilot-gcp-scheduler.test.ts test/github-native-instagram-publication-boundary.test.ts .github/workflows/tmp-fix-pr874-review.yml
+          git commit -m 'fix(instagram): close scheduled publisher review gaps'
+          git push origin HEAD:ops/restore-gcp-instagram-scheduler-20260916
