@@ -31,7 +31,7 @@ export class InstagramPostSaleReconciler {
       `select o.tenant_id, o.workspace_id, o.organization_id,
               o.opportunity_id, o.contact_id, o.lead_id,
               l.attributes->>'productEvent' as product_event,
-              max(e.occurred_at) as latest_inbound_at
+              max(case when ia.event_id is not null then e.occurred_at end) as latest_inbound_at
          from crm_opportunities o
          join crm_leads l
            on l.tenant_id = o.tenant_id
@@ -71,7 +71,8 @@ export class InstagramPostSaleReconciler {
         group by o.tenant_id, o.workspace_id, o.organization_id,
                  o.opportunity_id, o.contact_id, o.lead_id, l.attributes
        having max(case when ia.event_id is not null then e.occurred_at end) is not null
-        order by max(e.occurred_at) desc, o.opportunity_id asc
+        order by max(case when ia.event_id is not null then e.occurred_at end) desc,
+                 o.opportunity_id asc
         limit $1`,
       [limit],
     );
