@@ -11,6 +11,9 @@ const TODAY_PROGRAMMING_PATTERNS = [
   'programacao hoje',
   'qual a programacao de hoje',
   'qual e a programacao de hoje',
+  'o que tem hoje na toca',
+  'hoje tem o que na toca',
+  'o que acontece hoje na toca',
   'tem evento hoje',
 ] as const;
 
