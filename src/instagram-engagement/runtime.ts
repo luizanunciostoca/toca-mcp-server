@@ -10,6 +10,7 @@ import { GoogleSheetsRestClient } from '../providers/google-sheets/client.js';
 import type { InstagramEngagementProvider } from '../providers/instagram/instagram-engagement-contracts.js';
 import { InstagramGraphEngagementProvider } from '../providers/instagram/instagram-engagement-provider.js';
 import { MetaApiClient } from '../providers/meta/meta-api-client.js';
+import { Ag01GroundedInstagramKnowledgeSource } from './ag01-grounded-knowledge.js';
 import {
   INSTAGRAM_ENGAGEMENT_INBOUND_EVENT_TYPE,
   INSTAGRAM_ENGAGEMENT_REPLY_EVENT_TYPE,
@@ -81,11 +82,13 @@ export function createInstagramEngagementBatchRuntime(
   ] as const;
 
   const outbox = new PostgresTransactionalOutbox(options.pool);
+  const groundedFallback = createAg01GroundedFallback(env, options.fetchImpl);
   const knowledgeRuntime = createKnowledgeSource(
     options.pool,
     spreadsheetId,
     env,
     options.fetchImpl,
+    groundedFallback,
   );
 
   const crm = new PostgresCrmCoreStore(options.pool, { outbox });
@@ -166,18 +169,33 @@ export function createInstagramEngagementBatchRuntime(
   };
 }
 
+function createAg01GroundedFallback(
+  env: NodeJS.ProcessEnv,
+  fetchImpl?: typeof fetch,
+): InstagramEngagementKnowledgeSource | undefined {
+  if (!isTrue(env.INSTAGRAM_ENGAGEMENT_AG01_GROUNDED_FALLBACK_ENABLED)) return undefined;
+  const serviceUrl = requiredEnv(env, 'INSTAGRAM_ENGAGEMENT_AG01_SERVICE_URL');
+  return new Ag01GroundedInstagramKnowledgeSource({
+    serviceUrl,
+    audience: env.INSTAGRAM_ENGAGEMENT_AG01_AUDIENCE?.trim() || serviceUrl,
+    timeoutMs: boundedInteger(env.INSTAGRAM_ENGAGEMENT_AG01_TIMEOUT_MS, 8_000, 1_000, 30_000),
+    ...(fetchImpl ? { fetchFn: fetchImpl } : {}),
+  });
+}
+
 function createKnowledgeSource(
   pool: pg.Pool,
   spreadsheetId: string,
   env: NodeJS.ProcessEnv,
   fetchImpl?: typeof fetch,
+  groundedFallback?: InstagramEngagementKnowledgeSource,
 ): { readonly source: InstagramEngagementKnowledgeSource; readonly mode: KnowledgeRuntimeMode } {
   const kind = env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SOURCE?.trim().toLowerCase() || 'google-sheets';
   if (kind === 'postgres') {
     const faq = new PostgresInstagramEngagementKnowledgeSource(pool, spreadsheetId);
     if (!isTrue(env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED)) {
       return {
-        source: new MultiIntentInstagramEngagementKnowledgeSource(faq),
+        source: new MultiIntentInstagramEngagementKnowledgeSource(faq, { groundedFallback }),
         mode: 'postgres',
       };
     }
@@ -187,7 +205,7 @@ function createKnowledgeSource(
     });
     const tiered = new TieredInstagramEngagementKnowledgeSource({ faq, knowledgeBase });
     return {
-      source: new MultiIntentInstagramEngagementKnowledgeSource(tiered),
+      source: new MultiIntentInstagramEngagementKnowledgeSource(tiered, { groundedFallback }),
       mode: 'postgres',
     };
   }
@@ -204,7 +222,7 @@ function createKnowledgeSource(
     cacheMs: boundedInteger(env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_CACHE_MS, 60_000, 0, 3_600_000),
   });
   return {
-    source: new MultiIntentInstagramEngagementKnowledgeSource(sheets),
+    source: new MultiIntentInstagramEngagementKnowledgeSource(sheets, { groundedFallback }),
     mode: `google-sheets:${sheetsAuth.mode}`,
   };
 }
