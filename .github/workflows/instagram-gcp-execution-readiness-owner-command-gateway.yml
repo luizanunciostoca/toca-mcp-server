@@ -1,0 +1,70 @@
+name: Instagram GCP Execution Readiness Owner Command Gateway
+
+on:
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: instagram-gcp-execution-readiness-owner-command-gateway
+  cancel-in-progress: false
+
+jobs:
+  authorize-owner-command:
+    if: >-
+      github.event.issue.number == 869 &&
+      github.actor == 'luizanunciostoca' &&
+      github.event.comment.user.login == 'luizanunciostoca' &&
+      github.event.comment.author_association == 'OWNER'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      authorized_source_sha: ${{ steps.guard.outputs.authorized_source_sha }}
+    steps:
+      - name: Guard exact owner command and protected main SHA
+        id: guard
+        shell: bash
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          COMMENT_ASSOCIATION: ${{ github.event.comment.author_association }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
+          AUTHORIZED_SOURCE_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = 'issue_comment'
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$EVENT_ACTION" = 'created'
+          test "$EVENT_ISSUE_NUMBER" = '869'
+          test "$GITHUB_ACTOR" = 'luizanunciostoca'
+          test "$COMMENT_AUTHOR" = 'luizanunciostoca'
+          test "$COMMENT_ASSOCIATION" = 'OWNER'
+          [[ "$AUTHORIZED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          expected_command="AUTHORIZE_GCP_INSTAGRAM_EXECUTION_RUNTIME_READINESS ${AUTHORIZED_SOURCE_SHA}"
+          test "$COMMENT_BODY" = "$expected_command"
+
+          live_main_sha="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/heads/main" \
+            | jq -r '.object.sha')"
+          test "$live_main_sha" = "$AUTHORIZED_SOURCE_SHA"
+          echo "authorized_source_sha=$AUTHORIZED_SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo 'OWNER_COMMAND_AUTHORIZATION=VERIFIED'
+
+  execution-runtime-readiness:
+    needs: authorize-owner-command
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/instagram-gcp-publication-execution-readiness.yml
+    with:
+      expected_source_sha: ${{ needs.authorize-owner-command.outputs.authorized_source_sha }}
