@@ -19,6 +19,7 @@ on:
       - .github/workflows/marketing-autopilot-publication.yml
       - .github/workflows/marketing-publish-now.yml
       - control/marketing-autopilot-scheduler-policy.json
+      - scripts/marketing-autopilot-heartbeat-verify.mjs
       - scripts/marketing-autopilot-scheduler.mjs
       - scripts/marketing-autopilot-registry.mjs
       - scripts/marketing-autopilot-registry-binding.mjs
@@ -54,6 +55,8 @@ jobs:
       - name: Resolve scheduler mode and trusted trigger provenance
         id: mode
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           trigger_kind=''
@@ -65,27 +68,22 @@ jobs:
               ;;
             workflow_run)
               jq -e \
-                --arg name "$HEARTBEAT_WORKFLOW_NAME" \
-                --arg path "$HEARTBEAT_WORKFLOW_PATH" '
+                --arg name "$HEARTBEAT_WORKFLOW_NAME" '
                   .action == "completed" and
                   .workflow_run.name == $name and
-                  .workflow_run.path == $path and
                   .workflow_run.event == "schedule" and
                   .workflow_run.status == "completed" and
                   .workflow_run.conclusion == "success" and
                   .workflow_run.head_branch == "main" and
                   .workflow_run.run_attempt == 1
                 ' "$GITHUB_EVENT_PATH" >/dev/null
-              completed_at="$(jq -r .workflow_run.updated_at "$GITHUB_EVENT_PATH")"
-              completed_epoch="$(date -d "$completed_at" +%s)"
-              now_epoch="$(date +%s)"
-              heartbeat_age=$((now_epoch - completed_epoch))
-              test "$heartbeat_age" -ge -120
-              test "$heartbeat_age" -le 900
+              heartbeat_verification="$(node scripts/marketing-autopilot-heartbeat-verify.mjs)"
+              jq -e '.status == "VERIFIED" and (.upstreamRunId | test("^[0-9]+$"))' \
+                <<<"$heartbeat_verification" >/dev/null
               mode=AUTOPILOT
               trigger_kind=REDUNDANT_SCHEDULE_HEARTBEAT
-              upstream_run_id="$(jq -r .workflow_run.id "$GITHUB_EVENT_PATH")"
-              printf '%s' "$upstream_run_id" | grep -Eq '^[0-9]+$'
+              upstream_run_id="$(jq -r .upstreamRunId <<<"$heartbeat_verification")"
+              echo "MARKETING_AUTOPILOT_HEARTBEAT_READBACK=$heartbeat_verification"
               ;;
             workflow_dispatch|push)
               mode=PRECHECK
