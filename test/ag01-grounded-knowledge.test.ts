@@ -46,7 +46,8 @@ function fakeFetch(
   handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
 ): typeof fetch {
   return vi.fn((input: string | URL | Request, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     return Promise.resolve(handler(url, init));
   }) as unknown as typeof fetch;
 }
@@ -150,29 +151,30 @@ describe('AG-01 grounded TOCA OS knowledge', () => {
       modifiedTime: '2026-09-16T12:00:00Z',
       evidence: ['toca-os:resource:DOC-EVENT-001', 'drive:file:drive-DOC-EVENT-001'],
     } as const;
-    const fetchFn = fakeFetch(() =>
-      new Response(
-        JSON.stringify({
-          responseId: 'vertex-grounded-test',
-          modelVersion: 'gemini-2.5-flash',
-          candidates: [
-            {
-              content: {
-                parts: [
-                  {
-                    text: JSON.stringify({
-                      answer: 'Resposta inventada.',
-                      confidence: 0.99,
-                      citedResourceIds: ['DOC-NOT-SUPPLIED'],
-                    }),
-                  },
-                ],
+    const fetchFn = fakeFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            responseId: 'vertex-grounded-test',
+            modelVersion: 'gemini-2.5-flash',
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        answer: 'Resposta inventada.',
+                        confidence: 0.99,
+                        citedResourceIds: ['DOC-NOT-SUPPLIED'],
+                      }),
+                    },
+                  ],
+                },
               },
-            },
-          ],
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      ),
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
     );
     const adapter = new VertexGroundedKnowledgeAnswerAdapter({
       projectId: 'project-test',
