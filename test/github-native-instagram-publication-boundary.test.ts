@@ -115,7 +115,7 @@ describe('Instagram publication single-writer boundary', () => {
 
   it('restores Marketing Autopilot only as an orchestration scheduler', () => {
     expect(autopilotPolicy.timezone).toBe('America/Bahia');
-    expect(autopilotPolicy.schedule?.cron).toBe('2-59/5 * * * *');
+    expect(autopilotPolicy.schedule?.cron).toBe('2/5 * * * *');
     expect(autopilot).toContain(`cron: '${autopilotPolicy.schedule?.cron}'`);
     expect(autopilot).toContain(`timezone: '${autopilotPolicy.timezone}'`);
     expect(autopilot.match(/timezone: 'America\/Bahia'/g)).toHaveLength(1);
@@ -144,7 +144,7 @@ describe('Instagram publication single-writer boundary', () => {
       },
       dailyRollout: {
         phase: 'CANARY',
-        canaryContentItemId: 'MKT-20260916-SUNSET-STORY-1600',
+        canaryContentItemId: 'MKT-20260916-SUNSET-STORY-2000',
         generalAutonomy: false,
       },
       rollout: {

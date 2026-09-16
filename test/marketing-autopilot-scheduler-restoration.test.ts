@@ -25,12 +25,12 @@ const policy = JSON.parse(
   };
 };
 
-const productionCanaryId = 'MKT-20260916-SUNSET-STORY-1600';
+const productionCanaryId = 'MKT-20260916-SUNSET-STORY-2000';
 const canaryId = 'MKT-20260916-SUNSET-FEED-0900';
 const storyId = 'MKT-20260916-SUNSET-STORY-1100';
 const feedSha = '1c6c961dff3ed10ce0edfa13e2096c2849ade51ff99ade6a6fe14688cd2d1226';
 const storySha = 'c5fb0667575754c53c06e16fdda44db822dc0753f257c88ae8795f88ce564dda';
-const productionCanarySha = 'e3e3206a4878032e6c29060556474ee725543ed9d47e7d68d1d54d2f5fc9e5b4';
+const productionCanarySha = 'e17915b45526be8619eb72da91c3c676d4e8a0c7e0d3d1235a8e53204b2de93c';
 
 function feedRow(overrides: Record<string, string> = {}) {
   return {
@@ -117,29 +117,29 @@ function storyRow(overrides: Record<string, string> = {}) {
 function productionCanaryStoryRow(overrides: Record<string, string> = {}) {
   return {
     content_item_id: productionCanaryId,
-    scheduled_at: '2026-09-16T16:00:00-03:00',
+    scheduled_at: '2026-09-16T20:00:00-03:00',
     timezone: 'America/Bahia',
     operation: 'SUNSET',
     channel: 'INSTAGRAM',
     format: 'STORY',
-    message: 'Morro muda de cor daqui. E por alguns minutos, tudo parece parar.',
-    cta: 'Viva o Sunset na Toca.',
+    message: 'Daqui, o céu vira parte da experiência.',
+    cta: 'Celebre a vida com a gente.',
     status: 'PRODUCED',
-    creative_id: 'CR-MKT-20260903-SUNSET-STORY-2000-BATCH1',
-    copy_id: 'CP-MKT-20260903-SUNSET-STORY-2000-BATCH1',
+    creative_id: 'CR-MKT-20260903-SUNSET-STORY-1100-BATCH1',
+    copy_id: 'CP-MKT-20260903-SUNSET-STORY-1100-BATCH1',
     approval_status: 'APPROVED',
     approval_mode: 'EXPLICIT_APPROVAL',
     publication_id: '',
     provider_external_id: '',
     provider_status: '',
-    correlation_id: 'CORR-MKT-20260916-SUNSET-STORY-1600-GCP-AUTOPILOT-V1',
+    correlation_id: 'CORR-MKT-20260916-SUNSET-STORY-2000-GCP-AUTOPILOT-V1',
     master_asset_id: '',
     master_drive_file_id: '',
     master_status: '',
-    story_creative_id: 'SC-MKT-20260903-SUNSET-STORY-2000-V1',
-    story_drive_file_id: '1hOD_cyrpQAVXHUXMQg7Uqhcm66vix-Sl',
+    story_creative_id: 'SC-MKT-20260903-SUNSET-STORY-1100-V1',
+    story_drive_file_id: '1ma-_lO9LME3E6f_MQu0kqyfGjZd7vS9j',
     story_status: 'APPROVED',
-    registry_revision: 'MKTREG-GCP-AUTOPILOT-20260916-1600-V1',
+    registry_revision: 'MKTREG-GCP-AUTOPILOT-20260916-2000-V1',
     scheduling_status: 'LIMITED_READY_AFTER_CANARY',
     scheduling_policy: 'TOCA_MARKETING_AUTOPILOT_GCP_SCHEDULER_V1',
     creative_standard_id: 'SUNSET_STORY_V1',
@@ -222,9 +222,9 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     expect(workflow).not.toContain('REQUESTED_MODE');
     expect(policy.dailyRollout).toMatchObject({
       canaryContentItemId: productionCanaryId,
-      canaryScheduledAt: '2026-09-16T16:00:00-03:00',
-      rollForwardFromContentItemId: 'MKT-20260916-SUNSET-FEED-1500',
-      rollForwardReason: 'PREVIOUS_CANARY_WINDOW_EXPIRED_NO_PROVIDER_WRITE',
+      canaryScheduledAt: '2026-09-16T20:00:00-03:00',
+      rollForwardFromContentItemId: 'MKT-20260916-SUNSET-STORY-1600',
+      rollForwardReason: 'PREVIOUS_CANARY_WINDOW_EXPIRED_NO_SCHEDULE_RUN',
       promoteToLimitedAfterVerifiedCanary: true,
       generalAutonomy: false,
       limited: { generalAutonomy: false },
@@ -236,9 +236,9 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     });
   });
 
-  it('selects the production 16:00 Story as the only CANARY candidate', () => {
+  it('selects the production 20:00 Story as the only CANARY candidate', () => {
     const result = runScheduler({
-      now: '2026-09-16T15:58:00-03:00',
+      now: '2026-09-16T19:58:00-03:00',
       rows: [productionCanaryStoryRow()],
       useProductionPolicy: true,
     });
@@ -249,7 +249,7 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
       canaryVerified: false,
       candidate: {
         contentItemId: productionCanaryId,
-        scheduledAt: '2026-09-16T16:00:00-03:00',
+        scheduledAt: '2026-09-16T20:00:00-03:00',
         waitSeconds: 120,
         format: 'STORY',
         expectedAssetSha256: productionCanarySha,
@@ -257,11 +257,11 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     });
   });
 
-  it('builds the production 16:00 Story command in CANARY with exact approved binding', () => {
+  it('builds the production 20:00 Story command in CANARY with exact approved binding', () => {
     const targetCodeSha = '3'.repeat(40);
     const result = runScheduler({
       mode: 'build-command',
-      now: '2026-09-16T16:00:00-03:00',
+      now: '2026-09-16T20:00:00-03:00',
       rows: [productionCanaryStoryRow()],
       useProductionPolicy: true,
       extraEnv: {
@@ -277,11 +277,10 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
         action: 'PUBLISH_NOW',
         contentItemId: productionCanaryId,
         format: 'STORY_IMAGE',
-        assetId: 'SC-MKT-20260903-SUNSET-STORY-2000-V1',
-        driveFileId: '1hOD_cyrpQAVXHUXMQg7Uqhcm66vix-Sl',
+        assetId: 'SC-MKT-20260903-SUNSET-STORY-1100-V1',
+        driveFileId: '1ma-_lO9LME3E6f_MQu0kqyfGjZd7vS9j',
         expectedAssetSha256: productionCanarySha,
-        caption:
-          'Morro muda de cor daqui. E por alguns minutos, tudo parece parar.\n\nViva o Sunset na Toca.',
+        caption: 'Daqui, o céu vira parte da experiência.\n\nCelebre a vida com a gente.',
         targetCodeSha,
         creativeTruthBinding: {
           qualityGateStatus: 'PREVIEW_QA_PASSED',
@@ -289,8 +288,8 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
         },
         schedulerBinding: {
           rolloutPhase: 'CANARY',
-          notBefore: '2026-09-16T16:00:00-03:00',
-          expiresAt: '2026-09-16T16:30:00-03:00',
+          notBefore: '2026-09-16T20:00:00-03:00',
+          expiresAt: '2026-09-16T20:30:00-03:00',
         },
       },
     });
