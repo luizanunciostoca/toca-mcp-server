@@ -61,7 +61,7 @@ jobs:
           grep -Fq 'APP_IMAGE="${app_image_tag%:*}@${APP_IMAGE_DIGEST}"' scripts/marketing-publish-now.sh
           grep -Fq 'PREP_IMAGE="${prep_image_tag%:*}@${PREP_IMAGE_DIGEST}"' scripts/marketing-publish-now.sh
           grep -Fq 'verify_writes_disabled' scripts/marketing-publish-now.sh
-          git rm scripts/tmp-harden-gcp-publish-now.py
+          git rm -f scripts/tmp-harden-gcp-publish-now.py
           git rm .github/workflows/tmp-harden-gcp-publish-now.yml
           git diff --check
 
