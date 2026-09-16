@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "policyId": "TOCA_MARKETING_AUTOPILOT_GCP_SCHEDULER_V1",
+  "lifecycleStatus": "CANARY",
+  "generalAutonomy": false,
+  "timezone": "America/Bahia",
+  "spreadsheetId": "1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw",
+  "contentSheet": "CONTENT_ITEMS",
+  "schedulerExecutionLogSheet": "SCHEDULER_EXECUTION_LOG",
+  "canonicalWriter": {
+    "transport": "gcp-instagram-publish-now",
+    "workflow": ".github/workflows/marketing-publish-now.yml",
+    "durableCommandFile": "control/marketing-publish-now-command.json",
+    "durableCommandRequiredState": "NOOP",
+    "ephemeralCommandAllowed": true,
+    "providerPublicationWriteAuthorized": false
+  },
+  "instagramAccountId": "17841402033495654",
+  "schedule": {
+    "preparationLeadSeconds": 300,
+    "lateWindowSeconds": 1200,
+    "maxCandidatesPerRun": 1,
+    "cron": "3/5 * * * *"
+  },
+  "requiredEligibility": {
+    "status": "PRODUCED",
+    "approvalStatus": "APPROVED",
+    "approvalMode": "EXPLICIT_APPROVAL",
+    "channel": "INSTAGRAM",
+    "creativeTruthPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+    "brandIntegrityStatus": "PASSED",
+    "venueFidelityStatus": "PASSED",
+    "qualityGateStatus": "PASSED",
+    "exactAssetBinding": "TRUE",
+    "masterStatus": "MASTER_READY",
+    "providerExternalIdMustBeBlank": true,
+    "publicationIdMustBeBlank": true
+  },
+  "rollout": {
+    "phase": "CANARY",
+    "allowedContentItemIds": [
+      "MKT-20260917-SUNSET-FEED-0900"
+    ],
+    "promoteOnlyAfterVerifiedOperations": 3,
+    "blindRetryAuthorized": false,
+    "automaticFallbackAuthorized": false
+  },
+  "bindings": {
+    "MKT-20260917-SUNSET-FEED-0900": {
+      "expectedScheduledAt": "2026-09-17T09:00:00-03:00",
+      "operation": "SUNSET",
+      "format": "FEED",
+      "publishNowFormat": "FEED_IMAGE",
+      "contentType": "image/jpeg",
+      "masterAssetId": "MM-SUN-0268-FEED4X5-V1",
+      "driveFileId": "1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK",
+      "outputSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6",
+      "creativeId": "CR-MKT-20260903-SUNSET-FEED-0900-V1",
+      "copyId": "CP-MKT-20260903-SUNSET-FEED-0900-V1",
+      "registryMessage": "O fim de tarde começa no detalhe: um bom drink, a vista de Morro e o tempo desacelerando na Toca.",
+      "registryCta": "Salve este convite e venha viver o Sunset.",
+      "approvedCaption": "O fim de tarde começa no detalhe: um bom drink, a vista de Morro e o tempo desacelerando na Toca.\n\nSalve este convite e venha viver o Sunset.\n\nIngressos limitados! garanta o seu pelo link na bio.\n\n#TocaDoMorcego #MorroDeSaoPaulo #Bahia #Sunset #PorDoSol",
+      "correlationId": "CORR-MKT-20260917-SUNSET-FEED-0900-ROLLOVER-V1",
+      "idempotencyVersion": "V1",
+      "creativeTruthBinding": {
+        "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+        "standardId": "SUNSET_FEED_V1",
+        "creativeId": "CR-MKT-20260903-SUNSET-FEED-0900-V1",
+        "outputSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6",
+        "brandIntegrityStatus": "PASSED",
+        "venueFidelityStatus": "PASSED",
+        "qualityGateStatus": "PASSED",
+        "exactAssetBinding": true
+      },
+      "brandDeterminism": {
+        "status": "VERIFIED",
+        "standardRef": "TOCA_CREATIVE_TRUTH:SUNSET_FEED_V1",
+        "typographyRef": "EDITORIAL_TEXT_V1",
+        "assetSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6"
+      },
+      "rightsClearance": {
+        "status": "CLEARED",
+        "scope": "INSTAGRAM_ORGANIC_PUBLICATION",
+        "evidenceRef": "GOOGLE_DRIVE:1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK",
+        "authority": "USER_EXPLICIT_PUBLICATION_AUTHORIZATION_2026-09-15",
+        "clearedAt": "2026-09-15T16:21:53-03:00",
+        "assetSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6"
+      },
+      "bindingSource": {
+        "kind": "PROTECTED_GITHUB_HISTORY",
+        "commit": "87c5dcff748f69459925e4904cef686f171dfda9",
+        "note": "Reuses only exact asset/copy/Creative Truth/brand/rights bindings from the previously approved envelope; runtime identity, issuedAt, targetCodeSha and GCP idempotency are regenerated."
+      }
+    }
+  }
+}
