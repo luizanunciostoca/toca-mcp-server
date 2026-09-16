@@ -1,0 +1,112 @@
+name: Temporary GCP Recovery Bootstrap Boundary Fixer
+
+on:
+  push:
+    branches:
+      - fix/gcp-recovery-verify-bootstrap-apis-20260916
+    paths:
+      - '.github/workflows/tmp-fix-gcp-recovery-bootstrap-boundary.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/gcp-recovery-verify-bootstrap-apis-20260916
+          fetch-depth: 1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Remove Service Usage mutation from recovery runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          workflow_path = Path('.github/workflows/instagram-gcp-publication-recovery-preflight.yml')
+          test_path = Path('test/instagram-gcp-publication-recovery-preflight.test.ts')
+
+          workflow = workflow_path.read_text()
+          old_step = '''      - name: Reconcile only fixed allowlisted APIs and IAM bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          approved_apis=(
+            artifactregistry.googleapis.com
+            run.googleapis.com
+            secretmanager.googleapis.com
+            iamcredentials.googleapis.com
+            sqladmin.googleapis.com
+            logging.googleapis.com
+          )
+          gcloud services enable "${approved_apis[@]}" --project "$GCP_PROJECT_ID" --quiet
+
+          runtime_member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}"
+'''
+          new_step = '''      - name: Reconcile only fixed allowlisted IAM bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          # API enablement is an external production bootstrap precondition.
+          # This recovery workflow never grants itself Service Usage authority.
+          runtime_member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}"
+'''
+          if workflow.count(old_step) != 1:
+              raise SystemExit('EXPECTED_RECOVERY_ENABLE_BLOCK_NOT_FOUND_EXACTLY_ONCE')
+          workflow = workflow.replace(old_step, new_step)
+
+          old_verify = '''          for api in artifactregistry.googleapis.com run.googleapis.com secretmanager.googleapis.com iamcredentials.googleapis.com sqladmin.googleapis.com logging.googleapis.com; do
+            state="$(gcloud services list --enabled --project "$GCP_PROJECT_ID" --filter="config.name=${api}" --format='value(config.name)')"
+            test "$state" = "$api"
+          done
+
+'''
+          if workflow.count(old_verify) != 1:
+              raise SystemExit('EXPECTED_RECOVERY_API_VERIFY_BLOCK_NOT_FOUND_EXACTLY_ONCE')
+          workflow = workflow.replace(old_verify, '')
+
+          old_evidence = 'requiredApisEnabled:true'
+          new_evidence = 'requiredApisExternalBootstrap:true'
+          if workflow.count(old_evidence) != 1:
+              raise SystemExit('EXPECTED_RECOVERY_API_EVIDENCE_NOT_FOUND_EXACTLY_ONCE')
+          workflow = workflow.replace(old_evidence, new_evidence)
+          workflow_path.write_text(workflow)
+
+          test = test_path.read_text()
+          old_assertion = "    expect(workflow).toContain('approved_apis=(');\n"
+          new_assertions = (
+              "    expect(workflow).not.toContain('gcloud services enable');\n"
+              "    expect(workflow).not.toContain('gcloud services list --enabled');\n"
+              "    expect(workflow).toContain('requiredApisExternalBootstrap:true');\n"
+          )
+          if test.count(old_assertion) != 1:
+              raise SystemExit('EXPECTED_RECOVERY_API_TEST_ASSERTION_NOT_FOUND_EXACTLY_ONCE')
+          test = test.replace(old_assertion, new_assertions)
+          test_path.write_text(test)
+          PY
+          pnpm prettier --write \
+            .github/workflows/instagram-gcp-publication-recovery-preflight.yml \
+            test/instagram-gcp-publication-recovery-preflight.test.ts
+          git diff --check
+      - name: Commit exact boundary correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'toca-recovery-bootstrap-fixer[bot]'
+          git config user.email 'toca-recovery-bootstrap-fixer[bot]@users.noreply.github.com'
+          git add \
+            .github/workflows/instagram-gcp-publication-recovery-preflight.yml \
+            test/instagram-gcp-publication-recovery-preflight.test.ts
+          git diff --cached --quiet && { echo 'EXPECTED_PATCH_DIFF_MISSING'; exit 1; }
+          git commit -m 'fix(instagram): keep GCP API enablement in external bootstrap'
+          git push origin HEAD:fix/gcp-recovery-verify-bootstrap-apis-20260916
