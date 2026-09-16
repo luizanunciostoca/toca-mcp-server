@@ -8,7 +8,7 @@ import type {
 
 export interface MultiIntentInstagramEngagementKnowledgeOptions {
   readonly now?: () => Date;
-  readonly groundedFallback?: InstagramEngagementKnowledgeSource;
+  readonly groundedFallback?: InstagramEngagementKnowledgeSource | undefined;
 }
 
 export class MultiIntentInstagramEngagementKnowledgeSource implements InstagramEngagementKnowledgeSource {
