@@ -5,6 +5,7 @@ import { PostgresInstagramEngagementKnowledgeSource } from '../instagram-engagem
 
 const { Pool } = pg;
 const INBOUND_TYPE = 'instagram.engagement.inbound.v1';
+const CANDIDATE_QUERY_LIMIT = 100;
 const AUTO_ELIGIBLE = new Set([
   'FAQ_OPERATIONAL',
   'EVENT_INFO',
@@ -79,9 +80,18 @@ try {
                                          and candidate.occurred_at + interval '8 seconds'
         )
       order by candidate.occurred_at asc, candidate.event_id asc
-      limit 100`,
-    [INBOUND_TYPE, tenantId, workspaceId, organizationId, String(maxAgeMinutes)],
+      limit $6`,
+    [
+      INBOUND_TYPE,
+      tenantId,
+      workspaceId,
+      organizationId,
+      String(maxAgeMinutes),
+      CANDIDATE_QUERY_LIMIT,
+    ],
   );
+  const candidateCount = candidates.rowCount ?? candidates.rows.length;
+  const candidateQuerySaturated = candidateCount >= CANDIDATE_QUERY_LIMIT;
 
   const outboxCounts = await pool.query<{ status: string; count: string }>(
     `select status, count(*)::text as count
@@ -174,7 +184,9 @@ try {
         : 'MULTIPLE_ELIGIBLE_TARGETS';
 
   console.log(`INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY=${status}`);
-  console.log(`CANDIDATE_COUNT=${candidates.rowCount ?? candidates.rows.length}`);
+  console.log(`CANDIDATE_COUNT=${candidateCount}`);
+  console.log(`CANDIDATE_QUERY_LIMIT=${CANDIDATE_QUERY_LIMIT}`);
+  console.log(`CANDIDATE_QUERY_SATURATED=${candidateQuerySaturated}`);
   console.log(`ELIGIBLE_COUNT=${eligible.length}`);
   if (eligible.length === 1) {
     console.log(`ELIGIBLE_TARGET_SHA256=${eligible[0]}`);
