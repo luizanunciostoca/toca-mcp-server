@@ -1,0 +1,202 @@
+name: Instagram Canary Window Controller
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/instagram-canary-window-controller.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: instagram-canary-window-controller-20260915
+  cancel-in-progress: false
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TARGET_PR: '846'
+      EXPECTED_HEAD: '76145786fd9932c8a37aedc1dd7342274bc0d67d'
+      TARGET_ITEM: 'MKT-20260917-SUNSET-FEED-0900'
+      NOT_BEFORE: '2026-09-15T21:45:00-03:00'
+      MERGE_DEADLINE: '2026-09-15T21:47:00-03:00'
+      LEDGER_PATH: 'publication-state/3e9356148b41946660e2afd80e23b1d6fb220b94666cb01fb07ba65cc700e61e.json'
+
+    steps:
+      - name: Verify trusted main trigger
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$GITHUB_EVENT_NAME" = 'push'
+
+      - name: Wait for governed merge window
+        shell: bash
+        run: |
+          set -euo pipefail
+          now=$(date +%s)
+          not_before=$(date -d "$NOT_BEFORE" +%s)
+          deadline=$(date -d "$MERGE_DEADLINE" +%s)
+          if [ "$now" -gt "$deadline" ]; then
+            echo 'CANARY_WINDOW_MISSED_BEFORE_START'
+            exit 1
+          fi
+          if [ "$now" -lt "$not_before" ]; then
+            sleep $((not_before - now))
+          fi
+          now=$(date +%s)
+          test "$now" -le "$deadline" || { echo 'CANARY_WINDOW_MISSED'; exit 1; }
+
+      - name: Revalidate exact PR and protected gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr=$(gh api "repos/$REPO/pulls/$TARGET_PR")
+          test "$(jq -r '.state' <<<"$pr")" = 'open'
+          test "$(jq -r '.draft' <<<"$pr")" = 'false'
+          test "$(jq -r '.base.ref' <<<"$pr")" = 'main'
+          test "$(jq -r '.head.sha' <<<"$pr")" = "$EXPECTED_HEAD"
+
+          runs=$(gh api "repos/$REPO/actions/runs?head_sha=$EXPECTED_HEAD&per_page=100")
+          for required in 'Quality Gate' 'Autonomy Safety' 'Security Supply Chain'; do
+            conclusion=$(jq -r --arg name "$required" '[.workflow_runs[] | select(.name == $name)] | sort_by(.created_at) | last | .conclusion // ""' <<<"$runs")
+            test "$conclusion" = 'success' || { echo "REQUIRED_GATE_NOT_GREEN:$required:$conclusion"; exit 1; }
+          done
+
+      - name: Merge exact canary PR once
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          response=$(gh api --method PUT "repos/$REPO/pulls/$TARGET_PR/merge" -f sha="$EXPECTED_HEAD" -f merge_method='squash')
+          test "$(jq -r '.merged' <<<"$response")" = 'true'
+          merge_sha=$(jq -r '.sha' <<<"$response")
+          test "$merge_sha" != 'null'
+          echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch first controlled CANARY
+        id: first_dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          before=$(date -u +%s)
+          jq -n --arg item "$TARGET_ITEM" '{event_type:"github-native-instagram-publish-controlled",client_payload:{mode:"CANARY",writes_enabled:"true",canary_content_item_id:$item}}' \
+            | gh api --method POST "repos/$REPO/dispatches" --input -
+          echo "before=$before" >> "$GITHUB_OUTPUT"
+
+      - name: Await first publisher run without retry
+        id: first
+        shell: bash
+        env:
+          MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
+          BEFORE: ${{ steps.first_dispatch.outputs.before }}
+        run: |
+          set -euo pipefail
+          run_id=''
+          for _ in $(seq 1 60); do
+            runs=$(gh api "repos/$REPO/actions/workflows/github-native-instagram-publisher.yml/runs?event=repository_dispatch&branch=main&per_page=20")
+            run_id=$(jq -r --arg sha "$MERGE_SHA" --argjson before "$BEFORE" '[.workflow_runs[] | select(.head_sha == $sha) | select((.created_at | fromdateiso8601) >= $before)] | sort_by(.created_at) | last | .id // empty' <<<"$runs")
+            [ -n "$run_id" ] && break
+            sleep 5
+          done
+          test -n "$run_id" || { echo 'PUBLISHER_RUN_NOT_FOUND'; exit 1; }
+
+          for _ in $(seq 1 120); do
+            run=$(gh api "repos/$REPO/actions/runs/$run_id")
+            status=$(jq -r '.status' <<<"$run")
+            if [ "$status" = 'completed' ]; then
+              conclusion=$(jq -r '.conclusion' <<<"$run")
+              test "$conclusion" = 'success' || { echo "PUBLISHER_FAILED:$run_id:$conclusion"; exit 1; }
+              echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'PUBLISHER_RUN_TIMEOUT'
+          exit 1
+
+      - name: Verify first immutable evidence and PUBLISHED ledger
+        shell: bash
+        env:
+          RUN_ID: ${{ steps.first.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          rm -rf first-evidence
+          gh run download "$RUN_ID" --repo "$REPO" -n "github-native-instagram-${RUN_ID}-1" -D first-evidence
+          evidence=$(find first-evidence -name 'github-native-publication-evidence.json' -print -quit)
+          test -n "$evidence"
+          jq -e --arg item "$TARGET_ITEM" '.items[] | select(.contentItemId == $item and .outcome == "PUBLISHED_AND_READBACK_VERIFIED" and (.externalMediaId | length > 0))' "$evidence" >/dev/null
+
+          gh api "repos/$REPO/contents/$LEDGER_PATH?ref=publication-state" --jq '.content' | tr -d '\n' | base64 -d > ledger.json
+          jq -e '.state == "PUBLISHED" and (.externalMediaId | type == "string") and (.externalMediaId | length > 0)' ledger.json >/dev/null
+
+      - name: Trigger fresh provider readback only
+        id: second_dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          before=$(date -u +%s)
+          jq -n --arg item "$TARGET_ITEM" '{event_type:"github-native-instagram-publish-controlled",client_payload:{mode:"CANARY",writes_enabled:"true",canary_content_item_id:$item}}' \
+            | gh api --method POST "repos/$REPO/dispatches" --input -
+          echo "before=$before" >> "$GITHUB_OUTPUT"
+
+      - name: Await reconciliation run without retry
+        id: second
+        shell: bash
+        env:
+          MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
+          FIRST_RUN_ID: ${{ steps.first.outputs.run_id }}
+          BEFORE: ${{ steps.second_dispatch.outputs.before }}
+        run: |
+          set -euo pipefail
+          run_id=''
+          for _ in $(seq 1 60); do
+            runs=$(gh api "repos/$REPO/actions/workflows/github-native-instagram-publisher.yml/runs?event=repository_dispatch&branch=main&per_page=20")
+            run_id=$(jq -r --arg sha "$MERGE_SHA" --arg first "$FIRST_RUN_ID" --argjson before "$BEFORE" '[.workflow_runs[] | select(.head_sha == $sha) | select((.id|tostring) != $first) | select((.created_at | fromdateiso8601) >= $before)] | sort_by(.created_at) | last | .id // empty' <<<"$runs")
+            [ -n "$run_id" ] && break
+            sleep 5
+          done
+          test -n "$run_id" || { echo 'RECONCILIATION_RUN_NOT_FOUND'; exit 1; }
+
+          for _ in $(seq 1 120); do
+            run=$(gh api "repos/$REPO/actions/runs/$run_id")
+            status=$(jq -r '.status' <<<"$run")
+            if [ "$status" = 'completed' ]; then
+              conclusion=$(jq -r '.conclusion' <<<"$run")
+              test "$conclusion" = 'success' || { echo "RECONCILIATION_FAILED:$run_id:$conclusion"; exit 1; }
+              echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'RECONCILIATION_TIMEOUT'
+          exit 1
+
+      - name: Verify fresh readback evidence
+        shell: bash
+        env:
+          RUN_ID: ${{ steps.second.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          rm -rf second-evidence
+          gh run download "$RUN_ID" --repo "$REPO" -n "github-native-instagram-${RUN_ID}-1" -D second-evidence
+          evidence=$(find second-evidence -name 'github-native-publication-evidence.json' -print -quit)
+          test -n "$evidence"
+          jq -e --arg item "$TARGET_ITEM" '.items[] | select(.contentItemId == $item and .outcome == "RECONCILED_ALREADY_PUBLISHED_READBACK_VERIFIED" and (.externalMediaId | length > 0))' "$evidence" >/dev/null
+
+      - name: Record successful controlled completion
+        shell: bash
+        env:
+          FIRST_RUN_ID: ${{ steps.first.outputs.run_id }}
+          SECOND_RUN_ID: ${{ steps.second.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          echo "CANARY_ACCEPTED item=$TARGET_ITEM first_run=$FIRST_RUN_ID reconciliation_run=$SECOND_RUN_ID"
