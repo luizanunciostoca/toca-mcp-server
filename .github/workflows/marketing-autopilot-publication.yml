@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: '2-59/5 * * * *'
       timezone: 'America/Bahia'
+  workflow_run:
+    workflows:
+      - GitHub Native Instagram Publisher
+    types:
+      - completed
   workflow_dispatch:
   push:
     branches:
@@ -33,6 +38,8 @@ env:
   CONTENT_REGISTRY_SPREADSHEET_ID: 1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw
   POLICY_PATH: control/marketing-autopilot-scheduler-policy.json
   CANONICAL_WRITER_WORKFLOW: marketing-publish-now.yml
+  HEARTBEAT_WORKFLOW_NAME: GitHub Native Instagram Publisher
+  HEARTBEAT_WORKFLOW_PATH: .github/workflows/github-native-instagram-publisher.yml
 
 jobs:
   orchestrate:
@@ -44,18 +51,56 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Resolve scheduler mode
+      - name: Resolve scheduler mode and trusted trigger provenance
         id: mode
         shell: bash
         run: |
           set -euo pipefail
+          trigger_kind=''
+          upstream_run_id=''
           case "$GITHUB_EVENT_NAME" in
-            schedule) mode=AUTOPILOT ;;
-            workflow_dispatch|push) mode=PRECHECK ;;
-            *) echo "AUTOPILOT_UNSUPPORTED_EVENT=$GITHUB_EVENT_NAME" >&2; exit 1 ;;
+            schedule)
+              mode=AUTOPILOT
+              trigger_kind=PRIMARY_SCHEDULE
+              ;;
+            workflow_run)
+              jq -e \
+                --arg name "$HEARTBEAT_WORKFLOW_NAME" \
+                --arg path "$HEARTBEAT_WORKFLOW_PATH" '
+                  .action == "completed" and
+                  .workflow_run.name == $name and
+                  .workflow_run.path == $path and
+                  .workflow_run.event == "schedule" and
+                  .workflow_run.status == "completed" and
+                  .workflow_run.conclusion == "success" and
+                  .workflow_run.head_branch == "main" and
+                  .workflow_run.run_attempt == 1
+                ' "$GITHUB_EVENT_PATH" >/dev/null
+              completed_at="$(jq -r .workflow_run.updated_at "$GITHUB_EVENT_PATH")"
+              completed_epoch="$(date -d "$completed_at" +%s)"
+              now_epoch="$(date +%s)"
+              heartbeat_age=$((now_epoch - completed_epoch))
+              test "$heartbeat_age" -ge -120
+              test "$heartbeat_age" -le 900
+              mode=AUTOPILOT
+              trigger_kind=REDUNDANT_SCHEDULE_HEARTBEAT
+              upstream_run_id="$(jq -r .workflow_run.id "$GITHUB_EVENT_PATH")"
+              printf '%s' "$upstream_run_id" | grep -Eq '^[0-9]+$'
+              ;;
+            workflow_dispatch|push)
+              mode=PRECHECK
+              trigger_kind=NON_EXECUTING_PRECHECK
+              ;;
+            *)
+              echo "AUTOPILOT_UNSUPPORTED_EVENT=$GITHUB_EVENT_NAME" >&2
+              exit 1
+              ;;
           esac
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "trigger_kind=$trigger_kind" >> "$GITHUB_OUTPUT"
+          echo "upstream_run_id=$upstream_run_id" >> "$GITHUB_OUTPUT"
           echo "MARKETING_AUTOPILOT_MODE=$mode"
+          echo "MARKETING_AUTOPILOT_TRIGGER_KIND=$trigger_kind"
 
       - name: Verify single-writer scheduler boundary
         shell: bash
@@ -268,20 +313,30 @@ jobs:
           CONTENT_ITEM_ID: ${{ steps.scan.outputs.content_item_id }}
           SCHEDULED_AT: ${{ steps.scan.outputs.scheduled_at }}
           REGISTRY_SNAPSHOT_SHA256: ${{ steps.due.outputs.registry_snapshot_sha256 }}
+          TRIGGER_KIND: ${{ steps.mode.outputs.trigger_kind }}
+          UPSTREAM_RUN_ID: ${{ steps.mode.outputs.upstream_run_id }}
         run: |
           set -euo pipefail
           jq -n \
             --arg sourceRunId "$GITHUB_RUN_ID" \
             --arg sourceRunAttempt "$GITHUB_RUN_ATTEMPT" \
             --arg sourceSha "$GITHUB_SHA" \
-            --arg event "$GITHUB_EVENT_NAME" \
+            --arg sourceEvent "$GITHUB_EVENT_NAME" \
+            --arg triggerKind "$TRIGGER_KIND" \
+            --arg upstreamRunId "$UPSTREAM_RUN_ID" \
             --arg contentItemId "$CONTENT_ITEM_ID" \
             --arg scheduledAt "$SCHEDULED_AT" \
             --arg registrySnapshotSha256 "$REGISTRY_SNAPSHOT_SHA256" \
             --arg authorizedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{schemaVersion:1,sourceRunId:$sourceRunId,sourceRunAttempt:$sourceRunAttempt,sourceSha:$sourceSha,event:$event,contentItemId:$contentItemId,scheduledAt:$scheduledAt,priorAttemptState:"NONE",registrySnapshotSha256:$registrySnapshotSha256,authorizedAt:$authorizedAt}' \
+            '{schemaVersion:1,sourceRunId:$sourceRunId,sourceRunAttempt:$sourceRunAttempt,sourceSha:$sourceSha,event:"schedule",sourceEvent:$sourceEvent,triggerKind:$triggerKind,upstreamRunId:$upstreamRunId,contentItemId:$contentItemId,scheduledAt:$scheduledAt,priorAttemptState:"NONE",registrySnapshotSha256:$registrySnapshotSha256,authorizedAt:$authorizedAt}' \
             > marketing-autopilot-writer-authorization.json
-          jq -e '.event == "schedule" and .priorAttemptState == "NONE" and (.registrySnapshotSha256 | test("^[a-f0-9]{64}$"))' marketing-autopilot-writer-authorization.json >/dev/null
+          jq -e '
+            .event == "schedule" and
+            .priorAttemptState == "NONE" and
+            (.registrySnapshotSha256 | test("^[a-f0-9]{64}$")) and
+            ((.sourceEvent == "schedule" and .triggerKind == "PRIMARY_SCHEDULE" and .upstreamRunId == "") or
+             (.sourceEvent == "workflow_run" and .triggerKind == "REDUNDANT_SCHEDULE_HEARTBEAT" and (.upstreamRunId | test("^[0-9]+$"))))
+          ' marketing-autopilot-writer-authorization.json >/dev/null
 
       - name: Persist one-shot writer authorization
         if: >-
