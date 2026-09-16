@@ -152,7 +152,9 @@ async function executeReconciliation(options: MockOptions = {}) {
   const server = createServer((request, response) => {
     void handleRequest(request, response).catch((error: unknown) => {
       response.statusCode = 500;
-      response.end(JSON.stringify({ error: error instanceof Error ? error.message : 'mock failure' }));
+      response.end(
+        JSON.stringify({ error: error instanceof Error ? error.message : 'mock failure' }),
+      );
     });
   });
   openServers.add(server);

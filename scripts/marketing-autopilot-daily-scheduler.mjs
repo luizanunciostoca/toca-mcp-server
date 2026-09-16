@@ -34,7 +34,9 @@ if (MODE === 'build-command') {
   const targetCodeSha = process.env.MARKETING_AUTOPILOT_TARGET_CODE_SHA?.trim() ?? '';
   assert(/^[a-f0-9]{40}$/.test(targetCodeSha), 'AUTOPILOT_TARGET_CODE_SHA_INVALID');
   const command = buildCommand(validated, targetCodeSha, rollout.phase);
-  process.stdout.write(`${JSON.stringify({ status: 'COMMAND_READY', rolloutPhase: rollout.phase, command })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ status: 'COMMAND_READY', rolloutPhase: rollout.phase, command })}\n`,
+  );
   process.exit(0);
 }
 
@@ -108,7 +110,10 @@ function validatePolicy() {
     policy.dailyRollout?.automaticFallbackAuthorized === false,
     'AUTOPILOT_AUTOMATIC_FALLBACK_FORBIDDEN',
   );
-  assert(policy.standingAuthorization?.enabled === true, 'AUTOPILOT_STANDING_AUTHORIZATION_REQUIRED');
+  assert(
+    policy.standingAuthorization?.enabled === true,
+    'AUTOPILOT_STANDING_AUTHORIZATION_REQUIRED',
+  );
   assert(
     policy.standingAuthorization?.allowCopyMutation === false &&
       policy.standingAuthorization?.allowAssetMutation === false,
@@ -140,7 +145,11 @@ function isVerifiedCanary(item) {
   );
 }
 
-function selectCandidate(registryRows, rolloutState, { leadSeconds, forcedContentItemId: forcedId }) {
+function selectCandidate(
+  registryRows,
+  rolloutState,
+  { leadSeconds, forcedContentItemId: forcedId },
+) {
   assert(Number.isSafeInteger(leadSeconds) && leadSeconds >= 0, 'AUTOPILOT_SCAN_LEAD_INVALID');
   const eligible = [];
   const rejected = [];
@@ -179,7 +188,9 @@ function selectCandidate(registryRows, rolloutState, { leadSeconds, forcedConten
   const maximum =
     rolloutState.phase === 'CANARY'
       ? 1
-      : Number(policy.dailyRollout.limited.maxCandidatesPerRun ?? policy.schedule.maxCandidatesPerRun);
+      : Number(
+          policy.dailyRollout.limited.maxCandidatesPerRun ?? policy.schedule.maxCandidatesPerRun,
+        );
   assert(eligible.length <= maximum, 'AUTOPILOT_MULTIPLE_CANDIDATES_FAIL_CLOSED');
   if (eligible.length === 0) {
     return {
@@ -213,7 +224,10 @@ function isAuthorizedByRollout(item, rolloutState) {
 }
 
 function assertAuthorizedByRollout(item, rolloutState) {
-  assert(isAuthorizedByRollout(item, rolloutState), 'AUTOPILOT_CONTENT_ITEM_NOT_ROLLOUT_AUTHORIZED');
+  assert(
+    isAuthorizedByRollout(item, rolloutState),
+    'AUTOPILOT_CONTENT_ITEM_NOT_ROLLOUT_AUTHORIZED',
+  );
 }
 
 function requireExactItem(registryRows, contentItemId) {
@@ -226,7 +240,10 @@ function validateItem(item) {
   const required = policy.requiredEligibility;
   const format = text(item.format);
 
-  assert(text(item.status) === required.status, `AUTOPILOT_STATUS_NOT_ELIGIBLE:${text(item.status)}`);
+  assert(
+    text(item.status) === required.status,
+    `AUTOPILOT_STATUS_NOT_ELIGIBLE:${text(item.status)}`,
+  );
   assert(
     text(item.approval_status) === required.approvalStatus,
     `AUTOPILOT_APPROVAL_NOT_APPROVED:${text(item.approval_status)}`,
@@ -415,24 +432,54 @@ function verifyCommand(command, validated, rolloutPhase) {
   assert(command.action === 'PUBLISH_NOW', 'AUTOPILOT_COMMAND_ACTION_INVALID');
   assert(command.contentItemId === contentItemId, 'AUTOPILOT_COMMAND_CONTENT_ITEM_MISMATCH');
   assert(command.scheduledAt === validated.scheduledAt, 'AUTOPILOT_COMMAND_SCHEDULE_MISMATCH');
-  assert(command.driveFileId === validated.delivery.driveFileId, 'AUTOPILOT_COMMAND_DRIVE_FILE_MISMATCH');
+  assert(
+    command.driveFileId === validated.delivery.driveFileId,
+    'AUTOPILOT_COMMAND_DRIVE_FILE_MISMATCH',
+  );
   assert(command.assetId === validated.delivery.assetId, 'AUTOPILOT_COMMAND_ASSET_ID_MISMATCH');
   assert(command.expectedAssetSha256 === validated.outputSha256, 'AUTOPILOT_COMMAND_SHA_MISMATCH');
   assert(command.caption === validated.caption, 'AUTOPILOT_COMMAND_CAPTION_MISMATCH');
-  assert(command.correlationId === validated.correlationId, 'AUTOPILOT_COMMAND_CORRELATION_MISMATCH');
+  assert(
+    command.correlationId === validated.correlationId,
+    'AUTOPILOT_COMMAND_CORRELATION_MISMATCH',
+  );
   assert(command.idempotencyKey === expectedIdempotency, 'AUTOPILOT_COMMAND_IDEMPOTENCY_MISMATCH');
-  assert(command.instagramAccountId === policy.instagramAccountId, 'AUTOPILOT_COMMAND_ACCOUNT_MISMATCH');
+  assert(
+    command.instagramAccountId === policy.instagramAccountId,
+    'AUTOPILOT_COMMAND_ACCOUNT_MISMATCH',
+  );
   assert(command.targetCodeSha === targetCodeSha, 'AUTOPILOT_COMMAND_TARGET_CODE_SHA_MISMATCH');
-  assert(deepEqual(command.creativeTruthBinding, validated.creativeTruthBinding), 'AUTOPILOT_COMMAND_CREATIVE_TRUTH_MISMATCH');
-  assert(deepEqual(command.brandDeterminism, validated.brandDeterminism), 'AUTOPILOT_COMMAND_BRAND_MISMATCH');
-  assert(deepEqual(command.rightsClearance, validated.rightsClearance), 'AUTOPILOT_COMMAND_RIGHTS_MISMATCH');
+  assert(
+    deepEqual(command.creativeTruthBinding, validated.creativeTruthBinding),
+    'AUTOPILOT_COMMAND_CREATIVE_TRUTH_MISMATCH',
+  );
+  assert(
+    deepEqual(command.brandDeterminism, validated.brandDeterminism),
+    'AUTOPILOT_COMMAND_BRAND_MISMATCH',
+  );
+  assert(
+    deepEqual(command.rightsClearance, validated.rightsClearance),
+    'AUTOPILOT_COMMAND_RIGHTS_MISMATCH',
+  );
   assert(command.approvalMode === 'EXPLICIT_APPROVAL', 'AUTOPILOT_COMMAND_APPROVAL_MODE_INVALID');
   assert(command.approvalStatus === 'APPROVED', 'AUTOPILOT_COMMAND_APPROVAL_STATUS_INVALID');
   assert(command.publicationIntent === 'SHARE_NOW', 'AUTOPILOT_COMMAND_PUBLICATION_INTENT_INVALID');
-  assert(command.schedulerBinding?.source === 'MARKETING_AUTOPILOT_GCP', 'AUTOPILOT_SCHEDULER_BINDING_SOURCE_INVALID');
-  assert(command.schedulerBinding?.policyId === policy.policyId, 'AUTOPILOT_SCHEDULER_POLICY_BINDING_MISMATCH');
-  assert(command.schedulerBinding?.rolloutPhase === rolloutPhase, 'AUTOPILOT_ROLLOUT_BINDING_MISMATCH');
-  assert(command.schedulerBinding?.notBefore === validated.scheduledAt, 'AUTOPILOT_NOT_BEFORE_MISMATCH');
+  assert(
+    command.schedulerBinding?.source === 'MARKETING_AUTOPILOT_GCP',
+    'AUTOPILOT_SCHEDULER_BINDING_SOURCE_INVALID',
+  );
+  assert(
+    command.schedulerBinding?.policyId === policy.policyId,
+    'AUTOPILOT_SCHEDULER_POLICY_BINDING_MISMATCH',
+  );
+  assert(
+    command.schedulerBinding?.rolloutPhase === rolloutPhase,
+    'AUTOPILOT_ROLLOUT_BINDING_MISMATCH',
+  );
+  assert(
+    command.schedulerBinding?.notBefore === validated.scheduledAt,
+    'AUTOPILOT_NOT_BEFORE_MISMATCH',
+  );
   assert(
     command.schedulerBinding?.registrySnapshotSha256 === validated.registrySnapshotSha256,
     'AUTOPILOT_REGISTRY_SNAPSHOT_MISMATCH',

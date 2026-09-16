@@ -23,7 +23,8 @@ if (config.INSTAGRAM_PUBLICATION_WRITES_ENABLED) {
 }
 
 const scheduledAtMs = Date.parse(env.INSTAGRAM_DUPLICATE_PREFLIGHT_SCHEDULED_AT);
-if (!Number.isFinite(scheduledAtMs)) throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_SCHEDULE_INVALID');
+if (!Number.isFinite(scheduledAtMs))
+  throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_SCHEDULE_INVALID');
 const caption = env.INSTAGRAM_DUPLICATE_PREFLIGHT_CAPTION_BASE64
   ? Buffer.from(env.INSTAGRAM_DUPLICATE_PREFLIGHT_CAPTION_BASE64, 'base64').toString('utf8')
   : '';
