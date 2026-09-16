@@ -99,11 +99,12 @@ describe('social engagement event schedule classification', () => {
     });
   });
 
-  it('preserves commercial precedence for explicit purchase intent', () => {
+  it('keeps explicit purchase as a commercial signal while routing the reply through TICKET_INFO', () => {
     expect(
       classifySocialEngagement('Quero comprar o ingresso da The Party, tem disponibilidade?'),
     ).toMatchObject({
-      intent: 'COMMERCIAL_LEAD',
+      intent: 'TICKET_INFO',
+      topic: 'TICKETS',
       eventInterest: 'THE_PARTY',
       commercialIntent: 'HIGH',
       priority: 'P1',
