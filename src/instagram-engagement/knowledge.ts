@@ -235,10 +235,7 @@ function isGenericOperatingHoursQuery(
   return hasHours && hasOperating && !namesSpecificEvent;
 }
 
-function isTodayOperatingHoursQuery(
-  normalized: string,
-  expectedIntent: EngagementIntent,
-): boolean {
+function isTodayOperatingHoursQuery(normalized: string, expectedIntent: EngagementIntent): boolean {
   if (expectedIntent !== 'LOCATION_HOURS') return false;
   const tokens = new Set(normalized.split(' '));
   if (!tokens.has('hoje')) return false;
