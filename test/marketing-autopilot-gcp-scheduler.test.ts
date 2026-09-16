@@ -243,7 +243,7 @@ describe('GCP scheduled Instagram publication controller', () => {
 describe('GCP scheduled Instagram publication workflow', () => {
   it('runs from protected main on a bounded poll schedule and stays no-op when nothing is due', () => {
     expect(workflow).toContain("cron: '*/15 * * * *'");
-    expect(workflow).toContain("test \"$GITHUB_REF\" = 'refs/heads/main'");
+    expect(workflow).toContain('test "$GITHUB_REF" = \'refs/heads/main\'');
     expect(workflow).toContain('test "$live_main" = "$GITHUB_SHA"');
     expect(workflow).toContain("if: steps.selection.outputs.due == 'true'");
   });
@@ -251,8 +251,10 @@ describe('GCP scheduled Instagram publication workflow', () => {
   it('uses the same hardened GCP writer and never dispatches the GitHub-native publisher', () => {
     expect(workflow).toContain('PUBLICATION_POLICY_MODE: SCHEDULED');
     expect(workflow).toContain('bash scripts/marketing-publish-now-fixed.sh');
-    expect(workflow).toContain('google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed');
-    expect(workflow).toContain('DATABASE_SECRET_VERSION: \'1\'');
+    expect(workflow).toContain(
+      'google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed',
+    );
+    expect(workflow).toContain("DATABASE_SECRET_VERSION: '1'");
     expect(workflow).not.toContain('github-native-instagram-publish-controlled');
     expect(workflow).not.toContain('repository_dispatch');
   });
@@ -260,14 +262,20 @@ describe('GCP scheduled Instagram publication workflow', () => {
   it('pins execution code to an ancestor of the exact protected-main queue snapshot', () => {
     expect(workflow).toContain('git merge-base --is-ancestor "$TARGET_CODE_SHA" "$GITHUB_SHA"');
     expect(workflow).toContain('git checkout --detach "$TARGET_CODE_SHA"');
-    expect(workflow).toContain('GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh');
+    expect(workflow).toContain(
+      'GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh',
+    );
   });
 
   it('keeps fast-path caption policy separate from scheduled approved-caption policy', () => {
-    expect(publicationScript).toContain('PUBLICATION_POLICY_MODE="${PUBLICATION_POLICY_MODE:-FAST_PATH}"');
+    expect(publicationScript).toContain(
+      'PUBLICATION_POLICY_MODE="${PUBLICATION_POLICY_MODE:-FAST_PATH}"',
+    );
     expect(publicationScript).toContain('if [ "$PUBLICATION_POLICY_MODE" = "FAST_PATH" ]; then');
     expect(publicationScript).toContain('.schedulingPolicy == "SCHEDULED_GCP"');
     expect(publicationScript).toContain('test "$scheduled_delta" -ge 0');
-    expect(publicationScript).toContain('test "$scheduled_delta" -le "$scheduled_max_delay_seconds"');
+    expect(publicationScript).toContain(
+      'test "$scheduled_delta" -le "$scheduled_max_delay_seconds"',
+    );
   });
 });

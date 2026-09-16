@@ -2,9 +2,14 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-const queuePath = process.env.SCHEDULED_PUBLICATION_QUEUE_PATH ?? 'control/gcp-instagram-publication-queue.json';
-const commandPath = process.env.SCHEDULED_PUBLICATION_COMMAND_PATH ?? '/tmp/marketing-scheduled-publication-command.json';
-const summaryPath = process.env.SCHEDULED_PUBLICATION_SUMMARY_PATH ?? '/tmp/marketing-scheduled-publication-summary.json';
+const queuePath =
+  process.env.SCHEDULED_PUBLICATION_QUEUE_PATH ?? 'control/gcp-instagram-publication-queue.json';
+const commandPath =
+  process.env.SCHEDULED_PUBLICATION_COMMAND_PATH ??
+  '/tmp/marketing-scheduled-publication-command.json';
+const summaryPath =
+  process.env.SCHEDULED_PUBLICATION_SUMMARY_PATH ??
+  '/tmp/marketing-scheduled-publication-summary.json';
 const nowIso = process.env.SCHEDULED_PUBLICATION_NOW ?? new Date().toISOString();
 const nowMs = Date.parse(nowIso);
 
@@ -88,19 +93,29 @@ writeSummary({
 console.log(`GCP_SCHEDULED_PUBLICATION=DUE:${item.contentItemId}`);
 
 function validateQueue(value) {
-  fail(value && typeof value === 'object' && !Array.isArray(value), 'SCHEDULED_PUBLICATION_QUEUE_INVALID');
+  fail(
+    value && typeof value === 'object' && !Array.isArray(value),
+    'SCHEDULED_PUBLICATION_QUEUE_INVALID',
+  );
   fail(value.schemaVersion === 1, 'SCHEDULED_PUBLICATION_QUEUE_SCHEMA_INVALID');
   fail(value.mode === 'CANARY' || value.mode === 'LIMITED', 'SCHEDULED_PUBLICATION_MODE_INVALID');
   fail(typeof value.enabled === 'boolean', 'SCHEDULED_PUBLICATION_ENABLED_INVALID');
   fail(value.timezone === 'America/Bahia', 'SCHEDULED_PUBLICATION_TIMEZONE_INVALID');
   fail(Number.isInteger(value.maxDelayMinutes), 'SCHEDULED_PUBLICATION_MAX_DELAY_INVALID');
-  fail(value.maxDelayMinutes >= 5 && value.maxDelayMinutes <= 30, 'SCHEDULED_PUBLICATION_MAX_DELAY_INVALID');
+  fail(
+    value.maxDelayMinutes >= 5 && value.maxDelayMinutes <= 30,
+    'SCHEDULED_PUBLICATION_MAX_DELAY_INVALID',
+  );
   fail(Array.isArray(value.items), 'SCHEDULED_PUBLICATION_ITEMS_INVALID');
-  if (value.mode === 'CANARY') fail(value.items.length <= 1, 'SCHEDULED_PUBLICATION_CANARY_ITEM_LIMIT');
+  if (value.mode === 'CANARY')
+    fail(value.items.length <= 1, 'SCHEDULED_PUBLICATION_CANARY_ITEM_LIMIT');
 }
 
 function validateItem(item, mode, currentMs) {
-  fail(item && typeof item === 'object' && !Array.isArray(item), 'SCHEDULED_PUBLICATION_ITEM_INVALID');
+  fail(
+    item && typeof item === 'object' && !Array.isArray(item),
+    'SCHEDULED_PUBLICATION_ITEM_INVALID',
+  );
   for (const field of [
     'commandId',
     'contentItemId',
@@ -111,34 +126,67 @@ function validateItem(item, mode, currentMs) {
     'idempotencyKey',
     'targetCodeSha',
   ]) {
-    fail(typeof item[field] === 'string' && item[field].trim().length > 0, `SCHEDULED_PUBLICATION_${field.toUpperCase()}_REQUIRED`);
+    fail(
+      typeof item[field] === 'string' && item[field].trim().length > 0,
+      `SCHEDULED_PUBLICATION_${field.toUpperCase()}_REQUIRED`,
+    );
   }
-  fail(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(item.commandId), 'SCHEDULED_PUBLICATION_COMMAND_ID_INVALID');
-  fail(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(item.contentItemId), 'SCHEDULED_PUBLICATION_CONTENT_ITEM_ID_INVALID');
-  fail(/^[A-Za-z0-9_-]{10,128}$/.test(item.driveFileId), 'SCHEDULED_PUBLICATION_DRIVE_FILE_ID_INVALID');
-  fail(/^[a-f0-9]{64}$/.test(item.expectedAssetSha256 ?? ''), 'SCHEDULED_PUBLICATION_ASSET_SHA_INVALID');
+  fail(
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(item.commandId),
+    'SCHEDULED_PUBLICATION_COMMAND_ID_INVALID',
+  );
+  fail(
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(item.contentItemId),
+    'SCHEDULED_PUBLICATION_CONTENT_ITEM_ID_INVALID',
+  );
+  fail(
+    /^[A-Za-z0-9_-]{10,128}$/.test(item.driveFileId),
+    'SCHEDULED_PUBLICATION_DRIVE_FILE_ID_INVALID',
+  );
+  fail(
+    /^[a-f0-9]{64}$/.test(item.expectedAssetSha256 ?? ''),
+    'SCHEDULED_PUBLICATION_ASSET_SHA_INVALID',
+  );
   fail(/^[a-f0-9]{40}$/.test(item.targetCodeSha), 'SCHEDULED_PUBLICATION_TARGET_CODE_SHA_INVALID');
   fail(!/^0{40}$/.test(item.targetCodeSha), 'SCHEDULED_PUBLICATION_TARGET_CODE_SHA_INVALID');
-  fail(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}-03:00$/.test(item.scheduledAt ?? ''), 'SCHEDULED_PUBLICATION_SCHEDULE_INVALID');
+  fail(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}-03:00$/.test(item.scheduledAt ?? ''),
+    'SCHEDULED_PUBLICATION_SCHEDULE_INVALID',
+  );
   fail(Number.isFinite(Date.parse(item.scheduledAt)), 'SCHEDULED_PUBLICATION_SCHEDULE_INVALID');
-  fail(item.operation === 'SUNSET' || item.operation === 'THE_PARTY', 'SCHEDULED_PUBLICATION_OPERATION_INVALID');
+  fail(
+    item.operation === 'SUNSET' || item.operation === 'THE_PARTY',
+    'SCHEDULED_PUBLICATION_OPERATION_INVALID',
+  );
   fail(item.channel === 'INSTAGRAM', 'SCHEDULED_PUBLICATION_CHANNEL_INVALID');
-  fail(item.format === 'FEED_IMAGE' || item.format === 'STORY_IMAGE', 'SCHEDULED_PUBLICATION_FORMAT_INVALID');
+  fail(
+    item.format === 'FEED_IMAGE' || item.format === 'STORY_IMAGE',
+    'SCHEDULED_PUBLICATION_FORMAT_INVALID',
+  );
   fail(item.contentType === 'image/jpeg', 'SCHEDULED_PUBLICATION_CONTENT_TYPE_INVALID');
   fail(item.instagramAccountId === '17841402033495654', 'SCHEDULED_PUBLICATION_ACCOUNT_INVALID');
   fail(item.status === 'SCHEDULED', 'SCHEDULED_PUBLICATION_STATUS_INVALID');
   fail(item.scheduledState === 'SCHEDULED', 'SCHEDULED_PUBLICATION_SCHEDULED_STATE_INVALID');
   fail(item.approvalMode === 'EXPLICIT_APPROVAL', 'SCHEDULED_PUBLICATION_APPROVAL_MODE_INVALID');
   fail(item.approvalStatus === 'APPROVED', 'SCHEDULED_PUBLICATION_NOT_APPROVED');
-  fail(item.publicationStatus === 'NOT_PUBLISHED', 'SCHEDULED_PUBLICATION_ALREADY_MARKED_PUBLISHED');
+  fail(
+    item.publicationStatus === 'NOT_PUBLISHED',
+    'SCHEDULED_PUBLICATION_ALREADY_MARKED_PUBLISHED',
+  );
   if (mode === 'CANARY') fail(item.canary === true, 'SCHEDULED_PUBLICATION_CANARY_FLAG_REQUIRED');
 
   const truth = item.creativeTruthBinding;
   fail(truth && typeof truth === 'object', 'SCHEDULED_PUBLICATION_CREATIVE_TRUTH_REQUIRED');
-  fail(truth.policyId === 'TOCA_CREATIVE_TRUTH_POLICY_V1', 'SCHEDULED_PUBLICATION_CREATIVE_POLICY_INVALID');
+  fail(
+    truth.policyId === 'TOCA_CREATIVE_TRUTH_POLICY_V1',
+    'SCHEDULED_PUBLICATION_CREATIVE_POLICY_INVALID',
+  );
   fail(nonempty(truth.standardId), 'SCHEDULED_PUBLICATION_CREATIVE_STANDARD_REQUIRED');
   fail(nonempty(truth.creativeId), 'SCHEDULED_PUBLICATION_CREATIVE_ID_REQUIRED');
-  fail(truth.outputSha256 === item.expectedAssetSha256, 'SCHEDULED_PUBLICATION_CREATIVE_ASSET_MISMATCH');
+  fail(
+    truth.outputSha256 === item.expectedAssetSha256,
+    'SCHEDULED_PUBLICATION_CREATIVE_ASSET_MISMATCH',
+  );
   fail(truth.brandIntegrityStatus === 'PASSED', 'SCHEDULED_PUBLICATION_BRAND_GATE_FAILED');
   fail(truth.venueFidelityStatus === 'PASSED', 'SCHEDULED_PUBLICATION_VENUE_GATE_FAILED');
   fail(truth.qualityGateStatus === 'PASSED', 'SCHEDULED_PUBLICATION_QUALITY_GATE_FAILED');
@@ -147,30 +195,69 @@ function validateItem(item, mode, currentMs) {
   const rights = item.rightsClearance;
   fail(rights && typeof rights === 'object', 'SCHEDULED_PUBLICATION_RIGHTS_REQUIRED');
   fail(rights.status === 'CLEARED', 'SCHEDULED_PUBLICATION_RIGHTS_NOT_CLEARED');
-  fail(rights.scope === 'INSTAGRAM_ORGANIC_PUBLICATION', 'SCHEDULED_PUBLICATION_RIGHTS_SCOPE_INVALID');
+  fail(
+    rights.scope === 'INSTAGRAM_ORGANIC_PUBLICATION',
+    'SCHEDULED_PUBLICATION_RIGHTS_SCOPE_INVALID',
+  );
   fail(nonempty(rights.evidenceRef), 'SCHEDULED_PUBLICATION_RIGHTS_EVIDENCE_REQUIRED');
   fail(nonempty(rights.authority), 'SCHEDULED_PUBLICATION_RIGHTS_AUTHORITY_REQUIRED');
-  fail(rights.assetSha256 === item.expectedAssetSha256, 'SCHEDULED_PUBLICATION_RIGHTS_ASSET_MISMATCH');
+  fail(
+    rights.assetSha256 === item.expectedAssetSha256,
+    'SCHEDULED_PUBLICATION_RIGHTS_ASSET_MISMATCH',
+  );
   const clearedMs = Date.parse(rights.clearedAt ?? '');
-  fail(Number.isFinite(clearedMs) && clearedMs <= currentMs, 'SCHEDULED_PUBLICATION_RIGHTS_TIMESTAMP_INVALID');
+  fail(
+    Number.isFinite(clearedMs) && clearedMs <= currentMs,
+    'SCHEDULED_PUBLICATION_RIGHTS_TIMESTAMP_INVALID',
+  );
   if (rights.expiresAt !== undefined) {
     const expiresMs = Date.parse(rights.expiresAt);
-    fail(Number.isFinite(expiresMs) && expiresMs > currentMs, 'SCHEDULED_PUBLICATION_RIGHTS_EXPIRED');
+    fail(
+      Number.isFinite(expiresMs) && expiresMs > currentMs,
+      'SCHEDULED_PUBLICATION_RIGHTS_EXPIRED',
+    );
   }
 
   const snapshot = item.registrySnapshot;
-  fail(snapshot && typeof snapshot === 'object', 'SCHEDULED_PUBLICATION_REGISTRY_SNAPSHOT_REQUIRED');
-  fail(snapshot.sourceTitle === 'TOCA_OS — MARKETING_AUTOPILOT_CONTENT_REGISTRY_v1.0', 'SCHEDULED_PUBLICATION_REGISTRY_SOURCE_INVALID');
-  fail(snapshot.spreadsheetId === '1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw', 'SCHEDULED_PUBLICATION_REGISTRY_ID_INVALID');
+  fail(
+    snapshot && typeof snapshot === 'object',
+    'SCHEDULED_PUBLICATION_REGISTRY_SNAPSHOT_REQUIRED',
+  );
+  fail(
+    snapshot.sourceTitle === 'TOCA_OS — MARKETING_AUTOPILOT_CONTENT_REGISTRY_v1.0',
+    'SCHEDULED_PUBLICATION_REGISTRY_SOURCE_INVALID',
+  );
+  fail(
+    snapshot.spreadsheetId === '1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw',
+    'SCHEDULED_PUBLICATION_REGISTRY_ID_INVALID',
+  );
   fail(snapshot.sheetName === 'CONTENT_ITEMS', 'SCHEDULED_PUBLICATION_REGISTRY_SHEET_INVALID');
-  fail(Number.isInteger(snapshot.row) && snapshot.row >= 2, 'SCHEDULED_PUBLICATION_REGISTRY_ROW_INVALID');
-  fail(snapshot.contentItemId === item.contentItemId, 'SCHEDULED_PUBLICATION_REGISTRY_ITEM_MISMATCH');
+  fail(
+    Number.isInteger(snapshot.row) && snapshot.row >= 2,
+    'SCHEDULED_PUBLICATION_REGISTRY_ROW_INVALID',
+  );
+  fail(
+    snapshot.contentItemId === item.contentItemId,
+    'SCHEDULED_PUBLICATION_REGISTRY_ITEM_MISMATCH',
+  );
   fail(snapshot.approvalStatus === 'APPROVED', 'SCHEDULED_PUBLICATION_REGISTRY_APPROVAL_INVALID');
   fail(snapshot.scheduledState === 'SCHEDULED', 'SCHEDULED_PUBLICATION_REGISTRY_SCHEDULE_INVALID');
-  fail(snapshot.publicationStatus === 'NOT_PUBLISHED', 'SCHEDULED_PUBLICATION_REGISTRY_PUBLICATION_INVALID');
-  fail(snapshot.assetSha256 === item.expectedAssetSha256, 'SCHEDULED_PUBLICATION_REGISTRY_ASSET_MISMATCH');
-  fail(snapshot.captionSha256 === item.captionSha256, 'SCHEDULED_PUBLICATION_REGISTRY_CAPTION_MISMATCH');
-  fail(/^[a-f0-9]{64}$/.test(item.captionSha256 ?? ''), 'SCHEDULED_PUBLICATION_CAPTION_SHA_INVALID');
+  fail(
+    snapshot.publicationStatus === 'NOT_PUBLISHED',
+    'SCHEDULED_PUBLICATION_REGISTRY_PUBLICATION_INVALID',
+  );
+  fail(
+    snapshot.assetSha256 === item.expectedAssetSha256,
+    'SCHEDULED_PUBLICATION_REGISTRY_ASSET_MISMATCH',
+  );
+  fail(
+    snapshot.captionSha256 === item.captionSha256,
+    'SCHEDULED_PUBLICATION_REGISTRY_CAPTION_MISMATCH',
+  );
+  fail(
+    /^[a-f0-9]{64}$/.test(item.captionSha256 ?? ''),
+    'SCHEDULED_PUBLICATION_CAPTION_SHA_INVALID',
+  );
   const actualCaptionSha256 = createHash('sha256').update(item.caption).digest('hex');
   fail(actualCaptionSha256 === item.captionSha256, 'SCHEDULED_PUBLICATION_CAPTION_HASH_MISMATCH');
 }
