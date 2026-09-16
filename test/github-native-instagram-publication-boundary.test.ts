@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 const publisher = readFileSync('.github/workflows/github-native-instagram-publisher.yml', 'utf8');
 const stager = readFileSync('.github/workflows/github-native-instagram-stage-asset.yml', 'utf8');
-const legacyPublishNow = readFileSync('.github/workflows/marketing-publish-now.yml', 'utf8');
+const gcpPublishNow = readFileSync('.github/workflows/marketing-publish-now.yml', 'utf8');
 const legacyAutopilot = readFileSync(
   '.github/workflows/marketing-autopilot-publication.yml',
   'utf8',
@@ -14,7 +14,7 @@ const runtime = readFileSync(
 );
 
 describe('GitHub-native Instagram publication boundary', () => {
-  it('schedules outside the top-of-hour hotspot in America/Bahia', () => {
+  it('keeps the GitHub-native scheduler outside the top-of-hour hotspot in America/Bahia', () => {
     expect(publisher).toContain("cron: '2/5 * * * *'");
     expect(publisher).toContain("timezone: 'America/Bahia'");
   });
@@ -31,9 +31,9 @@ describe('GitHub-native Instagram publication boundary', () => {
     expect(runtime).toContain("publicationAssetHost = 'raw.githubusercontent.com'");
   });
 
-  it('executes write-capable dispatches only from default-branch repository_dispatch', () => {
-    expect(publisher).toContain('repository_dispatch:');
-    expect(publisher).toContain('github-native-instagram-publish-controlled');
+  it('removes the GitHub-native provider write dispatch surface while preserving asset staging', () => {
+    expect(publisher).not.toContain('repository_dispatch:');
+    expect(publisher).not.toContain('github-native-instagram-publish-controlled');
     expect(stager).toContain('repository_dispatch:');
     expect(stager).toContain('github-native-instagram-stage-asset');
     expect(publisher).not.toContain('workflow_dispatch:');
@@ -42,9 +42,12 @@ describe('GitHub-native Instagram publication boundary', () => {
     expect(stager).toContain('test "${GITHUB_REF}" = "refs/heads/${DEFAULT_BRANCH}"');
   });
 
-  it('keeps provider writes fail-closed and SHA-bound', () => {
-    expect(publisher).toContain("vars.TOCA_GITHUB_NATIVE_PUBLICATION_MODE || 'SHADOW'");
-    expect(publisher).toContain("vars.TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED || 'false'");
+  it('pins GitHub-native publication to read-only SHADOW regardless of repository variables', () => {
+    expect(publisher).toContain('TOCA_GITHUB_NATIVE_PUBLICATION_MODE: SHADOW');
+    expect(publisher).toContain("TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED: 'false'");
+    expect(publisher).toContain("TOCA_GITHUB_NATIVE_MANUAL_WRITE_CONFIRMATION: 'false'");
+    expect(publisher).not.toContain('vars.TOCA_GITHUB_NATIVE_PUBLICATION_MODE');
+    expect(publisher).not.toContain('vars.TOCA_GITHUB_NATIVE_PUBLICATION_WRITES_ENABLED');
     expect(publisher).toContain(
       'INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ vars.INSTAGRAM_BUSINESS_ACCOUNT_ID }}',
     );
@@ -75,13 +78,15 @@ describe('GitHub-native Instagram publication boundary', () => {
     expect(stager).toContain('raw.githubusercontent.com');
   });
 
-  it('keeps the older publish-now GCP lane disabled unless explicitly re-authorized', () => {
-    expect(legacyPublishNow).toContain("if: vars.ALLOW_LEGACY_GCP_MARKETING_PUBLISH_NOW == 'true'");
+  it('activates the governed GCP publish-now lane only through protected command state', () => {
+    expect(gcpPublishNow).not.toContain('ALLOW_LEGACY_GCP_MARKETING_PUBLISH_NOW');
+    expect(gcpPublishNow).toContain("if: steps.command.outputs.action == 'PUBLISH_NOW'");
+    expect(gcpPublishNow).toContain('target_code_sha=$(jq -r .targetCodeSha');
+    expect(gcpPublishNow).toContain('GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh');
   });
 
-  it('retires the command-file GCP autopilot lane with no cloud or provider side effects', () => {
+  it('keeps the command-file GCP autopilot lane retired with no cloud or provider side effects', () => {
     expect(legacyAutopilot).toContain('LEGACY_GCP_MARKETING_AUTOPILOT_PUBLICATION=RETIRED');
-    expect(legacyAutopilot).toContain('github-native-instagram-publisher.yml');
     expect(legacyAutopilot).not.toContain('google-github-actions/');
     expect(legacyAutopilot).not.toContain('gcloud ');
     expect(legacyAutopilot).not.toContain('id-token: write');
