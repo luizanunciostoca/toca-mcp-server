@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const workflow = readFileSync('.github/workflows/marketing-publish-now.yml', 'utf8');
 const script = readFileSync('scripts/marketing-publish-now.sh', 'utf8');
+const wrapper = readFileSync('scripts/marketing-publish-now-fixed.sh', 'utf8');
 const brandGate = readFileSync('scripts/check-publish-now-brand-determinism.mjs', 'utf8');
 const rightsGate = readFileSync('scripts/check-publish-now-rights-clearance.mjs', 'utf8');
 
@@ -34,6 +35,16 @@ describe('Marketing Publish Now hardening contract', () => {
     expect(result.stderr).toContain('P1_COMPAT_PATCH=PASS');
     expect(result.stderr).toContain('P1_WRAPPER_PHASE=PATCH_ONLY_COMPLETE');
     expect(result.stderr).not.toContain('P1_PHASE=AUTHENTICATE_DOCKER');
+  });
+
+  it('pins the Cloud SQL database secret version to the production-readiness proof', () => {
+    expect(workflow).toContain("DATABASE_SECRET_VERSION: '1'");
+    expect(wrapper).toContain("legacy_database_secret = 'DATABASE_URL=$DATABASE_SECRET_ID:latest'");
+    expect(wrapper).toContain(
+      "fixed_database_secret = 'DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION'",
+    );
+    expect(wrapper).toContain('DATABASE_SECRET_VERSION_REQUIRED');
+    expect(wrapper).toContain('P1_DATABASE_SECRET_VERSION=PINNED');
   });
 
   it('uses the runtime audited SHA without overriding the GitHub runner SHA', () => {
