@@ -56,6 +56,13 @@ describe('Instagram GCP execution-runtime readiness', () => {
   });
 
   it('binds execution to the build-produced digest and verifies the remote tag before deployment', () => {
+    const setupBuildx = workflow.indexOf(
+      'docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f',
+    );
+    const build = workflow.indexOf('docker buildx build');
+    expect(setupBuildx).toBeGreaterThanOrEqual(0);
+    expect(build).toBeGreaterThan(setupBuildx);
+    expect(workflow).toContain('driver: docker-container');
     expect(workflow).toContain('docker buildx build');
     expect(workflow).toContain('--metadata-file /tmp/build-metadata.json');
     expect(workflow).toContain('."containerimage.digest" // empty');
