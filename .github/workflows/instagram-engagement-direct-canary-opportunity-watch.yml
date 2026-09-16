@@ -1,0 +1,479 @@
+name: Instagram Engagement Direct Canary Opportunity Watch
+
+on:
+  issues:
+    types: [opened]
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-direct-canary-opportunity-watch
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  CANONICAL_FAQ_SPREADSHEET_ID: 1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU
+  TOCA_TENANT_ID: toca
+  TOCA_WORKSPACE_ID: toca
+  TOCA_ORGANIZATION_ID: toca
+
+jobs:
+  direct-opportunity-watch:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'issues' ||
+        (github.event.issue.user.login == github.repository_owner &&
+          startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram DIRECT canary opportunity watch READONLY AUTO')))
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact Direct watch controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify exact Direct watch controller SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Resolve one active owner-authored Direct watch
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
+          grep -Fxq 'MAIN_STABILITY=PASS' <<< "$CONTROL_BODY"
+          grep -Fxq "EVALUATED_MAIN_SHA=$GITHUB_SHA" <<< "$CONTROL_BODY"
+          grep -Fxq 'MERGE_RESERVATION=NONE' <<< "$CONTROL_BODY"
+
+          QUERY="repo:${GITHUB_REPOSITORY} is:issue is:open in:title \"PRODUCTION AUTHORIZATION — Instagram DIRECT canary opportunity watch READONLY AUTO\""
+          SEARCH_JSON="$(gh api --method GET search/issues -f q="$QUERY" -f per_page=10)"
+          MATCHES="$(jq -c --arg owner "$GITHUB_REPOSITORY_OWNER" '[.items[] | select(.pull_request == null) | select(.user.login == $owner) | select(.title | startswith("PRODUCTION AUTHORIZATION — Instagram DIRECT canary opportunity watch READONLY AUTO"))]' <<< "$SEARCH_JSON")"
+          COUNT="$(jq 'length' <<< "$MATCHES")"
+
+          if [[ "$COUNT" = '0' ]]; then
+            echo 'active=false' >> "$GITHUB_OUTPUT"
+            echo 'DIRECT_CANARY_OPPORTUNITY_WATCH=INACTIVE_NO_AUTHORIZATION' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$COUNT" != '1' ]]; then
+            echo "Expected exactly one active owner-authored Direct watch authorization, found $COUNT" >&2
+            exit 1
+          fi
+
+          ISSUE_NUMBER="$(jq -r '.[0].number' <<< "$MATCHES")"
+          BODY="$(jq -r '.[0].body // ""' <<< "$MATCHES")"
+          CREATED_AT="$(jq -r '.[0].created_at // empty' <<< "$MATCHES")"
+          if [[ "$GITHUB_EVENT_NAME" = 'issues' ]]; then
+            EVENT_ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+            test "$EVENT_ISSUE_NUMBER" = "$ISSUE_NUMBER"
+          fi
+
+          close_watch() {
+            local status="$1"
+            local updated_body
+            updated_body="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
+            if ! grep -Fxq 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$updated_body"; then
+              updated_body+=$'\nAUTHORIZATION_STATE=CONSUMED_AND_CLOSED'
+            fi
+            printf -v report '%s\n' \
+              "DIRECT_CANARY_OPPORTUNITY_WATCH_STATUS=$status" \
+              "CONTROLLER_SHA=$GITHUB_SHA" \
+              'DATABASE_MUTATIONS=false' \
+              'PROVIDER_CALLS=false' \
+              'EXTERNAL_REPLY_WRITES=false' \
+              'AUTO_REAL_CANARY_AUTHORIZED=false'
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$report" >/dev/null
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+              -f state=closed -f state_reason=completed -f body="$updated_body" >/dev/null
+          }
+
+          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          WATCH_EXPIRES_AT="$(grep '^WATCH_EXPIRES_AT=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          fixed_required=(
+            'AUTHORIZATION_STATE=ACTIVE'
+            'INSTAGRAM_ENGAGEMENT_DIRECT_CANARY_OPPORTUNITY_WATCH=AUTHORIZED'
+            'WATCH_MODE=READ_ONLY'
+            'WATCH_INTERVAL_MINUTES=10'
+            'WATCH_MAX_LIFETIME_HOURS=12'
+            'CANARY_CHANNEL=DIRECT'
+            'MAX_AGE_MINUTES=30'
+            'TEMPORARY_DIAGNOSTIC_JOB_AUTHORIZED=true'
+            'PERSISTENT_SERVICE_MUTATIONS_AUTHORIZED=false'
+            'DATABASE_MUTATIONS_AUTHORIZED=false'
+            'PROVIDER_CALLS_AUTHORIZED=false'
+            'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+            'OPPORTUNITY_ISSUE_CREATION_AUTHORIZED=true'
+            'AUTO_REAL_CANARY_AUTHORIZED=false'
+            'COMMENT_LIMITED_MUST_REMAIN_UNCHANGED=true'
+            'GENERAL_AUTONOMY_MUST_REMAIN_DISABLED=true'
+            'PERSISTENT_DIRECT_PROMOTION_AUTHORIZED=false'
+          )
+          for required in "${fixed_required[@]}"; do
+            if ! grep -Fxq "$required" <<< "$BODY"; then
+              close_watch 'INVALID_AUTHORIZATION'
+              echo "Missing exact Direct opportunity watch authorization field: $required" >&2
+              exit 1
+            fi
+          done
+
+          if [[ "$RUNTIME_SHA" != "$GITHUB_SHA" ]]; then
+            close_watch 'STALE_MAIN'
+            echo 'active=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            close_watch 'INVALID_RUNTIME_DIGEST'
+            exit 1
+          fi
+          if [[ -z "$WATCH_EXPIRES_AT" || -z "$CREATED_AT" ]]; then
+            close_watch 'INVALID_EXPIRY'
+            exit 1
+          fi
+          if ! CREATED_EPOCH="$(date -u -d "$CREATED_AT" +%s 2>/dev/null)"; then
+            close_watch 'INVALID_EXPIRY'
+            exit 1
+          fi
+          if ! EXPIRES_EPOCH="$(date -u -d "$WATCH_EXPIRES_AT" +%s 2>/dev/null)"; then
+            close_watch 'INVALID_EXPIRY'
+            exit 1
+          fi
+          NOW_EPOCH="$(date -u +%s)"
+          if (( EXPIRES_EPOCH <= CREATED_EPOCH || EXPIRES_EPOCH - CREATED_EPOCH > 43200 )); then
+            close_watch 'INVALID_EXPIRY_WINDOW'
+            exit 1
+          fi
+          if (( NOW_EPOCH >= EXPIRES_EPOCH )); then
+            close_watch 'EXPIRED'
+            echo 'active=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo 'active=true' >> "$GITHUB_OUTPUT"
+          echo "watch_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "watch_expires_at=$WATCH_EXPIRES_AT" >> "$GITHUB_OUTPUT"
+          echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo 'DIRECT_CANARY_OPPORTUNITY_WATCH=ACTIVE_READ_ONLY' >> "$GITHUB_STEP_SUMMARY"
+          echo "WATCH_AUTHORIZATION_ISSUE=$ISSUE_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          echo 'PROVIDER_CALLS=false' >> "$GITHUB_STEP_SUMMARY"
+          echo 'EXTERNAL_REPLY_WRITES=false' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Authenticate diagnostic identity
+        if: steps.auth.outputs.active == 'true'
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        if: steps.auth.outputs.active == 'true'
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify exact immutable runtime image
+        if: steps.auth.outputs.active == 'true'
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
+
+      - name: Run bounded read-only Direct opportunity probe
+        if: steps.auth.outputs.active == 'true'
+        id: probe
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
+          grep -Fxq 'MAIN_STABILITY=PASS' <<< "$CONTROL_BODY"
+          grep -Fxq "EVALUATED_MAIN_SHA=$GITHUB_SHA" <<< "$CONTROL_BODY"
+          grep -Fxq 'MERGE_RESERVATION=NONE' <<< "$CONTROL_BODY"
+
+          JOB="toca-ig-direct-watch-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "job=$JOB" >> "$GITHUB_OUTPUT"
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true#INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false#INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID#INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID#INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_ENGAGEMENT_CANARY_MAX_AGE_MINUTES=30#INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_MINUTES=120" \
+            --command node --args dist/src/ops/instagram-engagement-canary-eligibility-readonly.js \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+      - name: Parse sanitized Direct eligibility markers
+        if: steps.auth.outputs.active == 'true'
+        id: decision
+        env:
+          JOB: ${{ steps.probe.outputs.job }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SAFE_LINES=''
+          MARKERS_COMPLETE=false
+          required_markers=(
+            INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY CANDIDATE_COUNT CANDIDATE_SCAN_COMPLETE
+            ELIGIBLE_COUNT REJECTED_CONFIDENCE REJECTED_PRIORITY REJECTED_SENSITIVE
+            REJECTED_COMMERCIAL REJECTED_URGENCY REJECTED_INTENT REJECTED_KNOWLEDGE
+            READ_ONLY_ELIGIBILITY DATABASE_MUTATIONS PROVIDER_CALLS RAW_USER_DATA_LOGGED
+          )
+          for attempt in 1 2 3 4 5 6; do
+            if ! LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
+              --project "$GCP_PROJECT_ID" --freshness=1h --limit=300 --order=desc --format=json 2>/dev/null)"; then
+              LOGS='[]'
+            fi
+            SAFE_LINES="$(jq -r '.[] | (.textPayload // .jsonPayload.message // empty)' <<< "$LOGS" \
+              | grep -E '^(INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY|CANDIDATE_COUNT|CANDIDATE_SCAN_COMPLETE|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|REJECTED_[A-Z_]+|RECENT_DIRECT_[A-Z_]+|DIRECT_OUTBOX_[A-Z_]+|DIRECT_ACTION_[A-Z_]+|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|RAW_USER_DATA_LOGGED)=' \
+              || true)"
+            MARKERS_COMPLETE=true
+            for marker in "${required_markers[@]}"; do
+              count="$(grep -c "^${marker}=" <<< "$SAFE_LINES" || true)"
+              if [[ "$count" != '1' ]]; then MARKERS_COMPLETE=false; break; fi
+            done
+            if [[ "$MARKERS_COMPLETE" = 'true' ]]; then break; fi
+            if [[ "$attempt" != '6' ]]; then sleep 10; fi
+          done
+          if [[ "$MARKERS_COMPLETE" != 'true' ]]; then
+            echo 'status=BLOCKED_LOG_PROPAGATION' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          read_single_marker() {
+            local marker="$1" matches count
+            matches="$(grep "^${marker}=" <<< "$SAFE_LINES" || true)"
+            count="$(grep -c "^${marker}=" <<< "$SAFE_LINES" || true)"
+            test "$count" = '1'
+            printf '%s' "${matches#*=}"
+          }
+          read_exact_marker() { test "$(read_single_marker "$1")" = "$2"; }
+          STATUS="$(read_single_marker INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY)"
+          CANDIDATE_COUNT="$(read_single_marker CANDIDATE_COUNT)"
+          CANDIDATE_SCAN_COMPLETE="$(read_single_marker CANDIDATE_SCAN_COMPLETE)"
+          ELIGIBLE_COUNT="$(read_single_marker ELIGIBLE_COUNT)"
+          [[ "$STATUS" =~ ^(READY|NO_ELIGIBLE_TARGET|MULTIPLE_ELIGIBLE_TARGETS|SCAN_TRUNCATED)$ ]]
+          [[ "$CANDIDATE_COUNT" =~ ^[0-9]+$ ]]
+          [[ "$ELIGIBLE_COUNT" =~ ^[0-9]+$ ]]
+          if [[ "$STATUS" = 'SCAN_TRUNCATED' ]]; then
+            test "$CANDIDATE_SCAN_COMPLETE" = 'false'
+          else
+            test "$CANDIDATE_SCAN_COMPLETE" = 'true'
+          fi
+          read_exact_marker READ_ONLY_ELIGIBILITY true
+          read_exact_marker DATABASE_MUTATIONS false
+          read_exact_marker PROVIDER_CALLS false
+          read_exact_marker RAW_USER_DATA_LOGGED false
+
+          TARGET_SHA='NONE'
+          TARGET_COUNT="$(grep -c '^ELIGIBLE_TARGET_SHA256=' <<< "$SAFE_LINES" || true)"
+          if [[ "$STATUS" = 'READY' ]]; then
+            test "$ELIGIBLE_COUNT" = '1'
+            test "$TARGET_COUNT" = '1'
+            TARGET_SHA="$(grep '^ELIGIBLE_TARGET_SHA256=' <<< "$SAFE_LINES" | cut -d= -f2-)"
+            [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]
+          else
+            test "$TARGET_COUNT" = '0'
+          fi
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "candidate_count=$CANDIDATE_COUNT" >> "$GITHUB_OUTPUT"
+          echo "eligible_count=$ELIGIBLE_COUNT" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Delete temporary Direct opportunity job
+        if: always() && steps.auth.outputs.active == 'true'
+        env:
+          JOB: ${{ steps.probe.outputs.job }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${JOB:-}" ]]; then
+            exit 0
+          fi
+          deleted=false
+          for attempt in 1 2 3; do
+            gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+            REMAINING="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter="metadata.name=$JOB" --format='value(metadata.name)')"
+            if [[ -z "$REMAINING" ]]; then
+              deleted=true
+              break
+            fi
+            if [[ "$attempt" != '3' ]]; then sleep 5; fi
+          done
+          test "$deleted" = 'true'
+
+      - name: Handle sanitized Direct eligibility decision
+        if: steps.auth.outputs.active == 'true' && success()
+        env:
+          WATCH_ISSUE: ${{ steps.auth.outputs.watch_issue }}
+          WATCH_EXPIRES_AT: ${{ steps.auth.outputs.watch_expires_at }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+          STATUS: ${{ steps.decision.outputs.status }}
+          CANDIDATE_COUNT: ${{ steps.decision.outputs.candidate_count }}
+          ELIGIBLE_COUNT: ${{ steps.decision.outputs.eligible_count }}
+          TARGET_SHA: ${{ steps.decision.outputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          close_watch() {
+            local terminal_status="$1"
+            local issue_json body updated_body
+            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}")"
+            body="$(jq -r '.body // ""' <<< "$issue_json")"
+            updated_body="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$body")"
+            printf -v report '%s\n' \
+              "DIRECT_CANARY_OPPORTUNITY_WATCH_STATUS=$terminal_status" \
+              "CONTROLLER_SHA=$GITHUB_SHA" \
+              "CANDIDATE_COUNT=${CANDIDATE_COUNT:-0}" \
+              "ELIGIBLE_COUNT=${ELIGIBLE_COUNT:-0}" \
+              'DATABASE_MUTATIONS=false' \
+              'PROVIDER_CALLS=false' \
+              'EXTERNAL_REPLY_WRITES=false' \
+              'AUTO_REAL_CANARY_AUTHORIZED=false'
+            gh issue comment "$WATCH_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$report" >/dev/null
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}" \
+              -f state=closed -f state_reason=completed -f body="$updated_body" >/dev/null
+          }
+
+          if [[ "$STATUS" = 'BLOCKED_LOG_PROPAGATION' ]]; then
+            echo 'DIRECT_CANARY_OPPORTUNITY_WATCH_RESULT=BLOCKED_LOG_PROPAGATION' >> "$GITHUB_STEP_SUMMARY"
+            echo 'WATCH_REMAINS_ACTIVE=true' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$STATUS" = 'NO_ELIGIBLE_TARGET' ]]; then
+            echo 'DIRECT_CANARY_OPPORTUNITY_WATCH_RESULT=NO_ELIGIBLE_TARGET' >> "$GITHUB_STEP_SUMMARY"
+            echo 'WATCH_REMAINS_ACTIVE=true' >> "$GITHUB_STEP_SUMMARY"
+            echo 'PROVIDER_CALLS=false' >> "$GITHUB_STEP_SUMMARY"
+            echo 'EXTERNAL_REPLY_WRITES=false' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$STATUS" = 'READY' ]]; then
+            test "$ELIGIBLE_COUNT" = '1'
+            [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]
+
+            CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+            test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+            CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
+            grep -Fxq 'MAIN_STABILITY=PASS' <<< "$CONTROL_BODY"
+            grep -Fxq "EVALUATED_MAIN_SHA=$GITHUB_SHA" <<< "$CONTROL_BODY"
+            grep -Fxq 'MERGE_RESERVATION=NONE' <<< "$CONTROL_BODY"
+
+            WATCH_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}")"
+            test "$(jq -r '.state' <<< "$WATCH_JSON")" = 'open'
+            test "$(jq -r '.user.login' <<< "$WATCH_JSON")" = "$GITHUB_REPOSITORY_OWNER"
+            CURRENT_TITLE="$(jq -r '.title' <<< "$WATCH_JSON")"
+            [[ "$CURRENT_TITLE" == 'PRODUCTION AUTHORIZATION — Instagram DIRECT canary opportunity watch READONLY AUTO'* ]]
+            CURRENT_BODY="$(jq -r '.body // ""' <<< "$WATCH_JSON")"
+            current_required=(
+              'AUTHORIZATION_STATE=ACTIVE'
+              'INSTAGRAM_ENGAGEMENT_DIRECT_CANARY_OPPORTUNITY_WATCH=AUTHORIZED'
+              "RUNTIME_SOURCE_SHA=$GITHUB_SHA"
+              "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
+              'WATCH_MODE=READ_ONLY'
+              'WATCH_INTERVAL_MINUTES=10'
+              'WATCH_MAX_LIFETIME_HOURS=12'
+              "WATCH_EXPIRES_AT=$WATCH_EXPIRES_AT"
+              'CANARY_CHANNEL=DIRECT'
+              'MAX_AGE_MINUTES=30'
+              'TEMPORARY_DIAGNOSTIC_JOB_AUTHORIZED=true'
+              'PERSISTENT_SERVICE_MUTATIONS_AUTHORIZED=false'
+              'DATABASE_MUTATIONS_AUTHORIZED=false'
+              'PROVIDER_CALLS_AUTHORIZED=false'
+              'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+              'OPPORTUNITY_ISSUE_CREATION_AUTHORIZED=true'
+              'AUTO_REAL_CANARY_AUTHORIZED=false'
+              'COMMENT_LIMITED_MUST_REMAIN_UNCHANGED=true'
+              'GENERAL_AUTONOMY_MUST_REMAIN_DISABLED=true'
+              'PERSISTENT_DIRECT_PROMOTION_AUTHORIZED=false'
+            )
+            for required in "${current_required[@]}"; do
+              grep -Fxq "$required" <<< "$CURRENT_BODY"
+            done
+            EXPIRES_EPOCH="$(date -u -d "$WATCH_EXPIRES_AT" +%s)"
+            NOW_EPOCH="$(date -u +%s)"
+            (( NOW_EPOCH < EXPIRES_EPOCH ))
+
+            TARGET_SHORT="${TARGET_SHA:0:12}"
+            TITLE="INSTAGRAM DIRECT CANARY OPPORTUNITY — ${GITHUB_SHA:0:8} — ${TARGET_SHORT}"
+            QUERY="repo:${GITHUB_REPOSITORY} is:issue is:open in:title \"${TITLE}\""
+            SEARCH_JSON="$(gh api --method GET search/issues -f q="$QUERY" -f per_page=10)"
+            DUPLICATES="$(jq --arg title "$TITLE" '[.items[] | select(.pull_request == null) | select(.title == $title)] | length' <<< "$SEARCH_JSON")"
+            test "$DUPLICATES" = '0'
+            printf -v opportunity_body '%s\n' \
+              'DIRECT_CANARY_OPPORTUNITY_STATUS=READY' \
+              "SOURCE_WATCH_AUTHORIZATION_ISSUE=$WATCH_ISSUE" \
+              "RUNTIME_SOURCE_SHA=$GITHUB_SHA" \
+              "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST" \
+              'CANARY_CHANNEL=DIRECT' \
+              "ELIGIBLE_TARGET_SHA256=$TARGET_SHA" \
+              "CANDIDATE_COUNT=$CANDIDATE_COUNT" \
+              'ELIGIBLE_COUNT=1' \
+              'DATABASE_MUTATIONS=false' \
+              'PROVIDER_CALLS=false' \
+              'EXTERNAL_REPLY_WRITES=false' \
+              'RAW_USER_DATA_LOGGED=false' \
+              'REAL_DIRECT_CANARY_AUTHORIZED=false' \
+              'PERSISTENT_DIRECT_PROMOTION_AUTHORIZED=false'
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$opportunity_body" >/dev/null
+            close_watch 'READY_FOUND'
+            echo 'DIRECT_CANARY_OPPORTUNITY_WATCH_RESULT=READY_FOUND' >> "$GITHUB_STEP_SUMMARY"
+            echo "ELIGIBLE_TARGET_SHA256=$TARGET_SHA" >> "$GITHUB_STEP_SUMMARY"
+            echo 'REAL_DIRECT_CANARY_AUTHORIZED=false' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          close_watch "BLOCKED_${STATUS}"
+          echo "Direct opportunity watch stopped fail-closed with status $STATUS" >&2
+          exit 1
+
+      - name: Consume active Direct watch on controller failure
+        if: failure() && steps.auth.outputs.active == 'true'
+        env:
+          WATCH_ISSUE: ${{ steps.auth.outputs.watch_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${WATCH_ISSUE:-}"
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}")"
+          if [[ "$(jq -r '.state' <<< "$ISSUE_JSON")" != 'open' ]]; then
+            exit 0
+          fi
+          BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON")"
+          UPDATED_BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
+          printf -v report '%s\n' \
+            'DIRECT_CANARY_OPPORTUNITY_WATCH_STATUS=PROBE_OR_CONTROLLER_FAILURE' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            'DATABASE_MUTATIONS=false' \
+            'PROVIDER_CALLS=false' \
+            'EXTERNAL_REPLY_WRITES=false' \
+            'AUTO_REAL_CANARY_AUTHORIZED=false'
+          gh issue comment "$WATCH_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$report" >/dev/null
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}" \
+            -f state=closed -f state_reason=completed -f body="$UPDATED_BODY" >/dev/null
