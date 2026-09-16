@@ -90,6 +90,13 @@ async function readBody(request: IncomingMessage): Promise<string> {
   return body;
 }
 
+function cellText(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+
 async function executeReconciliation(options: MockOptions = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'toca-registry-reconcile-'));
   const baselineRow = canonicalRow();
@@ -98,7 +105,7 @@ async function executeReconciliation(options: MockOptions = {}) {
   let batchUpdateCount = 0;
   let appendCount = 0;
 
-  const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+  async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     response.setHeader('Content-Type', 'application/json');
 
@@ -124,7 +131,7 @@ async function executeReconciliation(options: MockOptions = {}) {
           const header = headers[columnIndex(column)];
           if (!header) continue;
           const value = update.values?.[0]?.[0];
-          next[header] = value === undefined || value === null ? '' : String(value);
+          next[header] = cellText(value);
         }
         liveRow = next;
       }
@@ -140,6 +147,13 @@ async function executeReconciliation(options: MockOptions = {}) {
 
     response.statusCode = 404;
     response.end(JSON.stringify({ error: 'not found' }));
+  }
+
+  const server = createServer((request, response) => {
+    void handleRequest(request, response).catch((error: unknown) => {
+      response.statusCode = 500;
+      response.end(JSON.stringify({ error: error instanceof Error ? error.message : 'mock failure' }));
+    });
   });
   openServers.add(server);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
