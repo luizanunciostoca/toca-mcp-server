@@ -96,7 +96,7 @@ describe('Instagram grounded multi-intent knowledge', () => {
             source: 'TOCA_OS — FAQ-003',
             confidence: 1,
             factsVerified: true,
-            tier: 'FAQ',
+            tier: 'FAQ' as const,
           };
         }
         return null;
