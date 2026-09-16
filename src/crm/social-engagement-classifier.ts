@@ -11,6 +11,17 @@ interface CanonicalRoute {
   readonly addConversationIntents?: readonly SocialConversationIntent[];
 }
 
+const NON_AUTONOMOUS_CORE_INTENTS = new Set<SocialEngagementClassification['intent']>([
+  'COMMERCIAL_LEAD',
+  'COMPLAINT',
+  'REFUND',
+  'LEGAL',
+  'SAFETY_INCIDENT',
+  'PRESS',
+  'PUBLIC_FIGURE',
+  'HARASSMENT_OR_THREAT',
+]);
+
 const REFUND_FAIL_CLOSED_PATTERNS = ['dinheiro de volta', 'devolver meu dinheiro'];
 
 const TICKET_INFO_PATTERNS = ['quanto pago para entrar'];
@@ -26,7 +37,14 @@ const LOCATION_HOURS_PATTERNS = [
   'qual a programacao regular da toca',
 ];
 
-const GASTRONOMY_OPERATIONAL_PATTERNS = ['o que tem para comer', 'o que tem para beber'];
+const GASTRONOMY_OPERATIONAL_PATTERNS = [
+  'o que tem para comer',
+  'o que tem para beber',
+  'o que tem hoje para comer',
+  'o que tem hoje para beber',
+  'hoje tem o que para comer',
+  'hoje tem o que para beber',
+];
 
 const OFFICIAL_OPERATIONAL_PATTERNS = [
   'tem site',
@@ -90,6 +108,23 @@ const EVENT_INFO_PATTERNS = [
   'o sunset de sabado tem samba',
   'o sunset de sabado tem pagode',
   'qual a programacao de sabado',
+  'qual a programacao de hoje',
+  'qual e a programacao de hoje',
+  'programacao de hoje',
+  'programacao hoje',
+  'o que tem hoje na toca',
+  'hoje tem o que na toca',
+  'o que acontece hoje na toca',
+  'tem evento hoje',
+];
+
+const EXACT_TODAY_EVENT_INFO_PATTERNS = [
+  'o que tem hoje',
+  'hoje tem o que',
+  'o que acontece hoje',
+  'tem algo hoje',
+  'agenda de hoje',
+  'agenda hoje',
 ];
 
 export function classifySocialEngagement(text: string): SocialEngagementClassification {
@@ -107,6 +142,12 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
       conversationIntents: mergeConversationIntents(base.conversationIntents, ['SUPPORT']),
     };
   }
+
+  // Never let a low-risk canonical FAQ/event pattern downgrade a core route that
+  // policy intentionally keeps out of autonomous reply. UNKNOWN remains eligible
+  // for exact canonical rescue patterns below; all other non-autonomous intents
+  // retain the core classifier's stricter route.
+  if (NON_AUTONOMOUS_CORE_INTENTS.has(base.intent)) return base;
 
   const route = canonicalRoute(normalized);
   if (!route) return base;
@@ -136,9 +177,12 @@ function canonicalRoute(normalized: string): CanonicalRoute | undefined {
     };
   }
 
-  // FAQ-036 and other explicit experience-description questions must remain
-  // EVENT_INFO even when they contain temporal words such as "sábado".
-  if (matchesAny(normalized, EVENT_INFO_PATTERNS)) {
+  // Keep ambiguous generic "today" aliases exact so a phrase such as
+  // "o que tem hoje para comer?" cannot be widened into EVENT_INFO.
+  if (
+    matchesAny(normalized, EVENT_INFO_PATTERNS) ||
+    matchesExactAny(normalized, EXACT_TODAY_EVENT_INFO_PATTERNS)
+  ) {
     return {
       intent: 'EVENT_INFO',
       topic: 'EVENT_INFO',
@@ -193,6 +237,10 @@ function mergeConversationIntents(
 
 function matchesAny(value: string, patterns: readonly string[]): boolean {
   return patterns.some((pattern) => value === pattern || value.includes(pattern));
+}
+
+function matchesExactAny(value: string, patterns: readonly string[]): boolean {
+  return patterns.includes(value);
 }
 
 function normalizeCanonicalText(value: string): string {
