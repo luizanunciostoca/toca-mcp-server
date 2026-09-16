@@ -4,13 +4,7 @@ run-name: Marketing Autopilot — ${{ github.event_name }} — ${{ github.run_id
 
 on:
   schedule:
-    - cron: '56 8,10,14,15,19 * * *'
-      timezone: 'America/Bahia'
-    - cron: '7 9,11,15,16,20 * * *'
-      timezone: 'America/Bahia'
-    - cron: '17 9,11,15,16,20 * * *'
-      timezone: 'America/Bahia'
-    - cron: '27 9,11,15,16,20 * * *'
+    - cron: '2-59/5 * * * *'
       timezone: 'America/Bahia'
   workflow_dispatch:
   push:
