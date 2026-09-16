@@ -6,17 +6,18 @@ on:
       - wave/social-response-faq-expansion
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   format-artifact:
+    if: github.repository == 'luizanunciostoca/toca-mcp-server' && github.ref == 'refs/heads/wave/social-response-faq-expansion'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout exact candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.sha }}
-          persist-credentials: false
+          persist-credentials: true
 
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
@@ -42,6 +43,16 @@ jobs:
           src/instagram-engagement/ticket-information.ts
           test/instagram-engagement-policy.test.ts
 
+      - name: Verify formatted file boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t changed < <(git diff --name-only)
+          allowed='^(src/crm/social-engagement-classifier\.ts|src/instagram-engagement/knowledge-base-ingest\.ts|src/instagram-engagement/knowledge-snapshot-current\.ts|src/instagram-engagement/processor\.ts|src/instagram-engagement/ticket-information\.ts|test/instagram-engagement-policy\.test\.ts)$'
+          for path in "${changed[@]}"; do
+            [[ "$path" =~ $allowed ]] || { echo "UNEXPECTED_FORMAT_PATH=$path"; exit 1; }
+          done
+
       - name: Verify formatted files
         run: >-
           pnpm exec prettier --check
@@ -52,16 +63,22 @@ jobs:
           src/instagram-engagement/ticket-information.ts
           test/instagram-engagement-policy.test.ts
 
-      - name: Upload formatted files
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: faq-prettier-${{ github.sha }}
-          path: |
-            src/crm/social-engagement-classifier.ts
-            src/instagram-engagement/knowledge-base-ingest.ts
-            src/instagram-engagement/knowledge-snapshot-current.ts
-            src/instagram-engagement/processor.ts
-            src/instagram-engagement/ticket-information.ts
+      - name: Commit exact Prettier output when needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'PRETTIER_ALREADY_CANONICAL=true'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            src/crm/social-engagement-classifier.ts \
+            src/instagram-engagement/knowledge-base-ingest.ts \
+            src/instagram-engagement/knowledge-snapshot-current.ts \
+            src/instagram-engagement/processor.ts \
+            src/instagram-engagement/ticket-information.ts \
             test/instagram-engagement-policy.test.ts
-          if-no-files-found: error
-          retention-days: 1
+          git commit -m 'style(instagram): apply canonical FAQ formatting'
+          git push origin HEAD:wave/social-response-faq-expansion
