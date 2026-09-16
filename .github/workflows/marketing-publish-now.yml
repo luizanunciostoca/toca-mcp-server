@@ -24,6 +24,7 @@ env:
   WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
   DATABASE_SECRET_ID: toca-database-url
+  DATABASE_SECRET_VERSION: '1'
   TOKEN_SECRET_ID: toca-meta-oauth-token
   PUBLICATION_ASSET_BUCKET: toca-mcp-publication-assets
   PREPARE_JOB_NAME: toca-marketing-publish-now-prepare
@@ -34,7 +35,6 @@ env:
 
 jobs:
   publish-now:
-    if: vars.ALLOW_LEGACY_GCP_MARKETING_PUBLISH_NOW == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
