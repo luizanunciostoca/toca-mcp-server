@@ -1,47 +1,5 @@
 {
   "schemaVersion": 1,
-  "commandId": "publish-now-MKT-20260917-SUNSET-FEED-0900-20260915-1621-v1",
-  "action": "PUBLISH_NOW",
-  "issuedAt": "2026-09-15T16:21:53-03:00",
-  "timezone": "America/Bahia",
-  "operation": "SUNSET",
-  "channel": "INSTAGRAM",
-  "format": "FEED_IMAGE",
-  "contentItemId": "MKT-20260917-SUNSET-FEED-0900",
-  "assetId": "CR-MKT-20260903-SUNSET-FEED-0900-V1",
-  "driveFileId": "1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK",
-  "contentType": "image/jpeg",
-  "expectedAssetSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6",
-  "instagramAccountId": "17841402033495654",
-  "caption": "O fim de tarde começa no detalhe: um bom drink, a vista de Morro e o tempo desacelerando na Toca.\n\nSalve este convite e venha viver o Sunset.\n\nIngressos limitados! garanta o seu pelo link na bio.\n\n#TocaDoMorcego #MorroDeSaoPaulo #Bahia #Sunset #PorDoSol",
-  "correlationId": "CORR-MKT-20260917-SUNSET-FEED-0900-SHARENOW-20260915-V1",
-  "idempotencyKey": "MKT-20260917-SUNSET-FEED-0900-SHARENOW-20260915-V1",
-  "targetCodeSha": "97a4cd4bea92d997211a0151f3a4b4b062303f4f",
-  "creativeTruthBinding": {
-    "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
-    "standardId": "SUNSET_FEED_V1",
-    "creativeId": "CR-MKT-20260903-SUNSET-FEED-0900-V1",
-    "outputSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6",
-    "brandIntegrityStatus": "PASSED",
-    "venueFidelityStatus": "PASSED",
-    "qualityGateStatus": "PASSED",
-    "exactAssetBinding": true
-  },
-  "brandDeterminism": {
-    "status": "VERIFIED",
-    "standardRef": "TOCA_CREATIVE_TRUTH:SUNSET_FEED_V1",
-    "typographyRef": "EDITORIAL_TEXT_V1",
-    "assetSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6"
-  },
-  "rightsClearance": {
-    "status": "CLEARED",
-    "scope": "INSTAGRAM_ORGANIC_PUBLICATION",
-    "evidenceRef": "GOOGLE_DRIVE:1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK",
-    "authority": "USER_EXPLICIT_PUBLICATION_AUTHORIZATION_2026-09-15",
-    "clearedAt": "2026-09-15T16:21:53-03:00",
-    "assetSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6"
-  },
-  "approvalMode": "EXPLICIT_APPROVAL",
-  "approvalStatus": "APPROVED",
-  "publicationIntent": "SHARE_NOW"
+  "commandId": "gcp-publication-idle-20260916-v1",
+  "action": "NOOP"
 }

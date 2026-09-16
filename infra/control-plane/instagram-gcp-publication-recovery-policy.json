@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "status": "AUTHORIZED_RECOVERY",
+  "authorizedAt": "2026-09-16",
+  "authorization": {
+    "mode": "WORKFLOW_DISPATCH_EXACT_SHA",
+    "phrase": "AUTHORIZE_GCP_INSTAGRAM_RECOVERY_PREFLIGHT"
+  },
+  "projectId": "toca-mcp-production",
+  "region": "southamerica-east1",
+  "artifactRepository": "toca-mcp",
+  "publicationAssetBucket": "toca-mcp-publication-assets",
+  "infrastructureAdminServiceAccount": "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com",
+  "deployServiceAccount": "toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com",
+  "runtimeServiceAccount": "toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com",
+  "requiredApis": [
+    "artifactregistry.googleapis.com",
+    "run.googleapis.com",
+    "secretmanager.googleapis.com",
+    "iamcredentials.googleapis.com",
+    "sqladmin.googleapis.com",
+    "logging.googleapis.com"
+  ],
+  "runtimeSecrets": ["toca-meta-oauth-token", "toca-meta-app-secret", "toca-database-url"],
+  "bindings": {
+    "runtimeSecretRole": "roles/secretmanager.secretAccessor",
+    "deployerRuntimeRole": "roles/iam.serviceAccountUser",
+    "deployerProjectRoles": ["roles/run.developer", "roles/logging.viewer"],
+    "deployerArtifactRepositoryRole": "roles/artifactregistry.writer",
+    "runtimeProjectRoles": ["roles/cloudsql.client"],
+    "runtimeBucketRoles": ["roles/storage.objectCreator", "roles/storage.objectViewer"]
+  },
+  "preflight": {
+    "providerReadOnly": true,
+    "metaGraphApiVersion": "v24.0",
+    "requiredMetaScopes": [
+      "instagram_basic",
+      "instagram_content_publish",
+      "pages_show_list",
+      "pages_read_engagement"
+    ],
+    "instagramAccountId": "17841402033495654",
+    "pageId": "306103746115875",
+    "username": "tocadomorcego",
+    "driveFileId": "1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK",
+    "expectedAssetSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6"
+  },
+  "forbidden": {
+    "projectOwner": true,
+    "projectEditor": true,
+    "projectSecretAccessor": true,
+    "serviceAccountKeys": true,
+    "providerWriteDuringRecovery": true,
+    "secretValueLogging": true,
+    "publicBucketIam": true,
+    "schedulerMutation": true,
+    "cloudSqlMutation": true,
+    "billingMutation": true
+  }
+}
