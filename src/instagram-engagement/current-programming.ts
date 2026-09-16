@@ -32,7 +32,10 @@ export function resolveCurrentProgrammingKnowledge(
 ): InstagramEngagementKnowledgeMatch | null {
   if (expectedIntent !== 'EVENT_INFO') return null;
   const normalized = normalize(text);
-  if (!TODAY_PROGRAMMING_PATTERNS.some((pattern) => normalized.includes(pattern))) return null;
+  if (
+    !TODAY_PROGRAMMING_PATTERNS.some((pattern) => normalized.includes(pattern))
+  )
+    return null;
 
   const now = options.now ?? new Date();
   const timeZone = options.timeZone ?? 'America/Bahia';
@@ -91,10 +94,16 @@ function localClockInTimeZone(now: Date, timeZone: string): LocalClock {
     hourCycle: 'h23',
     timeZone,
   }).formatToParts(now);
-  const weekdayValue = parts.find((part) => part.type === 'weekday')?.value.toLowerCase().slice(0, 3);
+  const weekdayValue = parts
+    .find((part) => part.type === 'weekday')
+    ?.value.toLowerCase()
+    .slice(0, 3);
   const hourValue = Number(parts.find((part) => part.type === 'hour')?.value);
 
-  if (!weekdayValue || !['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].includes(weekdayValue)) {
+  if (
+    !weekdayValue ||
+    !['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].includes(weekdayValue)
+  ) {
     throw new Error('INSTAGRAM_ENGAGEMENT_PROGRAMMING_WEEKDAY_INVALID');
   }
   if (!Number.isInteger(hourValue) || hourValue < 0 || hourValue > 23) {
