@@ -1,0 +1,291 @@
+name: Instagram Engagement FAQ Knowledge Recovery
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-faq-knowledge-recovery
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
+  CONTROL_PLANE_ISSUE: '640'
+  EVIDENCE_LEDGER_ISSUE: '641'
+  AUTHORIZATION_ISSUE: ${{ github.event.issue.number }}
+  RECOVERY_RESERVATION: FAQ_KNOWLEDGE_RECOVERY_${{ github.run_id }}_${{ github.run_attempt }}
+
+jobs:
+  recover-knowledge:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram FAQ knowledge RECOVERY AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout exact recovery controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate authorization and acquire shared engagement reservation
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
+          BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON")"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
+          BACKUP_KEY="$(grep '^BACKUP_KEY=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
+          EXPECTED_ACTIVE_REVISION="$(grep '^EXPECTED_ACTIVE_REVISION=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$BACKUP_KEY" =~ ^[0-9]+_[0-9]+$ ]]
+          [[ "$EXPECTED_ACTIVE_REVISION" =~ ^toca-managed-instagram-daemon-[a-z0-9-]+$ ]]
+
+          required_lines=(
+            "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
+            "AUTHORIZATION_STATE=ACTIVE"
+            "INSTAGRAM_FAQ_EXPANSION_KNOWLEDGE_RECOVERY=AUTHORIZED"
+            "RUNTIME_SOURCE_SHA=$GITHUB_SHA"
+            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
+            "BACKUP_KEY=$BACKUP_KEY"
+            "EXPECTED_ACTIVE_REVISION=$EXPECTED_ACTIVE_REVISION"
+            "DATABASE_MUTATIONS_AUTHORIZED=true"
+            "SERVICE_DEPLOY_AUTHORIZED=false"
+            "SCHEDULER_MUTATION_AUTHORIZED=false"
+            "PROVIDER_WRITES_AUTHORIZED=false"
+            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
+            "GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false"
+          )
+          for required in "${required_lines[@]}"; do
+            grep -Fxq "$required" <<< "$BODY" || {
+              echo "Missing exact authorization field: $required" >&2
+              exit 1
+            }
+          done
+
+          CONTROL_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${CONTROL_PLANE_ISSUE}")"
+          CONTROL_BODY="$(jq -r '.body // ""' <<< "$CONTROL_JSON")"
+          grep -Fxq "EVALUATED_MAIN_SHA=$GITHUB_SHA" <<< "$CONTROL_BODY"
+          grep -Fxq 'MAIN_STABILITY=PASS' <<< "$CONTROL_BODY"
+          grep -Fxq 'ENGAGEMENT_AUTONOMY_STAGE=LIMITED' <<< "$CONTROL_BODY"
+          grep -Fxq 'ENGAGEMENT_AUTO_REPLY_CHANNELS=DIRECT,COMMENT' <<< "$CONTROL_BODY"
+          grep -Fxq 'GENERAL_AUTONOMY=false' <<< "$CONTROL_BODY"
+          grep -Fxq 'MERGE_RESERVATION=NONE' <<< "$CONTROL_BODY"
+          NEW_CONTROL_BODY="$(sed "s/^MERGE_RESERVATION=NONE$/MERGE_RESERVATION=$RECOVERY_RESERVATION/" <<< "$CONTROL_BODY")"
+          grep -Fxq "MERGE_RESERVATION=$RECOVERY_RESERVATION" <<< "$NEW_CONTROL_BODY"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${CONTROL_PLANE_ISSUE}" -f body="$NEW_CONTROL_BODY" >/dev/null
+
+          echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "backup_key=$BACKUP_KEY" >> "$GITHUB_OUTPUT"
+          echo "expected_active_revision=$EXPECTED_ACTIVE_REVISION" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate governed deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify immutable image and unchanged LIMITED runtime
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
+          EXPECTED_ACTIVE_REVISION: ${{ steps.auth.outputs.expected_active_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
+          SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          ACTIVE_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end')"
+          test "$ACTIVE_REVISION" = "$EXPECTED_ACTIVE_REVISION"
+          REVISION_JSON="$(gcloud run revisions describe "$ACTIVE_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$REVISION_JSON" | jq -e '
+            .spec.containers[0] as $c |
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last) == "true") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] | last) == "true") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_BATCH_SIZE") | .value] | last) == "1") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS") | .value] | last) == "DIRECT,COMMENT") and
+            (([($c.env // [])[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last // "false") == "false")
+          ' >/dev/null
+
+      - name: Inspect preserved failed-refresh backup without mutation
+        id: inspect
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          BACKUP_KEY: ${{ steps.auth.outputs.backup_key }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-faq-recovery-inspect-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "INSTAGRAM_FAQ_EXPANSION_STATE_ACTION=INSPECT,INSTAGRAM_FAQ_EXPANSION_BACKUP_KEY=$BACKUP_KEY" \
+            --command node --args dist/src/ops/instagram-faq-expansion-knowledge-state.js \
+            --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet >/dev/null
+          sleep 3
+          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format=json || true)"
+          LINE="$(printf '%s' "$LOGS" | jq -r '.[] | .textPayload // empty' | grep '"validation":"instagram-faq-expansion-knowledge-state"' | grep '"operation":"INSPECT"' | tail -1 || true)"
+          test -n "$LINE"
+          jq -e '.status == "PASS" and .backupPresent == true' <<< "$LINE" >/dev/null
+          echo "backup_faq=$(jq -r '.backupFaqCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
+          echo "backup_documents=$(jq -r '.backupDocumentCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
+          echo "backup_chunks=$(jq -r '.backupChunkCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
+          echo "active_faq_before=$(jq -r '.activeFaqCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
+          echo "active_documents_before=$(jq -r '.activeDocumentCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
+          echo "active_chunks_before=$(jq -r '.activeChunkCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
+          cleanup
+          trap - EXIT
+
+      - name: Restore preserved knowledge snapshot transactionally
+        id: restore
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          BACKUP_KEY: ${{ steps.auth.outputs.backup_key }}
+          EXPECTED_FAQ: ${{ steps.inspect.outputs.backup_faq }}
+          EXPECTED_DOCUMENTS: ${{ steps.inspect.outputs.backup_documents }}
+          EXPECTED_CHUNKS: ${{ steps.inspect.outputs.backup_chunks }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-faq-recovery-restore-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "INSTAGRAM_FAQ_EXPANSION_STATE_ACTION=RESTORE,INSTAGRAM_FAQ_EXPANSION_BACKUP_KEY=$BACKUP_KEY" \
+            --command node --args dist/src/ops/instagram-faq-expansion-knowledge-state.js \
+            --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet >/dev/null
+          sleep 3
+          LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format=json || true)"
+          LINE="$(printf '%s' "$LOGS" | jq -r '.[] | .textPayload // empty' | grep '"validation":"instagram-faq-expansion-knowledge-state"' | grep '"operation":"RESTORE"' | tail -1 || true)"
+          test -n "$LINE"
+          jq -e --argjson faq "$EXPECTED_FAQ" --argjson documents "$EXPECTED_DOCUMENTS" --argjson chunks "$EXPECTED_CHUNKS" '
+            .status == "PASS" and
+            .faqCount == $faq and
+            .documentCount == $documents and
+            .chunkCount == $chunks and
+            .providerWriteAttempted == false
+          ' <<< "$LINE" >/dev/null
+          echo "restored_faq=$(jq -r '.faqCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
+          echo "restored_documents=$(jq -r '.documentCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
+          echo "restored_chunks=$(jq -r '.chunkCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
+          cleanup
+          trap - EXIT
+
+      - name: Verify runtime traffic remained unchanged after database recovery
+        env:
+          EXPECTED_ACTIVE_REVISION: ${{ steps.auth.outputs.expected_active_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          ACTIVE_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end')"
+          test "$ACTIVE_REVISION" = "$EXPECTED_ACTIVE_REVISION"
+          echo 'SERVICE_DEPLOY=false'
+          echo 'SCHEDULER_MUTATION=false'
+          echo 'PROVIDER_WRITES=false'
+          echo 'EXTERNAL_REPLY_WRITES=false'
+          echo 'GENERAL_AUTONOMY_PROMOTED=false'
+
+      - name: Publish recovery PASS evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BACKUP_KEY: ${{ steps.auth.outputs.backup_key }}
+          EXPECTED_ACTIVE_REVISION: ${{ steps.auth.outputs.expected_active_revision }}
+          RESTORED_FAQ: ${{ steps.restore.outputs.restored_faq }}
+          RESTORED_DOCUMENTS: ${{ steps.restore.outputs.restored_documents }}
+          RESTORED_CHUNKS: ${{ steps.restore.outputs.restored_chunks }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf -v COMMENT '%s\n' \
+            'FAQ_EXPANSION_KNOWLEDGE_RECOVERY_STATUS=PASS' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            "BACKUP_KEY=$BACKUP_KEY" \
+            "RESTORED_FAQ_COUNT=$RESTORED_FAQ" \
+            "RESTORED_DOCUMENT_COUNT=$RESTORED_DOCUMENTS" \
+            "RESTORED_CHUNK_COUNT=$RESTORED_CHUNKS" \
+            "ACTIVE_REVISION_UNCHANGED=$EXPECTED_ACTIVE_REVISION" \
+            'SERVICE_DEPLOY=false' \
+            'SCHEDULER_MUTATION=false' \
+            'PROVIDER_WRITES=false' \
+            'EXTERNAL_REPLY_WRITES=false' \
+            'GENERAL_AUTONOMY_PROMOTED=false'
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}/comments" -f body="$COMMENT" >/dev/null
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_LEDGER_ISSUE}/comments" -f body="$COMMENT" >/dev/null
+
+      - name: Publish sanitized recovery failure evidence
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf -v COMMENT '%s\n' \
+            'FAQ_EXPANSION_KNOWLEDGE_RECOVERY_STATUS=FAIL' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            'SERVICE_DEPLOY=false' \
+            'SCHEDULER_MUTATION=false' \
+            'PROVIDER_WRITES=false' \
+            'EXTERNAL_REPLY_WRITES=false' \
+            'GENERAL_AUTONOMY_PROMOTED=false'
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}/comments" -f body="$COMMENT" >/dev/null || true
+
+      - name: Release reservation and consume single-use authorization
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set +e
+          CONTROL_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${CONTROL_PLANE_ISSUE}" 2>/dev/null)"
+          CONTROL_BODY="$(jq -r '.body // ""' <<< "$CONTROL_JSON" 2>/dev/null)"
+          if grep -Fxq "MERGE_RESERVATION=$RECOVERY_RESERVATION" <<< "$CONTROL_BODY"; then
+            NEW_CONTROL_BODY="$(sed "s/^MERGE_RESERVATION=$RECOVERY_RESERVATION$/MERGE_RESERVATION=NONE/" <<< "$CONTROL_BODY")"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${CONTROL_PLANE_ISSUE}" -f body="$NEW_CONTROL_BODY" >/dev/null 2>&1
+          fi
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" 2>/dev/null)"
+          ISSUE_BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON" 2>/dev/null)"
+          if grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$ISSUE_BODY"; then
+            CONSUMED_BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$ISSUE_BODY")"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" -f body="$CONSUMED_BODY" -f state=closed >/dev/null 2>&1
+          fi
+          exit 0
