@@ -29,6 +29,8 @@ import {
   recordConversationReply,
   recordConversationReplyFailure,
 } from './conversation-reply-state.js';
+import type { InstagramSalesFunnelCoordinator } from './sales-funnel-coordinator.js';
+import type { InstagramSalesJourneyStage } from './sales-funnel.js';
 import type { ClaimedInstagramEngagementEvent } from './typed-outbox.js';
 
 type InboundActionStatus = Extract<
@@ -40,6 +42,7 @@ export interface InstagramEngagementProcessorOptions {
   readonly pool: pg.Pool;
   readonly knowledge: InstagramEngagementKnowledgeSource;
   readonly leadEngine: SocialEngagementLeadEngine;
+  readonly salesFunnel?: InstagramSalesFunnelCoordinator;
   readonly provider: InstagramEngagementProvider;
   readonly pageId: string;
   readonly instagramUserId: string;
@@ -163,6 +166,48 @@ export class InstagramEngagementProcessor {
       now,
     });
 
+    let salesFunnelEvidence = 'instagram:sales-funnel:not-applicable';
+    if (
+      payload.channel === 'DIRECT' &&
+      this.options.salesFunnel &&
+      leadResult.contact &&
+      leadResult.lead
+    ) {
+      try {
+        await this.options.salesFunnel.coordinate({
+          tenantId: claimed.tenantId,
+          workspaceId: claimed.workspaceId,
+          organizationId: claimed.organizationId,
+          leadId: leadResult.lead.leadId,
+          contactId: leadResult.contact.contactId,
+          lastInboundAt: webhookEvent.occurredAt ?? now,
+          now,
+          product: classification.productEvent,
+          journeyStage: journeyStageForLead(classification.commercialIntent, leadResult.humanRequired),
+          commercialIntent: classification.commercialIntent,
+          factsVerified:
+            knowledge?.factsVerified === true ||
+            (classification.intent === 'COMMERCIAL_LEAD' && classification.topic === 'TICKETS'),
+          humanRequired: leadResult.humanRequired,
+          executionId: claimed.executionId,
+          correlationId: claimed.correlationId,
+          evidence: [
+            'meta:webhook:persisted',
+            'instagram:engagement:commercial-lead',
+            `instagram:engagement:event:${payload.eventId}`,
+          ],
+        });
+        salesFunnelEvidence = 'instagram:sales-funnel:scheduled';
+      } catch (error) {
+        const code = safeErrorCode(error);
+        salesFunnelEvidence = `instagram:sales-funnel:schedule-failed:${code}`;
+        console.error(
+          'Instagram sales funnel scheduling failed',
+          JSON.stringify({ eventId: payload.eventId, errorCode: code }),
+        );
+      }
+    }
+
     const effectiveDecision = conversationDecision({
       decision: leadResult.policyDecision,
       confidence: classification.confidence,
@@ -250,6 +295,7 @@ export class InstagramEngagementProcessor {
         `instagram:engagement:thread:${context.threadId.slice(0, 12)}`,
         `instagram:engagement:confidence:${classification.confidence}`,
         `instagram:engagement:priority:${classification.priority}`,
+        salesFunnelEvidence,
       ],
       now: this.now().toISOString(),
     });
@@ -306,6 +352,16 @@ export class InstagramEngagementProcessor {
       });
     }
   }
+}
+
+function journeyStageForLead(
+  commercialIntent: 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH',
+  humanRequired: boolean,
+): InstagramSalesJourneyStage {
+  if (humanRequired) return 'HUMAN_HANDOFF';
+  if (commercialIntent === 'HIGH' || commercialIntent === 'MEDIUM') return 'PURCHASE_INTENT';
+  if (commercialIntent === 'LOW') return 'CONSIDERATION';
+  return 'DISCOVERY';
 }
 
 function conversationDecision(input: {

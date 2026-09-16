@@ -5,6 +5,7 @@ import { EnvSecretResolver } from '../core/secrets.js';
 import { SocialEngagementLeadEngine } from '../crm/social-engagement-lead-engine.js';
 import { PostgresTransactionalOutbox } from '../events/postgres-transactional-outbox.js';
 import { PostgresCrmCoreStore } from '../persistence/postgres-crm-core-store.js';
+import { PostgresCrmSalesStore } from '../persistence/postgres-crm-sales-store.js';
 import { PostgresEventRecordStore } from '../persistence/postgres-event-record-store.js';
 import { GoogleSheetsRestClient } from '../providers/google-sheets/client.js';
 import type { InstagramEngagementProvider } from '../providers/instagram/instagram-engagement-contracts.js';
@@ -19,9 +20,13 @@ import {
   GoogleSheetsInstagramEngagementKnowledgeSource,
   type InstagramEngagementKnowledgeSource,
 } from './knowledge.js';
+import { InstagramPostSaleReconciler } from './post-sale-reconciler.js';
 import { PostgresInstagramEngagementKnowledgeBaseSource } from './postgres-knowledge-base.js';
 import { PostgresInstagramEngagementKnowledgeSource } from './postgres-knowledge.js';
+import { PostgresInstagramSalesFunnelStore } from './postgres-sales-funnel-store.js';
 import { InstagramEngagementProcessor } from './processor.js';
+import { InstagramSalesFunnelCoordinator } from './sales-funnel-coordinator.js';
+import { InstagramSalesFunnelDispatcher } from './sales-funnel-dispatcher.js';
 import { TieredInstagramEngagementKnowledgeSource } from './tiered-knowledge.js';
 import {
   claimInstagramEngagementEvents,
@@ -88,6 +93,7 @@ export function createInstagramEngagementBatchRuntime(
   );
 
   const crm = new PostgresCrmCoreStore(options.pool, { outbox });
+  const sales = new PostgresCrmSalesStore(options.pool, { outbox });
   const events = new PostgresEventRecordStore(options.pool, { outbox });
   const leadEngine = new SocialEngagementLeadEngine({
     crm,
@@ -97,14 +103,46 @@ export function createInstagramEngagementBatchRuntime(
       theParty: env.INSTAGRAM_ENGAGEMENT_THE_PARTY_SERIES_KEY?.trim() || 'the-party',
     },
   });
+  const salesFunnelEnabled = isTrue(env.INSTAGRAM_SALES_FUNNEL_ENABLED);
+  const salesFunnel = salesFunnelEnabled
+    ? new InstagramSalesFunnelCoordinator({ sales })
+    : undefined;
+  const postSaleReconciler = salesFunnel
+    ? new InstagramPostSaleReconciler({
+        pool: options.pool,
+        coordinator: salesFunnel,
+        saturdaySambaPagodeVerified: isTrue(
+          env.INSTAGRAM_SALES_FUNNEL_SATURDAY_SAMBA_PAGODE_VERIFIED,
+        ),
+      })
+    : undefined;
 
   const provider: InstagramEngagementProvider = config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED
     ? createLiveProvider(config, env)
     : disabledProvider();
+  const salesFunnelDispatcher = salesFunnelEnabled
+    ? new InstagramSalesFunnelDispatcher({
+        store: new PostgresInstagramSalesFunnelStore(options.pool),
+        sales,
+        provider,
+        pageId,
+        instagramUserId,
+        writesEnabled:
+          config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED &&
+          isTrue(env.INSTAGRAM_SALES_FUNNEL_WRITES_ENABLED),
+      })
+    : undefined;
+  const salesFunnelBatchSize = boundedInteger(
+    env.INSTAGRAM_SALES_FUNNEL_BATCH_SIZE,
+    1,
+    1,
+    5,
+  );
   const processor = new InstagramEngagementProcessor({
     pool: options.pool,
     knowledge: knowledgeRuntime.source,
     leadEngine,
+    ...(salesFunnel ? { salesFunnel } : {}),
     provider,
     pageId,
     instagramUserId,
@@ -160,6 +198,35 @@ export function createInstagramEngagementBatchRuntime(
           );
         }
       }
+
+      if (postSaleReconciler) {
+        try {
+          const reconciled = await postSaleReconciler.reconcile(now, salesFunnelBatchSize);
+          if (reconciled > 0) {
+            console.log('Instagram post-sale reconciliation', JSON.stringify({ reconciled }));
+          }
+        } catch (error) {
+          console.error(
+            'Instagram post-sale reconciliation failed',
+            JSON.stringify({ errorCode: safeErrorCode(error) }),
+          );
+        }
+      }
+
+      if (salesFunnelDispatcher) {
+        try {
+          const dispatch = await salesFunnelDispatcher.runDue(now, salesFunnelBatchSize);
+          if (dispatch.claimed > 0) {
+            console.log('Instagram sales funnel dispatch', JSON.stringify(dispatch));
+          }
+        } catch (error) {
+          console.error(
+            'Instagram sales funnel dispatcher failed',
+            JSON.stringify({ errorCode: safeErrorCode(error) }),
+          );
+        }
+      }
+
       return { claimed: claimed.length, succeeded, failed };
     },
   };
