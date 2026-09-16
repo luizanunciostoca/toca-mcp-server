@@ -46,3 +46,11 @@ if text.count(old_expect) != 1:
 text = text.replace(old_expect, new_expect, 1)
 
 test_path.write_text(text, encoding='utf-8')
+
+boundary_path = Path('test/github-native-instagram-publication-boundary.test.ts')
+boundary = boundary_path.read_text(encoding='utf-8')
+old_boundary = "allowedContentItemIds: ['MKT-20260917-SUNSET-FEED-0900'],"
+new_boundary = "allowedContentItemIds: ['MKT-20260916-SUNSET-FEED-1500'],"
+if boundary.count(old_boundary) != 1:
+    raise SystemExit('boundary canary marker mismatch')
+boundary_path.write_text(boundary.replace(old_boundary, new_boundary, 1), encoding='utf-8')
