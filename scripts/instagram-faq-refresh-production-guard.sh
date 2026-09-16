@@ -163,21 +163,30 @@ grep -Fxq "MERGE_RESERVATION=$ENGAGEMENT_RESERVATION" <<< "$CONTROL_BODY"
 conflicts=0
 for status in in_progress queued; do
   RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?status=${status}&per_page=100")"
-  count="$(jq --argjson self "$GITHUB_RUN_ID" '[
-    .workflow_runs[]
-    | select(.id != $self)
-    | select(.event == "issues")
-    | select(.head_branch == "main")
-    | select(
-        .path == ".github/workflows/instagram-engagement-limited-activation.yml" or
-        .path == ".github/workflows/instagram-engagement-limited-runtime-refresh.yml" or
-        .path == ".github/workflows/instagram-engagement-comment-limited-promotion.yml" or
-        .path == ".github/workflows/instagram-engagement-tiered-knowledge-shadow.yml" or
-        .path == ".github/workflows/instagram-engagement-shadow-production.yml" or
-        .path == ".github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml" or
-        .path == ".github/workflows/instagram-engagement-faq-knowledge-recovery.yml"
-      )
-  ] | length' <<< "$RUNS")"
+  # An issue.opened event creates run records for every listening workflow before each
+  # workflow's job-level title predicate is evaluated. Count only runs whose issue title
+  # can actually authorize the mutation workflow represented by that path.
+  count="$(jq --argjson self "$GITHUB_RUN_ID" '
+    def authorized_issue_mutation:
+      ((.path == ".github/workflows/instagram-engagement-limited-activation.yml" and
+        ((.display_title // "") | startswith("PRODUCTION AUTHORIZATION — Instagram engagement LIMITED activation AUTO"))) or
+       (.path == ".github/workflows/instagram-engagement-limited-runtime-refresh.yml" and
+        ((.display_title // "") | startswith("PRODUCTION AUTHORIZATION — Instagram engagement LIMITED runtime refresh AUTO"))) or
+       (.path == ".github/workflows/instagram-engagement-comment-limited-promotion.yml" and
+        ((.display_title // "") | startswith("PRODUCTION AUTHORIZATION — Instagram engagement COMMENT LIMITED promotion AUTO"))) or
+       (.path == ".github/workflows/instagram-engagement-tiered-knowledge-shadow.yml" and
+        ((.display_title // "") | startswith("PRODUCTION AUTHORIZATION — Instagram tiered knowledge shadow AUTO"))) or
+       (.path == ".github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml" and
+        ((.display_title // "") | startswith("PRODUCTION AUTHORIZATION — Instagram FAQ expansion LIMITED refresh AUTO"))) or
+       (.path == ".github/workflows/instagram-engagement-faq-knowledge-recovery.yml" and
+        ((.display_title // "") | startswith("PRODUCTION AUTHORIZATION — Instagram FAQ knowledge RECOVERY AUTO"))));
+    [
+      .workflow_runs[]
+      | select(.id != $self)
+      | select(.event == "issues")
+      | select(.head_branch == "main")
+      | select(authorized_issue_mutation)
+    ] | length' <<< "$RUNS")"
   conflicts=$((conflicts + count))
 done
 if (( conflicts > 0 )); then
