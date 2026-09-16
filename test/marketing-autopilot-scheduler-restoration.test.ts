@@ -25,7 +25,7 @@ const policy = JSON.parse(
   };
 };
 
-const productionCanaryId = 'MKT-20260916-SUNSET-FEED-1500';
+const productionCanaryId = 'MKT-20260916-SUNSET-STORY-1600';
 const canaryId = 'MKT-20260916-SUNSET-FEED-0900';
 const storyId = 'MKT-20260916-SUNSET-STORY-1100';
 const feedSha = '1c6c961dff3ed10ce0edfa13e2096c2849ade51ff99ade6a6fe14688cd2d1226';
@@ -176,9 +176,9 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     expect(workflow).not.toContain('REQUESTED_MODE');
     expect(policy.dailyRollout).toMatchObject({
       canaryContentItemId: productionCanaryId,
-      canaryScheduledAt: '2026-09-16T15:00:00-03:00',
-      rollForwardFromContentItemId: canaryId,
-      rollForwardReason: 'STALE_WINDOW_NO_SCHEDULE_RUN',
+      canaryScheduledAt: '2026-09-16T16:00:00-03:00',
+      rollForwardFromContentItemId: 'MKT-20260916-SUNSET-FEED-1500',
+      rollForwardReason: 'PREVIOUS_CANARY_WINDOW_EXPIRED_NO_PROVIDER_WRITE',
       promoteToLimitedAfterVerifiedCanary: true,
       generalAutonomy: false,
       limited: { generalAutonomy: false },
