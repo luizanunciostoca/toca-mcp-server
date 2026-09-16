@@ -19,6 +19,8 @@ export const INSTAGRAM_ENGAGEMENT_KB_PREFLIGHT_SOURCE_IDS = [
   'SRC-OPS-001',
   'SRC-MENU-002',
   'SRC-LOC-001',
+  'SRC-BRAND-001',
+  'SRC-PROD-001',
 ] as const;
 
 interface SheetsReader {
