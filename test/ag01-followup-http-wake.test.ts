@@ -43,6 +43,8 @@ function runtimeWithFollowupTick(onTick: (limit: number) => void): Ag01Productio
     } as unknown as Ag01ProductionRuntime['followups'],
     execute: () => Promise.reject(new Error('TEST_EXECUTE_NOT_EXPECTED')),
     resume: () => Promise.reject(new Error('TEST_RESUME_NOT_EXPECTED')),
+    answerGroundedKnowledge: () =>
+      Promise.reject(new Error('TEST_GROUNDED_KNOWLEDGE_NOT_EXPECTED')),
     readiness: () => Promise.resolve(),
     close: () => Promise.resolve(),
   };

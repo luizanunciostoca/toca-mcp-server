@@ -9,15 +9,23 @@ import { bindApprovalStoreToScope } from '../governance/approval-scope.js';
 import { PostgresCrmSalesStore } from '../persistence/postgres-crm-sales-store.js';
 import { createTocaRuntimeComposition } from '../server.js';
 import { PostgresDeadLetterSink } from '../worker/postgres-dead-letter.js';
+import type { OrchestratorRequest, OrchestratorResponse } from './contracts.js';
 import { ExistingCoreCapabilityGateway } from './core-gateway.js';
 import { DurableFollowupCoordinator } from './durable-followup.js';
 import { GoogleOAuthRefreshSecretResolver } from './google-oauth-secret-resolver.js';
-import { PostgresConversationStore } from './postgres-conversation-store.js';
-import type { OrchestratorRequest, OrchestratorResponse } from './contracts.js';
+import {
+  DefaultAg01GroundedKnowledgeService,
+  GcpMetadataDriveReadonlyTokenProvider,
+  GoogleDriveCanonicalContentClient,
+  VertexGroundedKnowledgeAnswerAdapter,
+  type Ag01GroundedKnowledgeAnswer,
+  type Ag01GroundedKnowledgeIntent,
+} from './grounded-knowledge.js';
 import {
   OpenAiResponsesDecisionAdapter,
   type Ag01DecisionModelAdapter,
 } from './openai-responses-adapter.js';
+import { PostgresConversationStore } from './postgres-conversation-store.js';
 import {
   Ag01DecisionContext,
   ModelBackedIntentRouteResolver,
@@ -27,15 +35,15 @@ import type { Ag01ProductionConfig } from './production-config.js';
 import { assertAg01PersistenceReady } from './readiness.js';
 import { TocaOrchestratorRuntime } from './runtime.js';
 import { deterministicId } from './safety.js';
+import type { Ag01StructuredDecision } from './structured-decision.js';
 import {
   GoogleSheetsTocaOsRegistryClient,
   TocaOsCanonicalArtifactResolver,
 } from './toca-os-registry.js';
-import type { Ag01StructuredDecision } from './structured-decision.js';
 import { VertexGeminiDecisionAdapter } from './vertex-gemini-decision-adapter.js';
 
 export const AG01_SERVICE_NAME = 'toca-ag01-orchestrator';
-export const AG01_SERVICE_VERSION = '0.2.0';
+export const AG01_SERVICE_VERSION = '0.3.0';
 
 export interface Ag01RuntimeRequest {
   readonly conversationId?: string;
@@ -45,6 +53,13 @@ export interface Ag01RuntimeRequest {
   readonly correlationId?: string;
   readonly causationId?: string | null;
   readonly routeHint?: OrchestratorRequest['routeHint'];
+}
+
+export interface Ag01GroundedKnowledgeRequest {
+  readonly idempotencyKey: string;
+  readonly message: string;
+  readonly expectedIntent: Ag01GroundedKnowledgeIntent;
+  readonly correlationId?: string;
 }
 
 export interface Ag01RuntimeResult {
@@ -62,6 +77,9 @@ export interface Ag01ProductionRuntime {
   readonly followups: DurableFollowupCoordinator;
   execute(request: Ag01RuntimeRequest): Promise<Ag01RuntimeResult>;
   resume(conversationId: string): Promise<Ag01RuntimeResult>;
+  answerGroundedKnowledge(
+    request: Ag01GroundedKnowledgeRequest,
+  ): Promise<Ag01GroundedKnowledgeAnswer | null>;
   readiness(): Promise<void>;
   close(): Promise<void>;
 }
@@ -146,6 +164,28 @@ export function createAg01ProductionRuntime(
           maxRetries: config.openAiMaxRetries,
           maxOutputTokens: config.openAiMaxOutputTokens,
         });
+  const groundedKnowledge =
+    config.modelProvider === 'vertex'
+      ? new DefaultAg01GroundedKnowledgeService(
+          tocaOs,
+          new GoogleDriveCanonicalContentClient({
+            registry: tocaOs,
+            tokens: new GcpMetadataDriveReadonlyTokenProvider({
+              timeoutMs: config.registryTimeoutMs,
+            }),
+            timeoutMs: config.registryTimeoutMs,
+          }),
+          new VertexGroundedKnowledgeAnswerAdapter({
+            projectId: config.vertexProjectId,
+            location: config.vertexLocation,
+            model: config.vertexModel,
+            timeoutMs: config.openAiTimeoutMs,
+            maxRetries: Math.min(config.openAiMaxRetries, 1),
+            maxOutputTokens: config.openAiMaxOutputTokens,
+            costObserver: runtimeCostObserver,
+          }),
+        )
+      : null;
   const runtimeCapabilityIds = Object.freeze(
     coreComposition.registry
       .list()
@@ -237,6 +277,38 @@ export function createAg01ProductionRuntime(
       model: null,
     }));
 
+  const answerGroundedKnowledge = (
+    request: Ag01GroundedKnowledgeRequest,
+  ): Promise<Ag01GroundedKnowledgeAnswer | null> => {
+    if (!groundedKnowledge) return Promise.resolve(null);
+    const correlationId =
+      request.correlationId?.trim() ||
+      deterministicId('ag01groundcorr', identity.principal.tenantId, request.idempotencyKey);
+    const startedAt = new Date().toISOString();
+    const executionId = deterministicId(
+      'ag01groundcost',
+      identity.principal.tenantId,
+      request.idempotencyKey,
+      correlationId,
+      startedAt,
+    );
+    return runtimeCostContext.run(
+      {
+        executionId,
+        correlationId,
+        tenantId: config.tenantId,
+        workspaceId: config.workspaceId,
+        organizationId: config.organizationId,
+        startedAt,
+      },
+      () =>
+        groundedKnowledge.answer({
+          message: request.message,
+          expectedIntent: request.expectedIntent,
+        }),
+    );
+  };
+
   return {
     serviceName: AG01_SERVICE_NAME,
     serviceVersion: AG01_SERVICE_VERSION,
@@ -245,6 +317,7 @@ export function createAg01ProductionRuntime(
     followups,
     execute,
     resume,
+    answerGroundedKnowledge,
     readiness: async () => {
       await Promise.all([
         pool.query('select 1'),

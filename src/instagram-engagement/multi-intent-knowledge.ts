@@ -8,16 +8,19 @@ import type {
 
 export interface MultiIntentInstagramEngagementKnowledgeOptions {
   readonly now?: () => Date;
+  readonly groundedFallback?: InstagramEngagementKnowledgeSource | undefined;
 }
 
 export class MultiIntentInstagramEngagementKnowledgeSource implements InstagramEngagementKnowledgeSource {
   private readonly now: () => Date;
+  private readonly groundedFallback: InstagramEngagementKnowledgeSource | undefined;
 
   constructor(
     private readonly delegate: InstagramEngagementKnowledgeSource,
     options: MultiIntentInstagramEngagementKnowledgeOptions = {},
   ) {
     this.now = options.now ?? (() => new Date());
+    this.groundedFallback = options.groundedFallback;
   }
 
   async resolve(
@@ -43,7 +46,11 @@ export class MultiIntentInstagramEngagementKnowledgeSource implements InstagramE
   ): Promise<InstagramEngagementKnowledgeMatch | null> {
     const deterministic = await this.delegate.resolve(text, expectedIntent);
     if (deterministic) return deterministic;
-    return resolveCurrentProgrammingKnowledge(text, expectedIntent, { now: this.now() });
+    const currentProgramming = resolveCurrentProgrammingKnowledge(text, expectedIntent, {
+      now: this.now(),
+    });
+    if (currentProgramming) return currentProgramming;
+    return this.groundedFallback?.resolve(text, expectedIntent) ?? null;
   }
 }
 
