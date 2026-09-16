@@ -49,30 +49,32 @@ jobs:
               raise SystemExit('EXPECTED_RECOVERY_MUTATION_BOUNDARY_NOT_FOUND_EXACTLY_ONCE')
           start = workflow.index(start_marker)
           end = workflow.index(end_marker)
-          replacement = '''      - name: Record external bootstrap boundary without IAM mutation
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p gcp-recovery-evidence
-          jq -n \\
-            --arg sourceSha "$GITHUB_SHA" \\
-            --arg project "$GCP_PROJECT_ID" \\
-            --arg region "$GCP_REGION" \\
-            --arg runtime "$GCP_RUNTIME_SERVICE_ACCOUNT" \\
-            --arg deploy "$GCP_DEPLOY_SERVICE_ACCOUNT" \\
-            '{schemaVersion:1,sourceSha:$sourceSha,projectId:$project,region:$region,runtimeServiceAccount:$runtime,deployServiceAccount:$deploy,requiredApisExternalBootstrap:true,iamBindingsExternalBootstrap:true,iamMutationAttempted:false,iamPolicyInspectionAttempted:false,result:"PASS"}' \\
-            > gcp-recovery-evidence/bootstrap-boundary.json
-          echo 'GCP_PUBLICATION_EXTERNAL_BOOTSTRAP_BOUNDARY=VERIFIED'
-
-      - name: Upload sanitized bootstrap-boundary evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: instagram-gcp-bootstrap-boundary-${{ github.run_id }}
-          path: gcp-recovery-evidence/bootstrap-boundary.json
-          if-no-files-found: error
-          retention-days: 90
-
-'''
+          replacement_lines = [
+              '      - name: Record external bootstrap boundary without IAM mutation',
+              '        shell: bash',
+              '        run: |',
+              '          set -euo pipefail',
+              '          mkdir -p gcp-recovery-evidence',
+              '          jq -n \\',
+              '            --arg sourceSha "$GITHUB_SHA" \\',
+              '            --arg project "$GCP_PROJECT_ID" \\',
+              '            --arg region "$GCP_REGION" \\',
+              '            --arg runtime "$GCP_RUNTIME_SERVICE_ACCOUNT" \\',
+              '            --arg deploy "$GCP_DEPLOY_SERVICE_ACCOUNT" \\',
+              "            '{schemaVersion:1,sourceSha:$sourceSha,projectId:$project,region:$region,runtimeServiceAccount:$runtime,deployServiceAccount:$deploy,requiredApisExternalBootstrap:true,iamBindingsExternalBootstrap:true,iamMutationAttempted:false,iamPolicyInspectionAttempted:false,result:\"PASS\"}' \\",
+              '            > gcp-recovery-evidence/bootstrap-boundary.json',
+              "          echo 'GCP_PUBLICATION_EXTERNAL_BOOTSTRAP_BOUNDARY=VERIFIED'",
+              '',
+              '      - name: Upload sanitized bootstrap-boundary evidence',
+              '        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4',
+              '        with:',
+              '          name: instagram-gcp-bootstrap-boundary-${{ github.run_id }}',
+              '          path: gcp-recovery-evidence/bootstrap-boundary.json',
+              '          if-no-files-found: error',
+              '          retention-days: 90',
+              '',
+          ]
+          replacement = '\n'.join(replacement_lines) + '\n'
           workflow = workflow[:start] + replacement + workflow[end:]
 
           replacements = [
@@ -100,44 +102,51 @@ jobs:
                   raise SystemExit(f'FORBIDDEN_IAM_MUTATION_OR_INSPECTION_REMAINS: {token}')
           workflow_path.write_text(workflow)
 
-          test = test_path.read_text()
-          old_block = '''    expect(workflow).not.toContain('gcloud services enable');
-    expect(workflow).not.toContain('gcloud services list --enabled');
-    expect(workflow).toContain('requiredApisExternalBootstrap:true');
-    expect(workflow).toContain('GCP_PUBLICATION_RECOVERY_FORBIDDEN_PROJECT_ROLE');
-    expect(workflow).toContain(
-      'GCP_PUBLICATION_RECOVERY_FORBIDDEN_RUNTIME_PROJECT_SECRET_ACCESSOR',
-    );
-'''
-          new_block = '''    expect(workflow).not.toContain('gcloud services enable');
-    expect(workflow).not.toContain('gcloud services list --enabled');
-    expect(workflow).not.toContain('add-iam-policy-binding');
-    expect(workflow).not.toContain('get-iam-policy');
-    expect(workflow).toContain('requiredApisExternalBootstrap:true');
-    expect(workflow).toContain('iamBindingsExternalBootstrap:true');
-    expect(workflow).toContain('iamMutationAttempted:false');
-    expect(workflow).toContain('iamPolicyInspectionAttempted:false');
-    expect(workflow).toContain('GCP_PUBLICATION_EXTERNAL_BOOTSTRAP_BOUNDARY=VERIFIED');
-'''
-          if test.count(old_block) != 1:
+          test_lines = test_path.read_text().splitlines()
+          old_test_lines = [
+              "    expect(workflow).not.toContain('gcloud services enable');",
+              "    expect(workflow).not.toContain('gcloud services list --enabled');",
+              "    expect(workflow).toContain('requiredApisExternalBootstrap:true');",
+              "    expect(workflow).toContain('GCP_PUBLICATION_RECOVERY_FORBIDDEN_PROJECT_ROLE');",
+              '    expect(workflow).toContain(',
+              "      'GCP_PUBLICATION_RECOVERY_FORBIDDEN_RUNTIME_PROJECT_SECRET_ACCESSOR',",
+              '    );',
+          ]
+          new_test_lines = [
+              "    expect(workflow).not.toContain('gcloud services enable');",
+              "    expect(workflow).not.toContain('gcloud services list --enabled');",
+              "    expect(workflow).not.toContain('add-iam-policy-binding');",
+              "    expect(workflow).not.toContain('get-iam-policy');",
+              "    expect(workflow).toContain('requiredApisExternalBootstrap:true');",
+              "    expect(workflow).toContain('iamBindingsExternalBootstrap:true');",
+              "    expect(workflow).toContain('iamMutationAttempted:false');",
+              "    expect(workflow).toContain('iamPolicyInspectionAttempted:false');",
+              "    expect(workflow).toContain('GCP_PUBLICATION_EXTERNAL_BOOTSTRAP_BOUNDARY=VERIFIED');",
+          ]
+          starts = [
+              i for i in range(len(test_lines) - len(old_test_lines) + 1)
+              if test_lines[i:i + len(old_test_lines)] == old_test_lines
+          ]
+          if len(starts) != 1:
               raise SystemExit('EXPECTED_LEAST_AUTHORITY_TEST_BLOCK_NOT_FOUND_EXACTLY_ONCE')
-          test = test.replace(old_block, new_block, 1)
+          i = starts[0]
+          test_lines[i:i + len(old_test_lines)] = new_test_lines
 
-          old_db_assert = "    expect(workflow).toContain('DATABASE_URL=$DATABASE_SECRET_ID:latest');\n"
-          new_db_assert = "    expect(workflow).not.toContain('DATABASE_URL=$DATABASE_SECRET_ID:latest');\n"
-          if test.count(old_db_assert) != 1:
+          old_db_assert = "    expect(workflow).toContain('DATABASE_URL=$DATABASE_SECRET_ID:latest');"
+          if test_lines.count(old_db_assert) != 1:
               raise SystemExit('EXPECTED_DATABASE_ASSERTION_NOT_FOUND_EXACTLY_ONCE')
-          test = test.replace(old_db_assert, new_db_assert, 1)
+          db_index = test_lines.index(old_db_assert)
+          test_lines[db_index] = "    expect(workflow).not.toContain('DATABASE_URL=$DATABASE_SECRET_ID:latest');"
 
-          credential_anchor = "    expect(workflow).toContain('META_APP_SECRET=$APP_SECRET_ID:1');\n"
-          credential_extra = (
-              "    expect(workflow).toContain('metaRuntimeSecretsPresent: true');\n"
-              "    expect(workflow).not.toContain('const databaseUrl = process.env.DATABASE_URL');\n"
-          )
-          if test.count(credential_anchor) != 1:
+          credential_anchor = "    expect(workflow).toContain('META_APP_SECRET=$APP_SECRET_ID:1');"
+          if test_lines.count(credential_anchor) != 1:
               raise SystemExit('EXPECTED_META_CREDENTIAL_ANCHOR_NOT_FOUND_EXACTLY_ONCE')
-          test = test.replace(credential_anchor, credential_anchor + credential_extra, 1)
-          test_path.write_text(test)
+          credential_index = test_lines.index(credential_anchor)
+          test_lines[credential_index + 1:credential_index + 1] = [
+              "    expect(workflow).toContain('metaRuntimeSecretsPresent: true');",
+              "    expect(workflow).not.toContain('const databaseUrl = process.env.DATABASE_URL');",
+          ]
+          test_path.write_text('\n'.join(test_lines) + '\n')
           PY
           pnpm prettier --write \
             .github/workflows/instagram-gcp-publication-recovery-preflight.yml \
