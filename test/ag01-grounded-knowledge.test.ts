@@ -45,17 +45,22 @@ function registry(value: TocaOsRegistrySnapshot): TocaOsRegistryClient {
 function fakeFetch(
   handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
 ): typeof fetch {
-  return vi.fn((input: string | URL | Request, init?: RequestInit) => {
+  const mock: typeof fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url =
       typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    return Promise.resolve(handler(url, init));
-  }) as unknown as typeof fetch;
+    return handler(url, init);
+  });
+  return mock;
 }
 
 describe('AG-01 grounded TOCA OS knowledge', () => {
   it('never reads a Drive file whose registry status is not ACTIVE_CANONICAL', async () => {
     const item = resource('DOC-LEGACY-001', { status: 'SUPERSEDED' });
-    const fetchFn = fakeFetch(() => new Response('unexpected', { status: 500 }));
+    let fetchCalls = 0;
+    const fetchFn = fakeFetch(() => {
+      fetchCalls += 1;
+      return new Response('unexpected', { status: 500 });
+    });
     const client = new GoogleDriveCanonicalContentClient({
       registry: registry(snapshot([item])),
       tokens: { getAccessToken: () => Promise.resolve('drive-token') },
@@ -63,7 +68,7 @@ describe('AG-01 grounded TOCA OS knowledge', () => {
     });
 
     await expect(client.read(item.resourceId)).resolves.toBeNull();
-    expect(fetchFn).not.toHaveBeenCalled();
+    expect(fetchCalls).toBe(0);
   });
 
   it('rejects unsupported binary content even for an ACTIVE_CANONICAL resource', async () => {
