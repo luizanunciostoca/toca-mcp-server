@@ -3,6 +3,7 @@ import {
   INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID,
   INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE,
 } from '../src/instagram-engagement/knowledge-snapshot-current.js';
+import { OFFICIAL_TICKET_INFORMATION_ANSWER } from '../src/instagram-engagement/ticket-information.js';
 
 const ACTIVE_CANONICAL_SPREADSHEET_ID = '1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU';
 
@@ -11,8 +12,8 @@ describe('Instagram engagement canonical knowledge snapshot', () => {
     expect(INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID).toBe(ACTIVE_CANONICAL_SPREADSHEET_ID);
   });
 
-  it('contains the expanded approved Toca FAQ set with unique identifiers', () => {
-    expect(INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE).toHaveLength(35);
+  it('contains the reconciled approved Toca FAQ set with unique identifiers', () => {
+    expect(INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE).toHaveLength(36);
     expect(
       INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.every(
         (row) =>
@@ -20,7 +21,7 @@ describe('Instagram engagement canonical knowledge snapshot', () => {
           row.operationalValidity === 'ATIVO_ATE_SUBSTITUICAO_CANONICA',
       ),
     ).toBe(true);
-    expect(new Set(INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.map((row) => row.faqId)).size).toBe(35);
+    expect(new Set(INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.map((row) => row.faqId)).size).toBe(36);
   });
 
   it('keeps automatic replies limited to verified low-risk knowledge', () => {
@@ -31,7 +32,7 @@ describe('Instagram engagement canonical knowledge snapshot', () => {
       (row) => row.autonomy === 'SUGGEST_ONLY',
     );
 
-    expect(automatic).toHaveLength(23);
+    expect(automatic).toHaveLength(24);
     expect(automatic.every((row) => row.risk === 'LOW')).toBe(true);
     expect(suggested).toHaveLength(12);
     expect(suggested.every((row) => row.risk === 'MEDIUM')).toBe(true);
@@ -46,8 +47,31 @@ describe('Instagram engagement canonical knowledge snapshot', () => {
     expect(partySchedule?.answer).toContain('sextas-feiras');
   });
 
+  it('keeps ticket FAQs identical to the deterministic official CTA', () => {
+    for (const id of ['FAQ-003', 'FAQ-004']) {
+      const row = INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.find((item) => item.faqId === id);
+      expect(row?.intent).toBe('TICKET_INFO');
+      expect(row?.answer).toBe(OFFICIAL_TICKET_INFORMATION_ANSWER);
+    }
+  });
+
+  it('preserves source freshness instead of stamping old facts with the snapshot date', () => {
+    expect(
+      INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.find((row) => row.faqId === 'FAQ-001')
+        ?.sourceUpdatedOn,
+    ).toBe('2026-08-28');
+    expect(
+      INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.find((row) => row.faqId === 'FAQ-012')
+        ?.sourceUpdatedOn,
+    ).toBe('2026-08-08');
+    expect(
+      INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.find((row) => row.faqId === 'FAQ-036')
+        ?.sourceUpdatedOn,
+    ).toBe('2026-09-16');
+  });
+
   it('adds stable institutional and product knowledge without treating it as dynamic event data', () => {
-    for (const id of ['FAQ-012', 'FAQ-013', 'FAQ-014', 'FAQ-016', 'FAQ-035']) {
+    for (const id of ['FAQ-012', 'FAQ-013', 'FAQ-014', 'FAQ-016', 'FAQ-035', 'FAQ-036']) {
       const row = INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.find((item) => item.faqId === id);
       expect(row).toBeDefined();
       expect(row?.risk).toBe('LOW');
