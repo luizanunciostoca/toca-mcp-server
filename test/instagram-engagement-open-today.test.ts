@@ -101,7 +101,9 @@ describe('Instagram engagement open-today routing', () => {
     const classification = classifySocialEngagement('O Sunset funciona hoje?');
 
     expect(classification.intent).toBe('LOCATION_HOURS');
-    expect(resolveKnowledgeRows('O Sunset funciona hoje?', classification.intent, ROWS)).toMatchObject({
+    expect(
+      resolveKnowledgeRows('O Sunset funciona hoje?', classification.intent, ROWS),
+    ).toMatchObject({
       faqId: 'FAQ-001',
       factsVerified: true,
       confidence: 0.9,
