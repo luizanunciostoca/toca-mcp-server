@@ -198,17 +198,19 @@
       "legacyHeartbeatSuperseded": true
     },
     "ag01Orchestrator": {
-      "lifecycleStatus": "PRODUCTION_VERIFIED_DEGRADED",
+      "lifecycleStatus": "PRODUCTION_VERIFIED",
       "historicalVerification": {
         "status": "PRODUCTION_VERIFIED",
         "verifiedAt": "2026-08-28",
         "canonicalProductionRevision": "toca-ag01-orchestrator-vtx-d2c85284-2",
-        "canonicalRuntimeSourceSha": "d2c85284f3f67d017ee800e4c4b772f5418542d6"
+        "canonicalRuntimeSourceSha": "d2c85284f3f67d017ee800e4c4b772f5418542d6",
+        "canonicalImageDigest": "sha256:491c0f4e05c8b02bd030080e9ab3d92fbc61a2252f2983fe582b619cbb222e96",
+        "productionClosureRun": 33204846117
       },
-      "currentOperationalStatus": "DEGRADED",
-      "currentFreshnessObservedAt": "2026-09-15T19:43:48Z",
+      "currentOperationalStatus": "HEALTHY",
+      "currentFreshnessObservedAt": "2026-09-16T20:08:27Z",
       "deploymentAuthorized": false,
-      "executionAuthorized": false,
+      "executionAuthorized": true,
       "executionAuthority": "CORE_POLICY_APPROVAL_ONLY",
       "directProviderWriteAuthorized": false,
       "resourceType": "cloud-run-service",
@@ -239,27 +241,36 @@
       "cloudPlatformReadback": {
         "projectBillingEnabled": true,
         "billingAccountLinked": true,
-        "artifactRegistryServiceEnabled": false,
-        "artifactRegistryRepositoryReadback": "BILLING_DISABLED",
-        "baseHealthHttpStatus": 500,
-        "baseReadyHttpStatus": 503,
-        "taggedHealthHttpStatus": 503,
-        "taggedReadyHttpStatus": 503,
-        "failedRequestLatency": "0s",
-        "containerSystemEventCount": 0
+        "artifactRegistryServiceEnabled": true,
+        "artifactRegistryServiceState": "ENABLED",
+        "artifactRegistryRepositoryReadback": "READABLE",
+        "baseHealthHttpStatus": 200,
+        "baseReadyHttpStatus": 200,
+        "taggedHealthHttpStatus": 200,
+        "taggedReadyHttpStatus": 200,
+        "runtimeCapabilityCount": 42,
+        "networkProbeResult": "APPLICATION_READY_BASE_AND_TAG",
+        "productionRevision": "toca-ag01-orchestrator-vtx-d2c85284-2",
+        "runtimeSourceSha": "d2c85284f3f67d017ee800e4c4b772f5418542d6",
+        "imageDigest": "sha256:491c0f4e05c8b02bd030080e9ab3d92fbc61a2252f2983fe582b619cbb222e96",
+        "trafficPercent": 100
       },
       "freshnessEvidence": [
-        "github-actions:35012288857:attempt-2",
-        "github-actions:35015095866:attempt-1",
-        "github-actions:35015308326:attempt-1"
+        "github-actions:33204846117:attempt-1",
+        "github-actions:35141511500:attempt-1",
+        "github-actions:35144684629:attempt-1"
       ],
-      "repairRequirements": [
-        "ARTIFACT_REGISTRY_SERVICE_ENABLED",
-        "IMMUTABLE_IMAGE_READBACK_VERIFIED",
-        "HEALTH_200",
-        "READY_200",
-        "EXACT_HEAD_DEPLOYMENT_CERTIFIED"
-      ]
+      "repairRequirements": [],
+      "restorationEvidence": {
+        "status": "PASS",
+        "trackingIssue": "#932",
+        "artifactRegistryServiceEnabled": true,
+        "immutableImageReadbackVerified": true,
+        "health200": true,
+        "ready200": true,
+        "exactHeadDeploymentCertified": true,
+        "providerWriteAuthorityWidened": false
+      }
     },
     "mcpProduction": {
       "resourceType": "cloud-run-service",
