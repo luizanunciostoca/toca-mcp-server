@@ -55,6 +55,15 @@ if text.count(legacy_caption_gate) != 1:
     raise SystemExit("FAIL_CLOSED: expected one legacy caption gate")
 text = text.replace(legacy_caption_gate, scheduler_aware_caption_gate, 1)
 
+cleanup_marker = '  gcloud run jobs delete "$EXECUTE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --quiet >/dev/null 2>&1\n'
+if text.count(cleanup_marker) != 1:
+    raise SystemExit("FAIL_CLOSED: expected canonical execute-job cleanup marker")
+cleanup_replacement = cleanup_marker + '''  if [ -n "${DUPLICATE_PREFLIGHT_JOB_NAME:-}" ]; then
+    gcloud run jobs delete "$DUPLICATE_PREFLIGHT_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --quiet >/dev/null 2>&1
+  fi
+'''
+text = text.replace(cleanup_marker, cleanup_replacement, 1)
+
 sequence = '''validate_command
 authenticate_docker
 bind_source_asset
@@ -69,17 +78,33 @@ strong_preflight = r'''provider_duplicate_preflight() {
   fi
 
   local caption_base64 scheduled_at format result_line result_json execute_rc job_json
+  local preflight_image_tag preflight_image_digest preflight_image
   caption_base64="$(printf '%s' "$CAPTION" | base64 -w0)"
   scheduled_at="$(jq -r .scheduledAt "$COMMAND_FILE")"
   format="$(jq -r .format "$COMMAND_FILE")"
 
+  preflight_image_tag="$DOCKER_REGISTRY/$PROJECT_ID/$REPOSITORY/server:publish-now-duplicate-preflight-${GITHUB_SHA}"
+  cat >/tmp/publish-now-duplicate-preflight.Dockerfile <<'DOCKERFILE'
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+CMD ["node", "dist/src/instagram-provider-duplicate-preflight.js"]
+DOCKERFILE
+  docker build \
+    --build-arg "BASE_IMAGE=$APP_IMAGE" \
+    -f /tmp/publish-now-duplicate-preflight.Dockerfile \
+    -t "$preflight_image_tag" .
+  retry_command 3 5 docker push "$preflight_image_tag"
+  preflight_image_digest="$(gcloud artifacts docker images describe "$preflight_image_tag" \
+    --project "$PROJECT_ID" \
+    --format='value(image_summary.digest)')"
+  [[ "$preflight_image_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+  preflight_image="${preflight_image_tag%:*}@${preflight_image_digest}"
+
   retry_command 3 5 gcloud run jobs deploy "$DUPLICATE_PREFLIGHT_JOB_NAME" \
-    --image "$APP_IMAGE" \
+    --image "$preflight_image" \
     --project "$PROJECT_ID" \
     --region "$REGION" \
     --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-    --command node \
-    --args dist/src/instagram-provider-duplicate-preflight.js \
     --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID~INSTAGRAM_DUPLICATE_PREFLIGHT_CONTENT_ITEM_ID=$CONTENT_ITEM_ID~INSTAGRAM_DUPLICATE_PREFLIGHT_FORMAT=$format~INSTAGRAM_DUPLICATE_PREFLIGHT_EXPECTED_ASSET_SHA256=$EXPECTED_ASSET_SHA256~INSTAGRAM_DUPLICATE_PREFLIGHT_SCHEDULED_AT=$scheduled_at~INSTAGRAM_DUPLICATE_PREFLIGHT_CAPTION_BASE64=$caption_base64~META_APP_ID=2281930145887404~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$REDIRECT_URI~META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$PROJECT_ID" \
     --set-secrets "META_APP_SECRET=toca-meta-app-secret:1" \
     --tasks 1 \
@@ -88,10 +113,12 @@ strong_preflight = r'''provider_duplicate_preflight() {
     --quiet
 
   job_json="$(gcloud run jobs describe "$DUPLICATE_PREFLIGHT_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --format=json)"
-  printf '%s' "$job_json" | jq -e '
+  printf '%s' "$job_json" | jq -e \
+    --arg image "$preflight_image" '
     .spec.template.spec.template.spec.containers[0] as $container |
-    ($container.command == ["node"]) and
-    ($container.args == ["dist/src/instagram-provider-duplicate-preflight.js"]) and
+    ($container.image == $image) and
+    (($container.command // []) | length == 0) and
+    (($container.args // []) | length == 0) and
     ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"])
   ' >/dev/null
 
@@ -128,11 +155,10 @@ strong_preflight = r'''provider_duplicate_preflight() {
       .duplicateFound == false
     ' >/dev/null
   test "$execute_rc" -eq 0
-  echo "P1_PROVIDER_DUPLICATE_PREFLIGHT=PASS format=$format" >&2
+  echo "P1_PROVIDER_DUPLICATE_PREFLIGHT=PASS format=$format image=$preflight_image" >&2
 }
 
 '''
-strong_preflight = strong_preflight.replace('\\"', '"')
 instrumented = '''echo "P1_PHASE=VALIDATE_COMMAND" >&2
 validate_command
 echo "P1_PHASE=AUTHENTICATE_DOCKER" >&2
@@ -169,7 +195,13 @@ grep -Fq 'P1_PHASE=VALIDATE_COMMAND' "$PATCHED"
 grep -Fq 'P1_PHASE=PROVIDER_DUPLICATE_PREFLIGHT' "$PATCHED"
 grep -Fq 'P1_SCHEDULER_APPROVED_COPY_EXACT=PASS' "$PATCHED"
 grep -Fq 'PREVIEW_QA_PASSED' "$PATCHED"
-grep -Fq 'dist/src/instagram-provider-duplicate-preflight.js' "$PATCHED"
+grep -Fq 'publish-now-duplicate-preflight.Dockerfile' "$PATCHED"
+grep -Fq 'CMD ["node", "dist/src/instagram-provider-duplicate-preflight.js"]' "$PATCHED"
+grep -Fq 'P1_PROVIDER_DUPLICATE_PREFLIGHT=PASS' "$PATCHED"
+if sed -n '/provider_duplicate_preflight()/,/^}/p' "$PATCHED" | grep -Eq -- '--command[ =]node|--args[ =]dist/src/instagram-provider-duplicate-preflight.js'; then
+  echo "FAIL_CLOSED: duplicate preflight must use immutable image CMD, not deploy command overrides" >&2
+  exit 1
+fi
 echo "P1_HARDENED_SOURCE=PASS" >&2
 
 if [ "${PUBLISH_NOW_PATCH_ONLY:-false}" = "true" ]; then
