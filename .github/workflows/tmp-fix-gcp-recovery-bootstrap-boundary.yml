@@ -37,63 +37,60 @@ jobs:
           workflow_path = Path('.github/workflows/instagram-gcp-publication-recovery-preflight.yml')
           test_path = Path('test/instagram-gcp-publication-recovery-preflight.test.ts')
 
-          workflow = workflow_path.read_text()
-          old_step = '''      - name: Reconcile only fixed allowlisted APIs and IAM bindings
-        shell: bash
-        run: |
-          set -euo pipefail
-          approved_apis=(
-            artifactregistry.googleapis.com
-            run.googleapis.com
-            secretmanager.googleapis.com
-            iamcredentials.googleapis.com
-            sqladmin.googleapis.com
-            logging.googleapis.com
+          lines = workflow_path.read_text().splitlines()
+          step_name = '      - name: Reconcile only fixed allowlisted APIs and IAM bindings'
+          if lines.count(step_name) != 1:
+              raise SystemExit('EXPECTED_RECOVERY_STEP_NAME_NOT_FOUND_EXACTLY_ONCE')
+          step_index = lines.index(step_name)
+          lines[step_index] = '      - name: Reconcile only fixed allowlisted IAM bindings'
+
+          api_start_line = '          approved_apis=('
+          runtime_line = '          runtime_member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}"'
+          if lines.count(api_start_line) != 1 or lines.count(runtime_line) != 1:
+              raise SystemExit('EXPECTED_RECOVERY_ENABLE_BOUNDARY_NOT_FOUND_EXACTLY_ONCE')
+          api_start = lines.index(api_start_line)
+          runtime_index = lines.index(runtime_line)
+          if api_start >= runtime_index:
+              raise SystemExit('RECOVERY_ENABLE_BOUNDARY_ORDER_INVALID')
+          replacement = [
+              '          # API enablement is an external production bootstrap precondition.',
+              '          # This recovery workflow never grants itself Service Usage authority.',
+          ]
+          lines[api_start:runtime_index] = replacement
+
+          verify_start_line = '          for api in artifactregistry.googleapis.com run.googleapis.com secretmanager.googleapis.com iamcredentials.googleapis.com sqladmin.googleapis.com logging.googleapis.com; do'
+          if lines.count(verify_start_line) != 1:
+              raise SystemExit('EXPECTED_RECOVERY_API_VERIFY_START_NOT_FOUND_EXACTLY_ONCE')
+          verify_start = lines.index(verify_start_line)
+          verify_done = next(
+              index
+              for index in range(verify_start + 1, len(lines))
+              if lines[index] == '          done'
           )
-          gcloud services enable "${approved_apis[@]}" --project "$GCP_PROJECT_ID" --quiet
+          verify_end = verify_done + 1
+          if verify_end < len(lines) and lines[verify_end] == '':
+              verify_end += 1
+          del lines[verify_start:verify_end]
 
-          runtime_member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}"
-'''
-          new_step = '''      - name: Reconcile only fixed allowlisted IAM bindings
-        shell: bash
-        run: |
-          set -euo pipefail
-          # API enablement is an external production bootstrap precondition.
-          # This recovery workflow never grants itself Service Usage authority.
-          runtime_member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}"
-'''
-          if workflow.count(old_step) != 1:
-              raise SystemExit('EXPECTED_RECOVERY_ENABLE_BLOCK_NOT_FOUND_EXACTLY_ONCE')
-          workflow = workflow.replace(old_step, new_step)
-
-          old_verify = '''          for api in artifactregistry.googleapis.com run.googleapis.com secretmanager.googleapis.com iamcredentials.googleapis.com sqladmin.googleapis.com logging.googleapis.com; do
-            state="$(gcloud services list --enabled --project "$GCP_PROJECT_ID" --filter="config.name=${api}" --format='value(config.name)')"
-            test "$state" = "$api"
-          done
-
-'''
-          if workflow.count(old_verify) != 1:
-              raise SystemExit('EXPECTED_RECOVERY_API_VERIFY_BLOCK_NOT_FOUND_EXACTLY_ONCE')
-          workflow = workflow.replace(old_verify, '')
-
-          old_evidence = 'requiredApisEnabled:true'
-          new_evidence = 'requiredApisExternalBootstrap:true'
-          if workflow.count(old_evidence) != 1:
+          evidence_old = 'requiredApisEnabled:true'
+          evidence_new = 'requiredApisExternalBootstrap:true'
+          joined = '\n'.join(lines) + '\n'
+          if joined.count(evidence_old) != 1:
               raise SystemExit('EXPECTED_RECOVERY_API_EVIDENCE_NOT_FOUND_EXACTLY_ONCE')
-          workflow = workflow.replace(old_evidence, new_evidence)
-          workflow_path.write_text(workflow)
+          joined = joined.replace(evidence_old, evidence_new)
+          workflow_path.write_text(joined)
 
-          test = test_path.read_text()
-          old_assertion = "    expect(workflow).toContain('approved_apis=(');\n"
-          new_assertions = (
-              "    expect(workflow).not.toContain('gcloud services enable');\n"
-              "    expect(workflow).not.toContain('gcloud services list --enabled');\n"
-              "    expect(workflow).toContain('requiredApisExternalBootstrap:true');\n"
-          )
-          if test.count(old_assertion) != 1:
+          test_lines = test_path.read_text().splitlines()
+          assertion = "    expect(workflow).toContain('approved_apis=(');"
+          if test_lines.count(assertion) != 1:
               raise SystemExit('EXPECTED_RECOVERY_API_TEST_ASSERTION_NOT_FOUND_EXACTLY_ONCE')
-          test = test.replace(old_assertion, new_assertions)
-          test_path.write_text(test)
+          assertion_index = test_lines.index(assertion)
+          test_lines[assertion_index:assertion_index + 1] = [
+              "    expect(workflow).not.toContain('gcloud services enable');",
+              "    expect(workflow).not.toContain('gcloud services list --enabled');",
+              "    expect(workflow).toContain('requiredApisExternalBootstrap:true');",
+          ]
+          test_path.write_text('\n'.join(test_lines) + '\n')
           PY
           pnpm prettier --write \
             .github/workflows/instagram-gcp-publication-recovery-preflight.yml \
