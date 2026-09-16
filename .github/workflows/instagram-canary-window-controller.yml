@@ -13,7 +13,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: instagram-canary-window-controller-20260915-2220
+  group: instagram-canary-window-controller-20260915-2330
   cancel-in-progress: false
 
 jobs:
@@ -24,10 +24,10 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       TARGET_PR: '849'
-      EXPECTED_INITIAL_HEAD: '6b405b96d9cd1caf70f023116437991ab6a4e9af'
+      EXPECTED_INITIAL_HEAD: 'f080ba907ce8b68e49e53c9b9bdec825a61ae822'
       TARGET_ITEM: 'MKT-20260917-SUNSET-FEED-0900'
-      NOT_BEFORE: '2026-09-15T22:16:00-03:00'
-      MERGE_DEADLINE: '2026-09-15T22:18:00-03:00'
+      NOT_BEFORE: '2026-09-15T23:26:00-03:00'
+      MERGE_DEADLINE: '2026-09-15T23:28:00-03:00'
       LEDGER_PATH: 'publication-state/3e9356148b41946660e2afd80e23b1d6fb220b94666cb01fb07ba65cc700e61e.json'
 
     steps:
