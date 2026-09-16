@@ -15,7 +15,7 @@ const backupKey = requiredEnv('INSTAGRAM_FAQ_EXPANSION_BACKUP_KEY');
 if (!/^[0-9]+_[0-9]+$/.test(backupKey)) {
   throw new Error('INSTAGRAM_FAQ_EXPANSION_BACKUP_KEY_INVALID');
 }
-if (!['BACKUP', 'RESTORE', 'CLEANUP'].includes(action)) {
+if (!['BACKUP', 'RESTORE', 'CLEANUP', 'INSPECT'].includes(action)) {
   throw new Error('INSTAGRAM_FAQ_EXPANSION_STATE_ACTION_INVALID');
 }
 
@@ -36,7 +36,12 @@ for (const table of Object.values(tables)) {
 const pool = createPostgresPool({ connectionString: config.DATABASE_URL });
 const client = await pool.connect();
 try {
-  if (action === 'BACKUP') {
+  if (action === 'INSPECT') {
+    const present = await backupTablesPresent();
+    const active = await activeScopedCounts();
+    const backup = present ? await backupCounts() : { faq: 0, documents: 0, chunks: 0 };
+    printInspection(present, backup, active);
+  } else if (action === 'BACKUP') {
     await client.query('begin');
     await assertNoBackupTables();
     await client.query(
@@ -53,10 +58,11 @@ try {
     );
     await client.query(
       `create table ${tables.chunks} as
-       select c.*
-       from instagram_engagement_knowledge_chunks c
-       join instagram_engagement_knowledge_documents d on d.document_id = c.document_id
-       where d.source_id = any($1::text[])`,
+       select * from instagram_engagement_knowledge_chunks c
+       where c.document_id in (
+         select document_id from instagram_engagement_knowledge_documents
+         where source_id = any($1::text[])
+       )`,
       [[...SOURCE_IDS]],
     );
     const counts = await backupCounts();
@@ -92,7 +98,36 @@ try {
         `insert into instagram_engagement_knowledge_documents select * from ${tables.documents}`,
       );
       await client.query(
-        `insert into instagram_engagement_knowledge_chunks select * from ${tables.chunks}`,
+        `insert into instagram_engagement_knowledge_chunks (
+           chunk_id,
+           document_id,
+           sequence,
+           heading,
+           content,
+           search_text,
+           intent_hints,
+           risk,
+           autonomy,
+           source_reference,
+           source_sha256,
+           active,
+           synced_at
+         )
+         select
+           chunk_id,
+           document_id,
+           sequence,
+           heading,
+           content,
+           search_text,
+           intent_hints,
+           risk,
+           autonomy,
+           source_reference,
+           source_sha256,
+           active,
+           synced_at
+         from ${tables.chunks}`,
       );
       const restored = await activeScopedCounts();
       if (
@@ -202,6 +237,30 @@ function printResult(
       documentCount: counts.documents,
       chunkCount: counts.chunks,
       backupPresent,
+      rawAnswerContentPrinted: false,
+      rawSourceContentPrinted: false,
+      providerWriteAttempted: false,
+    }),
+  );
+}
+
+function printInspection(
+  backupPresent: boolean,
+  backup: { faq: number; documents: number; chunks: number },
+  active: { faq: number; documents: number; chunks: number },
+): void {
+  console.log(
+    JSON.stringify({
+      validation: 'instagram-faq-expansion-knowledge-state',
+      operation: 'INSPECT',
+      status: 'PASS',
+      backupPresent,
+      backupFaqCount: backup.faq,
+      backupDocumentCount: backup.documents,
+      backupChunkCount: backup.chunks,
+      activeFaqCount: active.faq,
+      activeDocumentCount: active.documents,
+      activeChunkCount: active.chunks,
       rawAnswerContentPrinted: false,
       rawSourceContentPrinted: false,
       providerWriteAttempted: false,

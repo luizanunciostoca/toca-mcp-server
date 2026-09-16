@@ -4,10 +4,12 @@ import { describe, expect, it } from 'vitest';
 
 const workflowPath = '.github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml';
 const guardPath = 'scripts/instagram-faq-refresh-production-guard.sh';
+const conflictFilterPath = 'scripts/instagram-engagement-production-mutation-conflicts.jq';
 const statePath = 'src/ops/instagram-faq-expansion-knowledge-state.ts';
 const verifierPath = 'src/ops/verify-instagram-faq-expansion-production.ts';
 const workflow = readFileSync(workflowPath, 'utf8');
 const guard = readFileSync(guardPath, 'utf8');
+const conflictFilter = readFileSync(conflictFilterPath, 'utf8');
 const state = readFileSync(statePath, 'utf8');
 const verifier = readFileSync(verifierPath, 'utf8');
 
@@ -34,8 +36,10 @@ describe('Instagram FAQ expansion LIMITED refresh', () => {
     expect(guard).toContain('MERGE_RESERVATION=$ENGAGEMENT_RESERVATION');
     expect(guard).toContain('MERGE_RESERVATION=NONE');
     expect(guard).toContain('actions/runs?status=${status}&per_page=100');
-    expect(guard).toContain('instagram-engagement-limited-runtime-refresh.yml');
-    expect(guard).toContain('instagram-engagement-comment-limited-promotion.yml');
+    expect(guard).toContain('-f "$CONFLICT_FILTER"');
+    expect(conflictFilter).toContain('instagram-engagement-limited-runtime-refresh.yml');
+    expect(conflictFilter).toContain('instagram-engagement-comment-limited-promotion.yml');
+    expect(conflictFilter).toContain('.actor.login == $owner');
     expect(workflow).toContain('test "$CURRENT_REVISION" = "$PRE_REVISION"');
     expect(workflow).toContain(
       'test "$CURRENT_SCHEDULER_FINGERPRINT" = "$PRE_SCHEDULER_FINGERPRINT"',
