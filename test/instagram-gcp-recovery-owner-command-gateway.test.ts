@@ -39,8 +39,9 @@ describe('Instagram GCP recovery owner-command gateway', () => {
 
   it('dispatches only the allowlisted preflight from live main', () => {
     expect(workflow).toContain('refs/heads/main');
-    expect(workflow).toContain('/git/ref/heads/main');
+    expect(workflow.match(/\/git\/ref\/heads\/main/g)).toHaveLength(2);
     expect(workflow).toContain('test "$live_main_sha" = "$AUTHORIZED_SOURCE_SHA"');
+    expect(workflow).toContain('provider-read-only recovery preflight');
     expect(workflow).toContain('instagram-gcp-publication-recovery-preflight.yml');
     expect(workflow).toContain('/dispatches');
     expect(workflow).toContain('test "$http_status" = \'204\'');
