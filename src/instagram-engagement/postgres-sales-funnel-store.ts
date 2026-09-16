@@ -21,6 +21,7 @@ export interface ClaimedInstagramSalesFunnelAction {
   readonly actionType: 'FOLLOW_UP' | 'POST_SALE';
   readonly playbookKey: InstagramSalesFunnelOwnedPlaybook;
   readonly dueAt: string;
+  readonly createdAt: string;
   readonly version: number;
 }
 
@@ -53,6 +54,7 @@ export class PostgresInstagramSalesFunnelStore {
         action_type: string;
         playbook_key: string | null;
         due_at: Date | string | null;
+        created_at: Date | string;
         version: number;
       }>(
         `with candidates as (
@@ -73,7 +75,8 @@ export class PostgresInstagramSalesFunnelStore {
            from candidates c
           where a.next_action_id = c.next_action_id
           returning a.next_action_id, a.tenant_id, a.workspace_id, a.organization_id,
-                    a.contact_id, a.lead_id, a.action_type, a.playbook_key, a.due_at, a.version`,
+                    a.contact_id, a.lead_id, a.action_type, a.playbook_key, a.due_at,
+                    a.created_at, a.version`,
         [now, [...OWNED_PLAYBOOKS], input.limit],
       );
       await client.query('commit');
@@ -96,6 +99,7 @@ export class PostgresInstagramSalesFunnelStore {
           actionType: row.action_type,
           playbookKey: row.playbook_key,
           dueAt: toIso(row.due_at),
+          createdAt: toIso(row.created_at),
           version: row.version,
         };
       });
