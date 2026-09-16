@@ -67,10 +67,10 @@ describe('Instagram GCP execution-runtime readiness', () => {
     expect(probe).toContain('databaseMutationAttempted: false');
     expect(probe).toContain('providerCredentialsMounted: false');
     expect(probe).toContain('providerWriteAttempted: false');
-    expect(probe).not.toMatch(/client\.query\(\s*[`'\"]\s*insert\s+into/i);
-    expect(probe).not.toMatch(/client\.query\(\s*[`'\"]\s*update\s+/i);
-    expect(probe).not.toMatch(/client\.query\(\s*[`'\"]\s*delete\s+from/i);
-    expect(probe).not.toMatch(/client\.query\(\s*[`'\"]\s*(create|alter|drop|truncate)\s+/i);
+    expect(probe).not.toMatch(/client\.query\(\s*[`'"]\s*insert\s+into/i);
+    expect(probe).not.toMatch(/client\.query\(\s*[`'"]\s*update\s+/i);
+    expect(probe).not.toMatch(/client\.query\(\s*[`'"]\s*delete\s+from/i);
+    expect(probe).not.toMatch(/client\.query\(\s*[`'"]\s*(create|alter|drop|truncate)\s+/i);
     expect(probe).not.toContain("client.query('commit')");
   });
 
