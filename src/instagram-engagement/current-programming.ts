@@ -38,7 +38,8 @@ export function resolveCurrentProgrammingKnowledge(
   const timeZone = options.timeZone ?? 'America/Bahia';
   const weekday = weekdayInTimeZone(now, timeZone);
   const answer = programmingAnswer(weekday);
-  const sources = weekday === 'sat' ? `${OPERATIONS_SOURCE}; ${SATURDAY_SOURCE}` : OPERATIONS_SOURCE;
+  const sources =
+    weekday === 'sat' ? `${OPERATIONS_SOURCE}; ${SATURDAY_SOURCE}` : OPERATIONS_SOURCE;
 
   return {
     faqId: `DYNAMIC:PROGRAMMING_TODAY:${weekday.toUpperCase()}`,
