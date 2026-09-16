@@ -8,8 +8,7 @@ export type { InstagramEngagementKnowledgeSnapshotRow } from './knowledge-snapsh
 
 export const INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID = CORE_SPREADSHEET_ID;
 
-const OFFICIAL_TICKET_LINKTREE =
-  'https://linktr.ee/tocadomorcegooficial?utm_source=ig&utm_medium=social&utm_content=link_in_bio&fbclid=PAdGRleAUXIVtwZG9mAmZkaWQWUOjnvXodfGyf-tm4_9E7SiXgNZTUeGV4dG4DYWVtAjExAHNydGMGYXBwX2lkDzEyNDAyNDU3NDI4NzQxNAABp086VQy0Dat5n1xOChyOLdqrAGTe_PQjh0WEXTPGeHtbPP2jPX0YsVAp7cyd_aem_dKq3n3m9OlgJ6Y_Y1BKxxQ';
+const OFFICIAL_TICKET_LINKTREE = 'https://linktr.ee/tocadomorcegooficial';
 
 const OFFICIAL_TICKET_ANSWER = `Os valores dos ingressos variam de acordo com a data. Para consultar a programação, próximos eventos, valores, comprar ingressos, cardápio, atendimento via WhatsApp e mais informações, acesse: ${OFFICIAL_TICKET_LINKTREE}`;
 
