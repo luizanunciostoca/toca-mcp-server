@@ -66,12 +66,15 @@ function runScheduler({
   });
 }
 
+function parseOutput(value: string): unknown {
+  return JSON.parse(value) as unknown;
+}
+
 describe('Marketing Autopilot scheduler restoration', () => {
   it('prepares inside the bounded lead window without declaring the item due early', () => {
     const result = runScheduler({ now: '2026-09-17T08:58:00-03:00' });
     expect(result.status, result.stderr).toBe(0);
-    const decision = JSON.parse(result.stdout);
-    expect(decision).toMatchObject({
+    expect(parseOutput(result.stdout)).toMatchObject({
       status: 'READY',
       candidate: {
         contentItemId,
@@ -93,30 +96,30 @@ describe('Marketing Autopilot scheduler restoration', () => {
       },
     });
     expect(result.status, result.stderr).toBe(0);
-    const command = JSON.parse(result.stdout).command;
-    expect(command).toMatchObject({
-      action: 'PUBLISH_NOW',
-      contentItemId,
-      scheduledAt: '2026-09-17T09:00:00-03:00',
-      targetCodeSha,
-      expectedAssetSha256: expectedSha,
-      approvalMode: 'EXPLICIT_APPROVAL',
-      approvalStatus: 'APPROVED',
-      publicationIntent: 'SHARE_NOW',
-      schedulerBinding: {
-        source: 'MARKETING_AUTOPILOT_GCP',
-        rolloutPhase: 'CANARY',
-        notBefore: '2026-09-17T09:00:00-03:00',
-        expiresAt: '2026-09-17T09:30:00-03:00',
+    expect(parseOutput(result.stdout)).toMatchObject({
+      status: 'COMMAND_READY',
+      command: {
+        action: 'PUBLISH_NOW',
+        contentItemId,
+        scheduledAt: '2026-09-17T09:00:00-03:00',
+        targetCodeSha,
+        expectedAssetSha256: expectedSha,
+        approvalMode: 'EXPLICIT_APPROVAL',
+        approvalStatus: 'APPROVED',
+        publicationIntent: 'SHARE_NOW',
+        idempotencyKey: `GCP-AUTOPILOT-${contentItemId}-${expectedSha.slice(0, 12)}-V1`,
+        creativeTruthBinding: { exactAssetBinding: true },
+        brandDeterminism: { status: 'VERIFIED' },
+        rightsClearance: { status: 'CLEARED' },
+        schedulerBinding: {
+          source: 'MARKETING_AUTOPILOT_GCP',
+          rolloutPhase: 'CANARY',
+          notBefore: '2026-09-17T09:00:00-03:00',
+          expiresAt: '2026-09-17T09:30:00-03:00',
+        },
       },
     });
-    expect(command.idempotencyKey).toBe(
-      `GCP-AUTOPILOT-${contentItemId}-${expectedSha.slice(0, 12)}-V1`,
-    );
-    expect(command.idempotencyKey).not.toContain('GITHUB_NATIVE');
-    expect(command.creativeTruthBinding.exactAssetBinding).toBe(true);
-    expect(command.brandDeterminism.status).toBe('VERIFIED');
-    expect(command.rightsClearance.status).toBe('CLEARED');
+    expect(result.stdout).not.toContain('GITHUB_NATIVE');
   });
 
   it('refuses to build a provider command before scheduled_at', () => {
@@ -135,9 +138,10 @@ describe('Marketing Autopilot scheduler restoration', () => {
   it('rejects an expired publication window rather than retrying late', () => {
     const result = runScheduler({ now: '2026-09-17T09:30:01-03:00' });
     expect(result.status, result.stderr).toBe(0);
-    const decision = JSON.parse(result.stdout);
-    expect(decision.status).toBe('NO_CANDIDATE');
-    expect(decision.rejected).toContainEqual({ contentItemId, reason: 'STALE_WINDOW' });
+    expect(parseOutput(result.stdout)).toMatchObject({
+      status: 'NO_CANDIDATE',
+      rejected: [{ contentItemId, reason: 'STALE_WINDOW' }],
+    });
   });
 
   it('rejects missing approval and never manufactures APPROVED state', () => {
@@ -145,9 +149,10 @@ describe('Marketing Autopilot scheduler restoration', () => {
       now: '2026-09-17T09:00:00-03:00',
       row: canonicalRow({ approval_status: 'PENDING' }),
     });
-    const decision = JSON.parse(result.stdout);
-    expect(decision.status).toBe('NO_CANDIDATE');
-    expect(decision.rejected[0].reason).toContain('AUTOPILOT_APPROVAL_NOT_APPROVED');
+    expect(parseOutput(result.stdout)).toMatchObject({
+      status: 'NO_CANDIDATE',
+      rejected: [{ contentItemId, reason: 'AUTOPILOT_APPROVAL_NOT_APPROVED:PENDING' }],
+    });
   });
 
   it('rejects exact-asset drift before an execution envelope exists', () => {
@@ -155,9 +160,10 @@ describe('Marketing Autopilot scheduler restoration', () => {
       now: '2026-09-17T09:00:00-03:00',
       row: canonicalRow({ output_sha256: '0'.repeat(64) }),
     });
-    const decision = JSON.parse(result.stdout);
-    expect(decision.status).toBe('NO_CANDIDATE');
-    expect(decision.rejected[0].reason).toBe('AUTOPILOT_OUTPUT_SHA256_BINDING_MISMATCH');
+    expect(parseOutput(result.stdout)).toMatchObject({
+      status: 'NO_CANDIDATE',
+      rejected: [{ contentItemId, reason: 'AUTOPILOT_OUTPUT_SHA256_BINDING_MISMATCH' }],
+    });
   });
 
   it('rejects any item that already has provider evidence', () => {
@@ -168,8 +174,9 @@ describe('Marketing Autopilot scheduler restoration', () => {
         provider_external_id: '17899999999999999',
       }),
     });
-    const decision = JSON.parse(result.stdout);
-    expect(decision.status).toBe('NO_CANDIDATE');
-    expect(decision.rejected[0].reason).toBe('AUTOPILOT_PUBLICATION_ID_ALREADY_PRESENT');
+    expect(parseOutput(result.stdout)).toMatchObject({
+      status: 'NO_CANDIDATE',
+      rejected: [{ contentItemId, reason: 'AUTOPILOT_PUBLICATION_ID_ALREADY_PRESENT' }],
+    });
   });
 });
