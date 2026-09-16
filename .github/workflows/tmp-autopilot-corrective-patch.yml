@@ -99,8 +99,9 @@ jobs:
           workflow = Path('.github/workflows/marketing-autopilot-publication.yml')
           text = workflow.read_text()
           start_marker = '''          baseline_run_id="$(jq -r '.rollout.providerReconciliationBaseline.runId' "$POLICY_PATH")"'''
+          end_marker = '''          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${CANONICAL_WRITER_WORKFLOW}/runs?per_page=100" > /tmp/writer-runs.json'''
           start = text.find(start_marker)
-          end = text.find('          writer_runs_json=', start)
+          end = text.find(end_marker, start)
           if start < 0 or end < 0:
               raise SystemExit(f'baseline markers missing start={start} end={end}')
           replacement = '''          baseline_run_id="$(jq -r '.rollout.providerReconciliationBaseline.runId' "$POLICY_PATH")"
@@ -121,6 +122,7 @@ jobs:
             baseline_run_id='NONE'
             echo 'MARKETING_AUTOPILOT_PROVIDER_BASELINE=NOT_APPLICABLE_STRICT_HISTORY_SCAN'
           fi
+
           '''
           workflow.write_text(text[:start] + replacement + text[end:])
 
