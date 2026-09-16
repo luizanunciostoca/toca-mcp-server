@@ -218,7 +218,9 @@ function readStringPath(value: unknown, path: string[]): string | undefined {
 describe('Marketing Autopilot daily scheduler restoration', () => {
   it('keeps manual execution PRECHECK-only and daily autonomy bounded', () => {
     expect(workflow).toContain('workflow_dispatch:');
-    expect(workflow).toContain('workflow_dispatch|push) mode=PRECHECK');
+    expect(workflow).toContain('workflow_dispatch|push)');
+    expect(workflow).toContain('mode=PRECHECK');
+    expect(workflow).toContain('trigger_kind=NON_EXECUTING_PRECHECK');
     expect(workflow).not.toContain('REQUESTED_MODE');
     expect(policy.dailyRollout).toMatchObject({
       canaryContentItemId: productionCanaryId,
