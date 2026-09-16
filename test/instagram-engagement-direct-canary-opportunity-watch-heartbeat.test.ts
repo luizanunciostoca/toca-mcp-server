@@ -70,15 +70,21 @@ describe('Instagram Direct canary opportunity watch heartbeat', () => {
       'if [[ "$RUNTIME_SHA" != "$CURRENT_MAIN_SHA" || "$NOW_EPOCH" -ge "$EXPIRES_EPOCH" ]]',
     );
     expect(workflow).toContain('select(.status != "completed")');
-    expect(workflow).toContain('DIRECT_CANARY_WATCH_HEARTBEAT_DECISION=SKIP_EXISTING_ACTIVE_PROBE');
+    expect(workflow).toContain(
+      'DIRECT_CANARY_WATCH_HEARTBEAT_DECISION=SKIP_EXISTING_ACTIVE_PROBE',
+    );
   });
 
   it('dispatches only the canonical read-only Direct watcher and never a provider canary', () => {
-    expect(workflow).toContain('WATCH_WORKFLOW: instagram-engagement-direct-canary-opportunity-watch.yml');
+    expect(workflow).toContain(
+      'WATCH_WORKFLOW: instagram-engagement-direct-canary-opportunity-watch.yml',
+    );
     expect(workflow).toContain(
       '"repos/${GITHUB_REPOSITORY}/actions/workflows/${WATCH_WORKFLOW}/dispatches"',
     );
-    expect(workflow).toContain('TARGET_WORKFLOW=instagram-engagement-direct-canary-opportunity-watch.yml');
+    expect(workflow).toContain(
+      'TARGET_WORKFLOW=instagram-engagement-direct-canary-opportunity-watch.yml',
+    );
     expect(workflow).not.toContain('provider-canary.yml');
     expect(workflow).not.toContain('INSTAGRAM_ENGAGEMENT_REAL_DIRECT_CANARY=AUTHORIZED');
     expect(workflow).not.toContain('EXTERNAL_DIRECT_REPLY_AUTHORIZED=true');
@@ -93,7 +99,9 @@ describe('Instagram Direct canary opportunity watch heartbeat', () => {
     expect(workflow).toContain('DIRECT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_STALE');
     expect(workflow).toContain('DIRECT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_EXPIRED');
     expect(workflow).toContain('select(.id != $current)');
-    expect(workflow).toContain('DIRECT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_EXISTING_ACTIVE_HEARTBEAT');
+    expect(workflow).toContain(
+      'DIRECT_CANARY_WATCH_HEARTBEAT_REARM=SKIPPED_EXISTING_ACTIVE_HEARTBEAT',
+    );
     expect(workflow).toContain(
       '"repos/${GITHUB_REPOSITORY}/actions/workflows/${HEARTBEAT_WORKFLOW}/dispatches"',
     );
