@@ -12,6 +12,7 @@ GUARD_PROFILE="${INSTAGRAM_FAQ_GUARD_PROFILE:-FAQ_EXPANSION_REFRESH}"
 : "${ENGAGEMENT_RESERVATION:?ENGAGEMENT_RESERVATION is required}"
 
 CONTROL_ISSUE=640
+CONFLICT_FILTER='scripts/instagram-engagement-production-mutation-conflicts.jq'
 
 release_reservation() {
   local control_json control_body updated_body
@@ -163,21 +164,13 @@ grep -Fxq "MERGE_RESERVATION=$ENGAGEMENT_RESERVATION" <<< "$CONTROL_BODY"
 conflicts=0
 for status in in_progress queued; do
   RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?status=${status}&per_page=100")"
-  count="$(jq --argjson self "$GITHUB_RUN_ID" '[
-    .workflow_runs[]
-    | select(.id != $self)
-    | select(.event == "issues")
-    | select(.head_branch == "main")
-    | select(
-        .path == ".github/workflows/instagram-engagement-limited-activation.yml" or
-        .path == ".github/workflows/instagram-engagement-limited-runtime-refresh.yml" or
-        .path == ".github/workflows/instagram-engagement-comment-limited-promotion.yml" or
-        .path == ".github/workflows/instagram-engagement-tiered-knowledge-shadow.yml" or
-        .path == ".github/workflows/instagram-engagement-shadow-production.yml" or
-        .path == ".github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml" or
-        .path == ".github/workflows/instagram-engagement-faq-knowledge-recovery.yml"
-      )
-  ] | length' <<< "$RUNS")"
+  # An issue.opened event creates run records for every listening workflow before each
+  # workflow's job-level predicates are evaluated. Count only runs whose actor, path,
+  # and authorization title can actually authorize the represented mutation workflow.
+  count="$(jq \
+    --argjson self "$GITHUB_RUN_ID" \
+    --arg owner "$GITHUB_REPOSITORY_OWNER" \
+    -f "$CONFLICT_FILTER" <<< "$RUNS")"
   conflicts=$((conflicts + count))
 done
 if (( conflicts > 0 )); then
