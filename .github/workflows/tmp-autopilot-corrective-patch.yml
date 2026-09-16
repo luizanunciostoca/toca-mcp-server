@@ -36,16 +36,9 @@ jobs:
           from pathlib import Path
           import re
 
-          def replace_once(text, pattern, replacement, label, flags=0):
-              updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)
-              if count != 1:
-                  raise SystemExit(f'{label} mismatch count={count}')
-              return updated
-
           registry = Path('scripts/marketing-autopilot-registry.mjs')
           text = registry.read_text()
-          text = replace_once(
-              text,
+          text, count = re.subn(
               r"async function recordPrecheck\(\) \{.*?\n\}\n\n(?=async function reconcilePublication\(\) \{)",
               '''async function recordPrecheck() {
             const sheet = await readContentSheet();
@@ -79,34 +72,37 @@ jobs:
           }
 
           ''',
-              'recordPrecheck',
-              re.S,
-          )
-          text = replace_once(
               text,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit(f'recordPrecheck mismatch count={count}')
+          text, count = re.subn(
               r"  assert\(\s*text\(row\.object\.master_drive_file_id\) === command\.driveFileId,\s*'AUTOPILOT_REGISTRY_DRIVE_FILE_DRIFT',\s*\);",
               '''  const deliveryDriveFileId =
             text(row.object.format) === 'STORY'
               ? text(row.object.story_drive_file_id)
               : text(row.object.master_drive_file_id);
           assert(deliveryDriveFileId === command.driveFileId, 'AUTOPILOT_REGISTRY_DRIVE_FILE_DRIFT');''',
-              'delivery drive binding',
-              re.S,
+              text,
+              count=1,
+              flags=re.S,
           )
+          if count != 1:
+              raise SystemExit(f'drive binding mismatch count={count}')
           legacy = "'GCP_PUBLISH_NOW_AUTOPILOT_CANARY'"
           if text.count(legacy) != 2:
-              raise SystemExit(f'legacy policy marker mismatch count={text.count(legacy)}')
-          text = text.replace(legacy, 'policy.policyId')
-          registry.write_text(text)
+              raise SystemExit(f'legacy policy mismatch count={text.count(legacy)}')
+          registry.write_text(text.replace(legacy, 'policy.policyId'))
 
           workflow = Path('.github/workflows/marketing-autopilot-publication.yml')
           text = workflow.read_text()
           start_marker = '''          baseline_run_id="$(jq -r '.rollout.providerReconciliationBaseline.runId' "$POLICY_PATH")"'''
-          end_marker = '''          writer_runs_json="$(gh api --paginate -H 'Accept: application/vnd.github+json' "repos/${GITHUB_REPOSITORY}/actions/workflows/marketing-publish-now.yml/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs')"'''
           start = text.find(start_marker)
-          end = text.find(end_marker, start)
+          end = text.find('          writer_runs_json=', start)
           if start < 0 or end < 0:
-              raise SystemExit(f'baseline structural markers missing start={start} end={end}')
+              raise SystemExit(f'baseline markers missing start={start} end={end}')
           replacement = '''          baseline_run_id="$(jq -r '.rollout.providerReconciliationBaseline.runId' "$POLICY_PATH")"
           baseline_completed_at="$(jq -r '.rollout.providerReconciliationBaseline.completedAt' "$POLICY_PATH")"
           baseline_content_item="$(jq -r '.rollout.providerReconciliationBaseline.contentItemId' "$POLICY_PATH")"
@@ -126,19 +122,16 @@ jobs:
             echo 'MARKETING_AUTOPILOT_PROVIDER_BASELINE=NOT_APPLICABLE_STRICT_HISTORY_SCAN'
           fi
           '''
-          text = text[:start] + replacement + text[end:]
-          workflow.write_text(text)
+          workflow.write_text(text[:start] + replacement + text[end:])
 
           test_path = Path('test/marketing-autopilot-scheduler-restoration.test.ts')
           text = test_path.read_text()
           title = "it('rejects an unapproved Story final instead of falling back to a source asset'"
-          test_start = text.find(title)
-          if test_start < 0:
-              raise SystemExit('Story rejection test title missing')
-          block_start = text.find('    expect(parseOutput(result.stdout)).toMatchObject({', test_start)
+          start = text.find(title)
+          block_start = text.find('    expect(parseOutput(result.stdout)).toMatchObject({', start)
           block_end = text.find('    });', block_start)
-          if block_start < 0 or block_end < 0:
-              raise SystemExit(f'Story assertion markers missing start={block_start} end={block_end}')
+          if min(start, block_start, block_end) < 0:
+              raise SystemExit('Story assertion structural markers missing')
           block_end += len('    });')
           replacement = '''    const output = parseOutput(result.stdout);
             expect(output).toMatchObject({ status: 'NO_CANDIDATE', rolloutPhase: 'LIMITED' });
@@ -150,14 +143,10 @@ jobs:
             const storyRejected = (rejected as unknown[]).some((item) => {
               if (typeof item !== 'object' || item === null) return false;
               const record = item as Record<string, unknown>;
-              return (
-                record.contentItemId === storyId &&
-                record.reason === 'AUTOPILOT_STORY_STATUS_INVALID'
-              );
+              return record.contentItemId === storyId && record.reason === 'AUTOPILOT_STORY_STATUS_INVALID';
             });
             expect(storyRejected).toBe(true);'''
-          text = text[:block_start] + replacement + text[block_end:]
-          test_path.write_text(text)
+          test_path.write_text(text[:block_start] + replacement + text[block_end:])
           PY
       - name: Format and validate touched files
         run: |
