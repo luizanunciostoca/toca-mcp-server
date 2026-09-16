@@ -227,10 +227,9 @@ describe('Instagram grounded multi-intent knowledge', () => {
       tier: 'FAQ',
     });
     const source = new MultiIntentInstagramEngagementKnowledgeSource({ resolve: delegateResolve });
-    const abusiveGroupedInput = Array.from(
-      { length: 9 },
-      () => 'Qual o valor do ingresso?',
-    ).join('\n');
+    const abusiveGroupedInput = Array.from({ length: 9 }, () => 'Qual o valor do ingresso?').join(
+      '\n',
+    );
 
     const match = await source.resolve(abusiveGroupedInput, 'TICKET_INFO');
 
