@@ -21,7 +21,8 @@
     "durableCommandFile": "control/marketing-publish-now-command.json",
     "durableCommandRequiredState": "NOOP",
     "ephemeralCommandAllowed": true,
-    "providerPublicationWriteAuthorized": true
+    "providerPublicationWriteAuthorized": false,
+    "controlPlaneProviderPublicationWriteAuthorized": true
   },
   "instagramAccountId": "17841402033495654",
   "schedule": {
