@@ -46,12 +46,17 @@ jobs:
 
           api_start_line = '          approved_apis=('
           runtime_line = '          runtime_member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}"'
-          if lines.count(api_start_line) != 1 or lines.count(runtime_line) != 1:
-              raise SystemExit('EXPECTED_RECOVERY_ENABLE_BOUNDARY_NOT_FOUND_EXACTLY_ONCE')
+          if lines.count(api_start_line) != 1:
+              raise SystemExit('EXPECTED_RECOVERY_API_START_NOT_FOUND_EXACTLY_ONCE')
           api_start = lines.index(api_start_line)
-          runtime_index = lines.index(runtime_line)
-          if api_start >= runtime_index:
-              raise SystemExit('RECOVERY_ENABLE_BOUNDARY_ORDER_INVALID')
+          runtime_candidates = [
+              index
+              for index in range(api_start + 1, len(lines))
+              if lines[index] == runtime_line
+          ]
+          if not runtime_candidates:
+              raise SystemExit('EXPECTED_RECOVERY_RUNTIME_BOUNDARY_NOT_FOUND_AFTER_API_BLOCK')
+          runtime_index = runtime_candidates[0]
           replacement = [
               '          # API enablement is an external production bootstrap precondition.',
               '          # This recovery workflow never grants itself Service Usage authority.',
