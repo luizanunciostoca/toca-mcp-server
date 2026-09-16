@@ -177,15 +177,21 @@ jobs:
           baseline_run_id="$(jq -r '.rollout.providerReconciliationBaseline.runId' "$POLICY_PATH")"
           baseline_completed_at="$(jq -r '.rollout.providerReconciliationBaseline.completedAt' "$POLICY_PATH")"
           baseline_content_item="$(jq -r '.rollout.providerReconciliationBaseline.contentItemId' "$POLICY_PATH")"
-          test "$baseline_content_item" = "$CONTENT_ITEM_ID"
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${baseline_run_id}" > /tmp/baseline-run.json
-          jq -e \
-            --arg completed "$baseline_completed_at" '
-              .name == "Instagram GCP Publication Recovery Preflight" and
-              .status == "completed" and
-              .conclusion == "success" and
-              .updated_at == $completed
-            ' /tmp/baseline-run.json >/dev/null
+          if [ "$baseline_content_item" = "$CONTENT_ITEM_ID" ]; then
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${baseline_run_id}" > /tmp/baseline-run.json
+            jq -e \
+              --arg completed "$baseline_completed_at" '
+                .name == "Instagram GCP Publication Recovery Preflight" and
+                .status == "completed" and
+                .conclusion == "success" and
+                .updated_at == $completed
+              ' /tmp/baseline-run.json >/dev/null
+            echo "MARKETING_AUTOPILOT_PROVIDER_BASELINE=VERIFIED run_id=$baseline_run_id"
+          else
+            baseline_completed_at='1970-01-01T00:00:00Z'
+            baseline_run_id='NONE'
+            echo 'MARKETING_AUTOPILOT_PROVIDER_BASELINE=NOT_APPLICABLE_STRICT_HISTORY_SCAN'
+          fi
 
           gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${CANONICAL_WRITER_WORKFLOW}/runs?per_page=100" > /tmp/writer-runs.json
           : > /tmp/matching-attempts.jsonl

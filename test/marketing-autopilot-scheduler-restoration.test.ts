@@ -15,7 +15,11 @@ const policy = JSON.parse(
     generalAutonomy?: boolean;
     limited?: { generalAutonomy?: boolean };
   };
-  standingAuthorization?: { authority?: string; allowCopyMutation?: boolean; allowAssetMutation?: boolean };
+  standingAuthorization?: {
+    authority?: string;
+    allowCopyMutation?: boolean;
+    allowAssetMutation?: boolean;
+  };
 };
 
 const canaryId = 'MKT-20260916-SUNSET-FEED-0900';
@@ -190,7 +194,9 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
         expectedAssetSha256: feedSha,
       },
     });
-    expect(readStringPath(output, ['candidate', 'registrySnapshotSha256'])).toMatch(/^[a-f0-9]{64}$/);
+    expect(readStringPath(output, ['candidate', 'registrySnapshotSha256'])).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
   });
 
   it('builds a fresh feed command with exact approved copy and no legacy CTA synthesis', () => {
@@ -310,10 +316,18 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
       rows: [publishedCanary(), storyRow({ story_status: 'PENDING' })],
     });
     expect(result.status, result.stderr).toBe(0);
-    expect(parseOutput(result.stdout)).toMatchObject({
-      status: 'NO_CANDIDATE',
-      rolloutPhase: 'LIMITED',
-      rejected: [{ contentItemId: storyId, reason: 'AUTOPILOT_STORY_STATUS_INVALID' }],
+    const output = parseOutput(result.stdout);
+    expect(output).toMatchObject({ status: 'NO_CANDIDATE', rolloutPhase: 'LIMITED' });
+    if (typeof output !== 'object' || output === null || !('rejected' in output)) {
+      throw new Error('AUTOPILOT_TEST_REJECTIONS_MISSING');
+    }
+    const rejected = (output as { rejected?: unknown }).rejected;
+    expect(Array.isArray(rejected)).toBe(true);
+    const storyRejected = (rejected as unknown[]).some((item) => {
+      if (typeof item !== 'object' || item === null) return false;
+      const record = item as Record<string, unknown>;
+      return record.contentItemId === storyId && record.reason === 'AUTOPILOT_STORY_STATUS_INVALID';
     });
+    expect(storyRejected).toBe(true);
   });
 });

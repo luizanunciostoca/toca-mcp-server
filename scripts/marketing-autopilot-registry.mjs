@@ -35,8 +35,15 @@ try {
 }
 
 async function recordPrecheck() {
-  const binding = policy.bindings?.[contentItemId];
-  assert(binding, 'AUTOPILOT_EXACT_BINDING_REQUIRED');
+  const sheet = await readContentSheet();
+  const item = findRow(sheet, contentItemId).object;
+  const scheduledAt = text(item.scheduled_at);
+  const schedulingStatus = text(item.scheduling_status);
+  assert(scheduledAt, 'AUTOPILOT_PRECHECK_SCHEDULED_AT_REQUIRED');
+  assert(
+    schedulingStatus === 'CANARY_READY' || schedulingStatus === 'LIMITED_READY_AFTER_CANARY',
+    `AUTOPILOT_PRECHECK_SCHEDULING_STATUS_INVALID:${schedulingStatus}`,
+  );
   const now = formatBahia(new Date());
   await appendSchedulerLog([
     `AUTOPILOT-PRECHECK-${process.env.GITHUB_RUN_ID ?? 'local'}`,
@@ -44,9 +51,9 @@ async function recordPrecheck() {
     contentItemId,
     process.env.GITHUB_RUN_ID ?? '',
     'GITHUB_ACTIONS_CONTROL_PLANE',
-    binding.expectedScheduledAt,
+    scheduledAt,
     'PRECHECK',
-    'CANARY_READY',
+    schedulingStatus,
     '0',
     '0',
     '',
@@ -54,7 +61,7 @@ async function recordPrecheck() {
     '',
     '',
     `run=${process.env.GITHUB_RUN_ID ?? ''};sha=${process.env.GITHUB_SHA ?? ''};provider_called=false;writer=${policy.canonicalWriter.workflow}`,
-    'GCP_PUBLISH_NOW_AUTOPILOT_CANARY',
+    policy.policyId,
   ]);
 }
 
@@ -126,10 +133,11 @@ async function reconcilePublication() {
     text(row.object.correlation_id) === command.correlationId,
     'AUTOPILOT_REGISTRY_CORRELATION_DRIFT',
   );
-  assert(
-    text(row.object.master_drive_file_id) === command.driveFileId,
-    'AUTOPILOT_REGISTRY_DRIVE_FILE_DRIFT',
-  );
+  const deliveryDriveFileId =
+    text(row.object.format) === 'STORY'
+      ? text(row.object.story_drive_file_id)
+      : text(row.object.master_drive_file_id);
+  assert(deliveryDriveFileId === command.driveFileId, 'AUTOPILOT_REGISTRY_DRIVE_FILE_DRIFT');
   assert(
     text(row.object.output_sha256) === command.expectedAssetSha256,
     'AUTOPILOT_REGISTRY_ASSET_SHA_DRIFT',
@@ -173,7 +181,7 @@ async function reconcilePublication() {
     scheduling_mode: 'GCP_AUTOPILOT',
     scheduling_status: 'PUBLISHED_VERIFIED',
     scheduling_evidence: evidenceSummary,
-    scheduling_policy: 'GCP_PUBLISH_NOW_AUTOPILOT_CANARY',
+    scheduling_policy: policy.policyId,
     publication_intent: 'SHARE_NOW',
     toca_scheduled_at: command.scheduledAt,
     scheduler_backend: 'GITHUB_ACTIONS_CONTROL_PLANE',
@@ -197,7 +205,7 @@ async function reconcilePublication() {
     providerId,
     text(publication.permalink),
     evidenceSummary,
-    'GCP_PUBLISH_NOW_AUTOPILOT_CANARY',
+    policy.policyId,
   ]);
 
   const readbackSheet = await readContentSheet();
