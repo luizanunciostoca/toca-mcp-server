@@ -132,6 +132,19 @@ describe('Instagram publication single-writer boundary', () => {
     expect(autopilot).not.toContain('github-native-instagram-publish-controlled');
   });
 
+  it('adds a trusted scheduled heartbeat without adding a second provider writer', () => {
+    expect(autopilot).toContain('workflow_run:');
+    expect(autopilot).toContain('- GitHub Native Instagram Publisher');
+    expect(autopilot).toContain('REDUNDANT_SCHEDULE_HEARTBEAT');
+    expect(autopilot).toContain('.workflow_run.event == "schedule"');
+    expect(autopilot).toContain('.workflow_run.conclusion == "success"');
+    expect(autopilot).toContain('.workflow_run.run_attempt == 1');
+    expect(gcpPublishNow).toContain('(.event == "schedule" or .event == "workflow_run")');
+    expect(gcpPublishNow).toContain('MARKETING_AUTOPILOT_HEARTBEAT_PROVENANCE=VERIFIED');
+    expect(gcpPublishNow).toContain('.run_attempt == 1');
+    expect(gcpPublishNow).toContain('HEARTBEAT_WORKFLOW_PATH');
+  });
+
   it('keeps the restored scheduler CANARY, fail-closed and provider-write-free', () => {
     expect(autopilotPolicy).toMatchObject({
       lifecycleStatus: 'CANARY',
