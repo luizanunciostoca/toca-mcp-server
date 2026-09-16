@@ -66,15 +66,13 @@ export function resolveCurrentProgrammingKnowledge(
 }
 
 function programmingAnswer(weekday: Weekday, fridayPartyCarryover: boolean): string {
-  const parts = [
-    'Pela programação regular canônica, hoje tem Sunset na Toca do Morcego a partir das 16:30, no horário da Bahia.',
-  ];
+  const parts = ['Hoje tem Sunset na Toca do Morcego a partir das 16:30, no horário da Bahia.'];
   if (weekday === 'fri') {
     parts.push('Às sextas-feiras, a The Party acontece das 23:59 às 06:00.');
   }
   if (fridayPartyCarryover) {
     parts.push(
-      'Se você está falando de agora, a The Party de sexta-feira ainda está dentro da janela regular canônica, que segue até 06:00 de sábado.',
+      'Se você está falando de agora, a The Party de sexta-feira segue até 06:00 de sábado.',
     );
   }
   if (weekday === 'sat') {
