@@ -158,7 +158,7 @@ function mergeConversationIntents(
   existing: readonly SocialConversationIntent[],
   additions: readonly SocialConversationIntent[],
 ): readonly SocialConversationIntent[] {
-  const merged = existing.filter((intent) => intent !== 'OTHER');
+  const merged: SocialConversationIntent[] = existing.filter((intent) => intent !== 'OTHER');
   for (const intent of additions) {
     if (!merged.includes(intent)) merged.push(intent);
   }
