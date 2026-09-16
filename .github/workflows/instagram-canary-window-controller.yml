@@ -13,21 +13,21 @@ permissions:
   actions: read
 
 concurrency:
-  group: instagram-canary-window-controller-20260915
+  group: instagram-canary-window-controller-20260915-2220
   cancel-in-progress: false
 
 jobs:
   control:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
-      TARGET_PR: '846'
-      EXPECTED_HEAD: '76145786fd9932c8a37aedc1dd7342274bc0d67d'
+      TARGET_PR: '849'
+      EXPECTED_INITIAL_HEAD: '6b405b96d9cd1caf70f023116437991ab6a4e9af'
       TARGET_ITEM: 'MKT-20260917-SUNSET-FEED-0900'
-      NOT_BEFORE: '2026-09-15T21:45:00-03:00'
-      MERGE_DEADLINE: '2026-09-15T21:47:00-03:00'
+      NOT_BEFORE: '2026-09-15T22:16:00-03:00'
+      MERGE_DEADLINE: '2026-09-15T22:18:00-03:00'
       LEDGER_PATH: 'publication-state/3e9356148b41946660e2afd80e23b1d6fb220b94666cb01fb07ba65cc700e61e.json'
 
     steps:
@@ -37,6 +37,56 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = 'refs/heads/main'
           test "$GITHUB_EVENT_NAME" = 'push'
+          test "$(gh api "repos/$REPO/branches/main" --jq '.commit.sha')" = "$GITHUB_SHA"
+
+      - name: Synchronize exact canary PR with controller main
+        id: sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr=$(gh api "repos/$REPO/pulls/$TARGET_PR")
+          test "$(jq -r '.state' <<<"$pr")" = 'open'
+          test "$(jq -r '.draft' <<<"$pr")" = 'false'
+          test "$(jq -r '.base.ref' <<<"$pr")" = 'main'
+          test "$(jq -r '.head.sha' <<<"$pr")" = "$EXPECTED_INITIAL_HEAD"
+
+          gh api --method PUT "repos/$REPO/pulls/$TARGET_PR/update-branch" \
+            -f expected_head_sha="$EXPECTED_INITIAL_HEAD" >/dev/null
+
+          target_head=''
+          for _ in $(seq 1 60); do
+            current=$(gh api "repos/$REPO/pulls/$TARGET_PR" --jq '.head.sha')
+            if [ "$current" != "$EXPECTED_INITIAL_HEAD" ]; then
+              target_head="$current"
+              break
+            fi
+            sleep 5
+          done
+          test -n "$target_head" || { echo 'TARGET_PR_SYNC_TIMEOUT'; exit 1; }
+          echo "target_head=$target_head" >> "$GITHUB_OUTPUT"
+
+      - name: Await synchronized target protected gates
+        shell: bash
+        env:
+          TARGET_HEAD: ${{ steps.sync.outputs.target_head }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 180); do
+            runs=$(gh api "repos/$REPO/actions/runs?head_sha=$TARGET_HEAD&per_page=100")
+            all_green=true
+            for required in 'Quality Gate' 'Autonomy Safety' 'Security Supply Chain'; do
+              conclusion=$(jq -r --arg name "$required" '[.workflow_runs[] | select(.name == $name)] | sort_by(.created_at) | last | .conclusion // ""' <<<"$runs")
+              if [ -n "$conclusion" ] && [ "$conclusion" != 'success' ]; then
+                echo "TARGET_REQUIRED_GATE_FAILED:$required:$conclusion"
+                exit 1
+              fi
+              [ "$conclusion" = 'success' ] || all_green=false
+            done
+            [ "$all_green" = true ] && exit 0
+            sleep 5
+          done
+          echo 'TARGET_REQUIRED_GATES_TIMEOUT'
+          exit 1
 
       - name: Wait for governed merge window
         shell: bash
@@ -57,15 +107,17 @@ jobs:
 
       - name: Revalidate exact PR and protected gates
         shell: bash
+        env:
+          TARGET_HEAD: ${{ steps.sync.outputs.target_head }}
         run: |
           set -euo pipefail
           pr=$(gh api "repos/$REPO/pulls/$TARGET_PR")
           test "$(jq -r '.state' <<<"$pr")" = 'open'
           test "$(jq -r '.draft' <<<"$pr")" = 'false'
           test "$(jq -r '.base.ref' <<<"$pr")" = 'main'
-          test "$(jq -r '.head.sha' <<<"$pr")" = "$EXPECTED_HEAD"
+          test "$(jq -r '.head.sha' <<<"$pr")" = "$TARGET_HEAD"
 
-          runs=$(gh api "repos/$REPO/actions/runs?head_sha=$EXPECTED_HEAD&per_page=100")
+          runs=$(gh api "repos/$REPO/actions/runs?head_sha=$TARGET_HEAD&per_page=100")
           for required in 'Quality Gate' 'Autonomy Safety' 'Security Supply Chain'; do
             conclusion=$(jq -r --arg name "$required" '[.workflow_runs[] | select(.name == $name)] | sort_by(.created_at) | last | .conclusion // ""' <<<"$runs")
             test "$conclusion" = 'success' || { echo "REQUIRED_GATE_NOT_GREEN:$required:$conclusion"; exit 1; }
@@ -74,9 +126,11 @@ jobs:
       - name: Merge exact canary PR once
         id: merge
         shell: bash
+        env:
+          TARGET_HEAD: ${{ steps.sync.outputs.target_head }}
         run: |
           set -euo pipefail
-          response=$(gh api --method PUT "repos/$REPO/pulls/$TARGET_PR/merge" -f sha="$EXPECTED_HEAD" -f merge_method='squash')
+          response=$(gh api --method PUT "repos/$REPO/pulls/$TARGET_PR/merge" -f sha="$TARGET_HEAD" -f merge_method='squash')
           test "$(jq -r '.merged' <<<"$response")" = 'true'
           merge_sha=$(jq -r '.sha' <<<"$response")
           test "$merge_sha" != 'null'
@@ -109,7 +163,7 @@ jobs:
           done
           test -n "$run_id" || { echo 'PUBLISHER_RUN_NOT_FOUND'; exit 1; }
 
-          for _ in $(seq 1 120); do
+          for _ in $(seq 1 180); do
             run=$(gh api "repos/$REPO/actions/runs/$run_id")
             status=$(jq -r '.status' <<<"$run")
             if [ "$status" = 'completed' ]; then
@@ -166,7 +220,7 @@ jobs:
           done
           test -n "$run_id" || { echo 'RECONCILIATION_RUN_NOT_FOUND'; exit 1; }
 
-          for _ in $(seq 1 120); do
+          for _ in $(seq 1 180); do
             run=$(gh api "repos/$REPO/actions/runs/$run_id")
             status=$(jq -r '.status' <<<"$run")
             if [ "$status" = 'completed' ]; then
