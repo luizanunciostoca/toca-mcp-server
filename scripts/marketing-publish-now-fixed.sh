@@ -21,6 +21,15 @@ if legacy_count != 1:
     raise SystemExit(f"FAIL_CLOSED: expected exactly one legacy evidence JSON expansion, found {legacy_count}")
 text = text.replace(legacy, fixed, 1)
 
+legacy_database_secret = 'DATABASE_URL=$DATABASE_SECRET_ID:latest'
+fixed_database_secret = 'DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION'
+legacy_database_secret_count = text.count(legacy_database_secret)
+if legacy_database_secret_count != 1:
+    raise SystemExit(
+        f"FAIL_CLOSED: expected exactly one unpinned database secret reference, found {legacy_database_secret_count}"
+    )
+text = text.replace(legacy_database_secret, fixed_database_secret, 1)
+
 sequence = '''validate_command
 authenticate_docker
 bind_source_asset
@@ -57,6 +66,7 @@ echo "P1_WRAPPER_PHASE=PATCH_GENERATED" >&2
 chmod 0700 "$PATCHED"
 bash -n "$PATCHED"
 grep -Fq 'local extra_json="${2:-}"' "$PATCHED"
+grep -Fq 'DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION' "$PATCHED"
 grep -Fq 'P1_PHASE=VALIDATE_COMMAND' "$PATCHED"
 echo "P1_COMPAT_PATCH=PASS" >&2
 
@@ -64,6 +74,10 @@ if [ "${PUBLISH_NOW_PATCH_ONLY:-false}" = "true" ]; then
   echo "P1_WRAPPER_PHASE=PATCH_ONLY_COMPLETE" >&2
   exit 0
 fi
+
+: "${DATABASE_SECRET_VERSION:?DATABASE_SECRET_VERSION_REQUIRED}"
+printf '%s' "$DATABASE_SECRET_VERSION" | grep -Eq '^[1-9][0-9]*$'
+echo "P1_DATABASE_SECRET_VERSION=PINNED" >&2
 
 echo "P1_WRAPPER_PHASE=EXECUTE_PATCHED_SCRIPT" >&2
 exec bash "$PATCHED"
