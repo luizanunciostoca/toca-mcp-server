@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
+import { hashRegistrySnapshot } from './marketing-autopilot-registry-binding.mjs';
 
 const MODE = process.argv[2] ?? 'scan';
 const POLICY_PATH =
@@ -19,6 +20,22 @@ assert(
 assert(
   policy.canonicalWriter?.providerPublicationWriteAuthorized === false,
   'AUTOPILOT_SCHEDULER_PROVIDER_WRITE_MUST_BE_FALSE',
+);
+assert(
+  policy.canonicalWriter?.durableCommandRequiredState === 'NOOP',
+  'AUTOPILOT_DURABLE_COMMAND_POLICY_MUST_BE_NOOP',
+);
+assert(
+  policy.canonicalWriter?.ephemeralCommandAllowed === true,
+  'AUTOPILOT_EPHEMERAL_COMMAND_MUST_BE_ALLOWED',
+);
+assert(
+  policy.schedulerAuthority?.providerPublicationWriteAuthorized === false,
+  'AUTOPILOT_SCHEDULER_DIRECT_PROVIDER_WRITE_FORBIDDEN',
+);
+assert(
+  policy.schedulerAuthority?.metaCredentialAccessAuthorized === false,
+  'AUTOPILOT_SCHEDULER_META_CREDENTIAL_ACCESS_FORBIDDEN',
 );
 assert(policy.rollout?.phase === 'CANARY', 'AUTOPILOT_ROLLOUT_PHASE_INVALID');
 assert(policy.rollout?.generalAutonomy !== true, 'AUTOPILOT_ROLLOUT_GENERAL_AUTONOMY_FORBIDDEN');
@@ -97,6 +114,7 @@ function selectCandidate(registryRows, { leadSeconds, forcedContentItemId: force
         format: text(item.format),
         expectedAssetSha256: validated.binding.outputSha256,
         correlationId: validated.binding.correlationId,
+        registrySnapshotSha256: validated.registrySnapshotSha256,
       });
     } catch (error) {
       rejected.push({ contentItemId: id, reason: errorMessage(error) });
@@ -151,6 +169,7 @@ function validateBoundItem(item, contentItemId) {
   assert(text(item.copy_id) === binding.copyId, 'AUTOPILOT_COPY_BINDING_MISMATCH');
   assert(text(item.message) === binding.registryMessage, 'AUTOPILOT_MESSAGE_BINDING_MISMATCH');
   assert(text(item.cta) === binding.registryCta, 'AUTOPILOT_CTA_BINDING_MISMATCH');
+  assert(text(item.correlation_id) === binding.correlationId, 'AUTOPILOT_CORRELATION_BINDING_MISMATCH');
   assert(text(item.master_asset_id) === binding.masterAssetId, 'AUTOPILOT_MASTER_ASSET_MISMATCH');
   assert(text(item.master_drive_file_id) === binding.driveFileId, 'AUTOPILOT_DRIVE_FILE_MISMATCH');
   assert(text(item.master_status) === required.masterStatus, 'AUTOPILOT_MASTER_STATUS_INVALID');
@@ -205,8 +224,10 @@ function validateBoundItem(item, contentItemId) {
     scheduledAtMs === Date.parse(binding.expectedScheduledAt),
     'AUTOPILOT_SCHEDULE_BINDING_MISMATCH',
   );
+  const registrySnapshotSha256 = hashRegistrySnapshot(item);
+  assert(/^[a-f0-9]{64}$/.test(registrySnapshotSha256), 'AUTOPILOT_REGISTRY_SNAPSHOT_HASH_INVALID');
 
-  return { item, binding, scheduledAt, scheduledAtMs };
+  return { item, binding, scheduledAt, scheduledAtMs, registrySnapshotSha256 };
 }
 
 function assertDue(scheduledAtMs) {
@@ -219,7 +240,7 @@ function assertDue(scheduledAtMs) {
 }
 
 function buildCommand(validated, targetCodeSha) {
-  const { item, binding, scheduledAt, scheduledAtMs } = validated;
+  const { item, binding, scheduledAt, scheduledAtMs, registrySnapshotSha256 } = validated;
   const contentItemId = text(item.content_item_id);
   const issuedAt = formatBahia(now);
   const expiresAt = formatBahia(new Date(scheduledAtMs + policy.schedule.lateWindowSeconds * 1000));
@@ -267,13 +288,14 @@ function buildCommand(validated, targetCodeSha) {
       scheduledAt,
       notBefore: scheduledAt,
       expiresAt,
+      registrySnapshotSha256,
       bindingSourceCommit: binding.bindingSource?.commit ?? null,
     },
   };
 }
 
 function verifyCommand(command, validated) {
-  const { item, binding, scheduledAt, scheduledAtMs } = validated;
+  const { item, binding, scheduledAt, scheduledAtMs, registrySnapshotSha256 } = validated;
   const contentItemId = text(item.content_item_id);
   const expectedIdempotency = `GCP-AUTOPILOT-${contentItemId}-${binding.outputSha256.slice(0, 12)}-${binding.idempotencyVersion}`;
   const targetCodeSha = process.env.MARKETING_AUTOPILOT_TARGET_CODE_SHA?.trim() ?? '';
@@ -316,6 +338,10 @@ function verifyCommand(command, validated) {
     'AUTOPILOT_SCHEDULER_POLICY_BINDING_MISMATCH',
   );
   assert(command.schedulerBinding?.notBefore === scheduledAt, 'AUTOPILOT_NOT_BEFORE_MISMATCH');
+  assert(
+    command.schedulerBinding?.registrySnapshotSha256 === registrySnapshotSha256,
+    'AUTOPILOT_REGISTRY_SNAPSHOT_MISMATCH',
+  );
   assert(
     Date.parse(command.schedulerBinding?.expiresAt ?? '') ===
       scheduledAtMs + policy.schedule.lateWindowSeconds * 1000,
@@ -370,9 +396,34 @@ function canonicalScheduledAt(value) {
     const ss = pad2(utc.getUTCSeconds());
     return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}-03:00`;
   }
-  const parsed = Date.parse(raw);
+  const isoWallClock = raw.match(
+    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/,
+  );
+  if (isoWallClock) {
+    const [, yyyy, mm, dd, hh, mi, ss = '00'] = isoWallClock;
+    return assertBahiaWallClock(`${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}-03:00`);
+  }
+  const brWallClock = raw.match(
+    /^(\d{2})\/(\d{2})\/(\d{4})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/,
+  );
+  if (brWallClock) {
+    const [, dd, mm, yyyy, hh, mi, ss = '00'] = brWallClock;
+    return assertBahiaWallClock(`${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}-03:00`);
+  }
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(raw)) {
+    const parsed = Date.parse(raw);
+    assert(Number.isFinite(parsed), 'AUTOPILOT_SCHEDULED_AT_UNPARSABLE');
+    return formatBahia(new Date(parsed));
+  }
+  throw new Error('AUTOPILOT_SCHEDULED_AT_UNPARSABLE');
+}
+
+function assertBahiaWallClock(value) {
+  const parsed = Date.parse(value);
   assert(Number.isFinite(parsed), 'AUTOPILOT_SCHEDULED_AT_UNPARSABLE');
-  return formatBahia(new Date(parsed));
+  const canonical = formatBahia(new Date(parsed));
+  assert(canonical === value, 'AUTOPILOT_SCHEDULED_AT_WALL_CLOCK_INVALID');
+  return value;
 }
 
 function formatBahia(date) {
