@@ -61,7 +61,8 @@ jobs:
           fi
 
           ARTIFACTREGISTRY_SERVICE_ENABLED=false
-          if gcloud services list --enabled --project "$PROJECT_ID" --filter='name:artifactregistry.googleapis.com' --format='value(name)' | grep -Fxq 'artifactregistry.googleapis.com'; then
+          ARTIFACTREGISTRY_SERVICE_STATE="$(gcloud services describe artifactregistry.googleapis.com --project "$PROJECT_ID" --format='value(state)' 2>/tmp/artifactregistry-service.err || true)"
+          if [[ "$ARTIFACTREGISTRY_SERVICE_STATE" == "ENABLED" ]]; then
             ARTIFACTREGISTRY_SERVICE_ENABLED=true
           fi
 
@@ -86,10 +87,11 @@ jobs:
             --argjson billingEnabled "$BILLING_ENABLED" \
             --argjson billingAccountLinked "$BILLING_ACCOUNT_LINKED" \
             --arg billingAccountOpen "$BILLING_ACCOUNT_OPEN" \
+            --arg artifactRegistryServiceState "$ARTIFACTREGISTRY_SERVICE_STATE" \
             --argjson artifactRegistryServiceEnabled "$ARTIFACTREGISTRY_SERVICE_ENABLED" \
             --argjson repositoryReadable "$REPOSITORY_READABLE" \
             --arg repositoryErrorClass "$REPOSITORY_ERROR_CLASS" \
-            '{schemaVersion:"toca.ag01.production-billing-service-readback.v1",billingEnabled:$billingEnabled,billingAccountLinked:$billingAccountLinked,billingAccountOpen:(if $billingAccountOpen=="true" then true elif $billingAccountOpen=="false" then false else null end),artifactRegistryServiceEnabled:$artifactRegistryServiceEnabled,repositoryReadable:$repositoryReadable,repositoryErrorClass:$repositoryErrorClass}' \
+            '{schemaVersion:"toca.ag01.production-billing-service-readback.v2",billingEnabled:$billingEnabled,billingAccountLinked:$billingAccountLinked,billingAccountOpen:(if $billingAccountOpen=="true" then true elif $billingAccountOpen=="false" then false else null end),artifactRegistryServiceState:$artifactRegistryServiceState,artifactRegistryServiceEnabled:$artifactRegistryServiceEnabled,repositoryReadable:$repositoryReadable,repositoryErrorClass:$repositoryErrorClass}' \
             > ag01-billing-service-readback/state.json
 
           jq -n \
