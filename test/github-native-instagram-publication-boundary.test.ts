@@ -82,7 +82,9 @@ describe('GitHub-native Instagram publication boundary', () => {
     expect(gcpPublishNow).not.toContain('ALLOW_LEGACY_GCP_MARKETING_PUBLISH_NOW');
     expect(gcpPublishNow).toContain("if: steps.command.outputs.action == 'PUBLISH_NOW'");
     expect(gcpPublishNow).toContain('target_code_sha=$(jq -r .targetCodeSha');
-    expect(gcpPublishNow).toContain('GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh');
+    expect(gcpPublishNow).toContain(
+      'GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh',
+    );
   });
 
   it('keeps the command-file GCP autopilot lane retired with no cloud or provider side effects', () => {
