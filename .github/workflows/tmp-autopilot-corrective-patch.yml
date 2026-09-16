@@ -144,10 +144,27 @@ jobs:
 
           test_path = Path('test/marketing-autopilot-scheduler-restoration.test.ts')
           text = test_path.read_text()
-          old = """      rejected: [{ contentItemId: storyId, reason: 'AUTOPILOT_STORY_STATUS_INVALID' }],"""
-          new = """      rejected: expect.arrayContaining([
-                { contentItemId: storyId, reason: 'AUTOPILOT_STORY_STATUS_INVALID' },
-              ]),"""
+          old = """    expect(parseOutput(result.stdout)).toMatchObject({
+              status: 'NO_CANDIDATE',
+              rolloutPhase: 'LIMITED',
+              rejected: [{ contentItemId: storyId, reason: 'AUTOPILOT_STORY_STATUS_INVALID' }],
+            });"""
+          new = """    const output = parseOutput(result.stdout);
+            expect(output).toMatchObject({ status: 'NO_CANDIDATE', rolloutPhase: 'LIMITED' });
+            if (typeof output !== 'object' || output === null || !('rejected' in output)) {
+              throw new Error('AUTOPILOT_TEST_REJECTIONS_MISSING');
+            }
+            const rejected = (output as { rejected?: unknown }).rejected;
+            expect(Array.isArray(rejected)).toBe(true);
+            const storyRejected = (rejected as unknown[]).some((item) => {
+              if (typeof item !== 'object' || item === null) return false;
+              const record = item as Record<string, unknown>;
+              return (
+                record.contentItemId === storyId &&
+                record.reason === 'AUTOPILOT_STORY_STATUS_INVALID'
+              );
+            });
+            expect(storyRejected).toBe(true);"""
           if text.count(old) != 1:
               raise SystemExit(f'Story rejection assertion mismatch count={text.count(old)}')
           test_path.write_text(text.replace(old, new, 1))
