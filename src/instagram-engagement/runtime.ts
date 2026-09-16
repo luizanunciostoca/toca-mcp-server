@@ -19,6 +19,7 @@ import {
   GoogleSheetsInstagramEngagementKnowledgeSource,
   type InstagramEngagementKnowledgeSource,
 } from './knowledge.js';
+import { MultiIntentInstagramEngagementKnowledgeSource } from './multi-intent-knowledge.js';
 import { PostgresInstagramEngagementKnowledgeBaseSource } from './postgres-knowledge-base.js';
 import { PostgresInstagramEngagementKnowledgeSource } from './postgres-knowledge.js';
 import { InstagramEngagementProcessor } from './processor.js';
@@ -175,14 +176,18 @@ function createKnowledgeSource(
   if (kind === 'postgres') {
     const faq = new PostgresInstagramEngagementKnowledgeSource(pool, spreadsheetId);
     if (!isTrue(env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_BASE_ENABLED)) {
-      return { source: faq, mode: 'postgres' };
+      return {
+        source: new MultiIntentInstagramEngagementKnowledgeSource(faq),
+        mode: 'postgres',
+      };
     }
     const knowledgeBase = new PostgresInstagramEngagementKnowledgeBaseSource(pool, {
       minimumConfidence: boundedNumber(env.INSTAGRAM_ENGAGEMENT_KB_MIN_CONFIDENCE, 0.58, 0.3, 0.95),
       limit: boundedInteger(env.INSTAGRAM_ENGAGEMENT_KB_CANDIDATE_LIMIT, 12, 1, 50),
     });
+    const tiered = new TieredInstagramEngagementKnowledgeSource({ faq, knowledgeBase });
     return {
-      source: new TieredInstagramEngagementKnowledgeSource({ faq, knowledgeBase }),
+      source: new MultiIntentInstagramEngagementKnowledgeSource(tiered),
       mode: 'postgres',
     };
   }
@@ -192,13 +197,14 @@ function createKnowledgeSource(
   const sheetsClient = new GoogleSheetsRestClient(sheetsAuth.resolver, {
     tokenReference: sheetsAuth.tokenReference,
   });
+  const sheets = new GoogleSheetsInstagramEngagementKnowledgeSource({
+    client: sheetsClient,
+    spreadsheetId,
+    range: env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_RANGE?.trim() || 'FAQ_IA!A:T',
+    cacheMs: boundedInteger(env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_CACHE_MS, 60_000, 0, 3_600_000),
+  });
   return {
-    source: new GoogleSheetsInstagramEngagementKnowledgeSource({
-      client: sheetsClient,
-      spreadsheetId,
-      range: env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_RANGE?.trim() || 'FAQ_IA!A:T',
-      cacheMs: boundedInteger(env.INSTAGRAM_ENGAGEMENT_KNOWLEDGE_CACHE_MS, 60_000, 0, 3_600_000),
-    }),
+    source: new MultiIntentInstagramEngagementKnowledgeSource(sheets),
     mode: `google-sheets:${sheetsAuth.mode}`,
   };
 }
