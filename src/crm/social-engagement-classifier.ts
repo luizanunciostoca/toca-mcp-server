@@ -90,6 +90,15 @@ const EVENT_INFO_PATTERNS = [
   'o sunset de sabado tem samba',
   'o sunset de sabado tem pagode',
   'qual a programacao de sabado',
+  'qual a programacao de hoje',
+  'qual e a programacao de hoje',
+  'programacao de hoje',
+  'programacao hoje',
+  'o que tem hoje na toca',
+  'hoje tem o que na toca',
+  'o que acontece hoje na toca',
+  'tem evento hoje',
+  'agenda de hoje',
 ];
 
 export function classifySocialEngagement(text: string): SocialEngagementClassification {
