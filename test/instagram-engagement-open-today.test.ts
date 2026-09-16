@@ -90,6 +90,24 @@ describe('Instagram engagement open-today routing', () => {
     expect(result.knowledge?.answer).toContain('Sunset acontece todos os dias a partir das 16:30');
   });
 
+  it('preserves a core gastronomy route when open-today wording refers to food', () => {
+    expect(classifySocialEngagement('Tem comida aberta hoje?')).toMatchObject({
+      intent: 'FAQ_OPERATIONAL',
+      topic: 'GASTRONOMY',
+    });
+  });
+
+  it('prefers Sunset-specific verified hours when Sunset is named', () => {
+    const classification = classifySocialEngagement('O Sunset funciona hoje?');
+
+    expect(classification.intent).toBe('LOCATION_HOURS');
+    expect(resolveKnowledgeRows('O Sunset funciona hoje?', classification.intent, ROWS)).toMatchObject({
+      faqId: 'FAQ-001',
+      factsVerified: true,
+      confidence: 0.9,
+    });
+  });
+
   it('does not bind a Party-specific today question to generic Toca opening hours', () => {
     const classification = classifySocialEngagement('A The Party funciona hoje?');
 
