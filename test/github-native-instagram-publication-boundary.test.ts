@@ -106,7 +106,11 @@ describe('Instagram publication single-writer boundary', () => {
   });
 
   it('restores Marketing Autopilot only as an orchestration scheduler', () => {
-    expect(autopilot).toContain("cron: '3/5 * * * *'");
+    expect(autopilot).toContain("cron: '56 8,10,14,15,19 * * *'");
+    expect(autopilot).toContain("cron: '7 9,11,15,16,20 * * *'");
+    expect(autopilot).toContain("cron: '17 9,11,15,16,20 * * *'");
+    expect(autopilot).toContain("cron: '27 9,11,15,16,20 * * *'");
+    expect(autopilot.match(/timezone: 'America\/Bahia'/g)).toHaveLength(4);
     expect(autopilot).toContain('actions: write');
     expect(autopilot).toContain('id-token: write');
     expect(autopilot).toContain('marketing-autopilot-scheduler.mjs scan');
