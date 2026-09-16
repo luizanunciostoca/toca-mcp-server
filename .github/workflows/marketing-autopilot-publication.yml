@@ -6,15 +6,6 @@ on:
   schedule:
     - cron: '3/5 * * * *'
   workflow_dispatch:
-    inputs:
-      mode:
-        description: Safe execution mode. PRECHECK never dispatches the writer.
-        required: true
-        default: PRECHECK
-        type: choice
-        options:
-          - PRECHECK
-          - AUTOPILOT
   push:
     branches:
       - main
@@ -24,6 +15,7 @@ on:
       - control/marketing-autopilot-scheduler-policy.json
       - scripts/marketing-autopilot-scheduler.mjs
       - scripts/marketing-autopilot-registry.mjs
+      - scripts/marketing-autopilot-registry-binding.mjs
 
 permissions:
   contents: read
@@ -54,17 +46,13 @@ jobs:
       - name: Resolve scheduler mode
         id: mode
         shell: bash
-        env:
-          REQUESTED_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           case "$GITHUB_EVENT_NAME" in
             schedule) mode=AUTOPILOT ;;
-            workflow_dispatch) mode="${REQUESTED_MODE:-PRECHECK}" ;;
-            push) mode=PRECHECK ;;
+            workflow_dispatch|push) mode=PRECHECK ;;
             *) echo "AUTOPILOT_UNSUPPORTED_EVENT=$GITHUB_EVENT_NAME" >&2; exit 1 ;;
           esac
-          case "$mode" in PRECHECK|AUTOPILOT) ;; *) exit 1 ;; esac
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "MARKETING_AUTOPILOT_MODE=$mode"
 
@@ -75,15 +63,23 @@ jobs:
           jq -e '
             .canonicalWriter.transport == "gcp-instagram-publish-now" and
             .canonicalWriter.providerPublicationWriteAuthorized == false and
+            .canonicalWriter.durableCommandRequiredState == "NOOP" and
+            .canonicalWriter.ephemeralCommandAllowed == true and
+            .schedulerAuthority.providerPublicationWriteAuthorized == false and
+            .schedulerAuthority.metaCredentialAccessAuthorized == false and
+            .schedulerAuthority.directCloudRunPublicationAuthorized == false and
+            .schedulerAuthority.manualAutopilotAuthorized == false and
             .rollout.phase == "CANARY" and
             .generalAutonomy == false and
             .rollout.blindRetryAuthorized == false and
             .rollout.automaticFallbackAuthorized == false
           ' "$POLICY_PATH" >/dev/null
           forbidden_meta_token_name='META_''ACCESS_TOKEN'
+          forbidden_write_flag='INSTAGRAM_PUBLICATION_WRITES_ENABLED''=true'
+          forbidden_cloud_run='gcloud run ''jobs'
           ! grep -Fq "$forbidden_meta_token_name" .github/workflows/marketing-autopilot-publication.yml
-          ! grep -Fq 'INSTAGRAM_PUBLICATION_WRITES_ENABLED=true' .github/workflows/marketing-autopilot-publication.yml
-          ! grep -Fq 'gcloud run jobs' .github/workflows/marketing-autopilot-publication.yml
+          ! grep -Fq "$forbidden_write_flag" .github/workflows/marketing-autopilot-publication.yml
+          ! grep -Fq "$forbidden_cloud_run" .github/workflows/marketing-autopilot-publication.yml
           echo 'MARKETING_AUTOPILOT_SINGLE_WRITER_BOUNDARY=PASS'
 
       - name: Authenticate for canonical Content Registry access
@@ -153,6 +149,7 @@ jobs:
 
       - name: Revalidate exact item at due time
         if: steps.mode.outputs.mode == 'AUTOPILOT' && steps.scan.outputs.status == 'READY'
+        id: due
         shell: bash
         env:
           GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
@@ -163,8 +160,9 @@ jobs:
             node scripts/marketing-autopilot-scheduler.mjs scan > marketing-autopilot-due-revalidation.json
           jq -e \
             --arg id "$MARKETING_AUTOPILOT_CONTENT_ITEM_ID" \
-            '.status == "READY" and .candidate.contentItemId == $id and .candidate.waitSeconds == 0' \
+            '.status == "READY" and .candidate.contentItemId == $id and .candidate.waitSeconds == 0 and (.candidate.registrySnapshotSha256 | test("^[a-f0-9]{64}$"))' \
             marketing-autopilot-due-revalidation.json >/dev/null
+          echo "registry_snapshot_sha256=$(jq -r .candidate.registrySnapshotSha256 marketing-autopilot-due-revalidation.json)" >> "$GITHUB_OUTPUT"
           echo 'MARKETING_AUTOPILOT_DUE_REVALIDATION=PASS'
 
       - name: Reject duplicate or ambiguous prior writer attempts
@@ -176,19 +174,68 @@ jobs:
           CONTENT_ITEM_ID: ${{ steps.scan.outputs.content_item_id }}
         run: |
           set -euo pipefail
+          baseline_run_id="$(jq -r '.rollout.providerReconciliationBaseline.runId' "$POLICY_PATH")"
+          baseline_completed_at="$(jq -r '.rollout.providerReconciliationBaseline.completedAt' "$POLICY_PATH")"
+          baseline_content_item="$(jq -r '.rollout.providerReconciliationBaseline.contentItemId' "$POLICY_PATH")"
+          test "$baseline_content_item" = "$CONTENT_ITEM_ID"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${baseline_run_id}" > /tmp/baseline-run.json
+          jq -e \
+            --arg completed "$baseline_completed_at" '
+              .name == "Instagram GCP Publication Recovery Preflight" and
+              .status == "completed" and
+              .conclusion == "success" and
+              .updated_at == $completed
+            ' /tmp/baseline-run.json >/dev/null
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${CANONICAL_WRITER_WORKFLOW}/runs?per_page=100" > /tmp/writer-runs.json
+          : > /tmp/matching-attempts.jsonl
           expected_title="Marketing Publish Now — ${CONTENT_ITEM_ID}"
-          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${CANONICAL_WRITER_WORKFLOW}/runs?event=workflow_dispatch&per_page=100" \
-            > /tmp/writer-runs.json
-          existing="$(jq -c --arg title "$expected_title" '
-            [.workflow_runs[] | select(.display_title == $title)] | sort_by(.created_at) | last // empty
-          ' /tmp/writer-runs.json)"
-          if [ -z "$existing" ]; then
+
+          while IFS= read -r run; do
+            event="$(jq -r .event <<<"$run")"
+            created_at="$(jq -r .created_at <<<"$run")"
+            run_id="$(jq -r .id <<<"$run")"
+            matches=false
+            if [ "$event" = workflow_dispatch ] && [ "$(jq -r .display_title <<<"$run")" = "$expected_title" ]; then
+              matches=true
+            elif [ "$event" = push ]; then
+              head_sha="$(jq -r .head_sha <<<"$run")"
+              set +e
+              command_json="$(gh api "repos/${GITHUB_REPOSITORY}/contents/control/marketing-publish-now-command.json?ref=${head_sha}" \
+                --jq .content 2>/dev/null | tr -d '\n' | base64 --decode 2>/dev/null)"
+              command_rc=$?
+              set -e
+              if [ "$command_rc" -ne 0 ] || [ -z "$command_json" ]; then
+                if [[ "$created_at" > "$baseline_completed_at" ]]; then
+                  echo "MARKETING_AUTOPILOT_AMBIGUOUS_PUSH_ATTEMPT=$run_id" >&2
+                  exit 1
+                fi
+                continue
+              fi
+              if jq -e --arg id "$CONTENT_ITEM_ID" '.action == "PUBLISH_NOW" and .contentItemId == $id' <<<"$command_json" >/dev/null; then
+                matches=true
+              fi
+            fi
+            if [ "$matches" = true ]; then
+              jq -c '.' <<<"$run" >> /tmp/matching-attempts.jsonl
+            fi
+          done < <(jq -c '.workflow_runs[] | select(.event == "workflow_dispatch" or .event == "push")' /tmp/writer-runs.json)
+
+          if [ ! -s /tmp/matching-attempts.jsonl ]; then
             echo 'state=NONE' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          status="$(jq -r .status <<<"$existing")"
-          conclusion="$(jq -r '.conclusion // ""' <<<"$existing")"
-          run_id="$(jq -r .id <<<"$existing")"
+
+          post_baseline="$(jq -s --arg baseline "$baseline_completed_at" '[.[] | select(.created_at > $baseline)] | sort_by(.created_at) | last // empty' /tmp/matching-attempts.jsonl)"
+          if [ -z "$post_baseline" ] || [ "$post_baseline" = null ]; then
+            echo 'state=NONE' >> "$GITHUB_OUTPUT"
+            echo "MARKETING_AUTOPILOT_HISTORICAL_ATTEMPTS_RECONCILED_BY_BASELINE=$baseline_run_id"
+            exit 0
+          fi
+
+          status="$(jq -r .status <<<"$post_baseline")"
+          conclusion="$(jq -r '.conclusion // ""' <<<"$post_baseline")"
+          run_id="$(jq -r .id <<<"$post_baseline")"
           echo "existing_run_id=$run_id" >> "$GITHUB_OUTPUT"
           if [ "$status" != completed ]; then
             echo 'state=IN_FLIGHT' >> "$GITHUB_OUTPUT"
@@ -203,6 +250,43 @@ jobs:
           echo 'state=RECONCILIATION_REQUIRED' >> "$GITHUB_OUTPUT"
           echo "MARKETING_AUTOPILOT_RECONCILIATION_REQUIRED existing_run_id=$run_id conclusion=$conclusion" >&2
           exit 1
+
+      - name: Create one-shot writer authorization
+        if: >-
+          steps.mode.outputs.mode == 'AUTOPILOT' &&
+          steps.scan.outputs.status == 'READY' &&
+          steps.prior.outputs.state == 'NONE'
+        shell: bash
+        env:
+          CONTENT_ITEM_ID: ${{ steps.scan.outputs.content_item_id }}
+          SCHEDULED_AT: ${{ steps.scan.outputs.scheduled_at }}
+          REGISTRY_SNAPSHOT_SHA256: ${{ steps.due.outputs.registry_snapshot_sha256 }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg sourceRunId "$GITHUB_RUN_ID" \
+            --arg sourceRunAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg event "$GITHUB_EVENT_NAME" \
+            --arg contentItemId "$CONTENT_ITEM_ID" \
+            --arg scheduledAt "$SCHEDULED_AT" \
+            --arg registrySnapshotSha256 "$REGISTRY_SNAPSHOT_SHA256" \
+            --arg authorizedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion:1,sourceRunId:$sourceRunId,sourceRunAttempt:$sourceRunAttempt,sourceSha:$sourceSha,event:$event,contentItemId:$contentItemId,scheduledAt:$scheduledAt,priorAttemptState:"NONE",registrySnapshotSha256:$registrySnapshotSha256,authorizedAt:$authorizedAt}' \
+            > marketing-autopilot-writer-authorization.json
+          jq -e '.event == "schedule" and .priorAttemptState == "NONE" and (.registrySnapshotSha256 | test("^[a-f0-9]{64}$"))' marketing-autopilot-writer-authorization.json >/dev/null
+
+      - name: Persist one-shot writer authorization
+        if: >-
+          steps.mode.outputs.mode == 'AUTOPILOT' &&
+          steps.scan.outputs.status == 'READY' &&
+          steps.prior.outputs.state == 'NONE'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: marketing-autopilot-writer-authorization-${{ github.run_id }}
+          path: marketing-autopilot-writer-authorization.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Dispatch canonical GCP writer
         if: >-
@@ -241,5 +325,6 @@ jobs:
             marketing-autopilot-scheduler-decision.json
             marketing-autopilot-due-revalidation.json
             marketing-autopilot-registry-reconciliation.json
+            marketing-autopilot-writer-authorization.json
           if-no-files-found: warn
           retention-days: 90
