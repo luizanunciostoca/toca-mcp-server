@@ -1,5 +1,5 @@
 {
-  "version": 10,
+  "version": 11,
   "projectId": "toca-mcp-production",
   "region": "southamerica-east1",
   "adminServiceAccount": "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com",
@@ -113,10 +113,46 @@
     }
   },
   "publicationControlPlane": {
-    "canonicalTransport": "github-native-instagram-publication",
-    "canonicalWorkflow": ".github/workflows/github-native-instagram-publisher.yml",
-    "assetTransport": "github-publication-assets-branch",
-    "stateTransport": "github-publication-state-branch",
+    "canonicalTransport": "gcp-instagram-publish-now",
+    "canonicalWorkflow": ".github/workflows/marketing-publish-now.yml",
+    "assetTransport": "google-drive-exact-sha256-to-private-gcs",
+    "stateTransport": "cloud-sql-idempotency-audit",
+    "gcpInstagramPublishNowTransport": {
+      "lifecycleStatus": "LIMITED",
+      "publicationExecutionAuthorized": true,
+      "publicationSchedulerAuthorized": false,
+      "providerPublicationWriteAuthorized": true,
+      "approvalTransport": "protected-main-command",
+      "commandFile": "control/marketing-publish-now-command.json",
+      "writeAuthority": "EXPLICIT_APPROVAL_EXACT_ASSET_ONLY",
+      "deployServiceAccount": "toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com",
+      "runtimeServiceAccount": "toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com",
+      "workloadIdentityProvider": "projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp",
+      "databaseSecretId": "toca-database-url",
+      "databaseSecretVersion": "1",
+      "metaTokenSecretId": "toca-meta-oauth-token",
+      "publicationAssetBucket": "toca-mcp-publication-assets",
+      "requiredControls": {
+        "protectedMain": true,
+        "freshCommand": true,
+        "explicitApproval": true,
+        "exactAssetSha256": true,
+        "creativeTruth": true,
+        "rightsClearance": true,
+        "idempotency": true,
+        "writeDisableAfterAttempt": true,
+        "providerReadback": true,
+        "immutableEvidence": true
+      }
+    },
+    "githubNativeInstagramPublicationTransport": {
+      "lifecycleStatus": "SHADOW_READ_ONLY",
+      "publicationExecutionAuthorized": true,
+      "providerPublicationWriteAuthorized": false,
+      "repositoryDispatchWriteAuthorized": false,
+      "scheduleShadowAuthorized": true,
+      "canonicalForPublication": false
+    },
     "legacyGcpInstagramPublicationTransport": {
       "lifecycleStatus": "RETIRED",
       "publicationExecutionAuthorized": false,
@@ -124,6 +160,7 @@
       "providerPublicationWriteAuthorized": false,
       "physicalEngagementRuntimeMayRemain": true,
       "replacedBy": "github-native-instagram-publication",
+      "currentCanonicalReplacement": "gcp-instagram-publish-now",
       "retiredAt": "2026-09-12",
       "historicalTopologyRetainedForEvidence": true
     }
