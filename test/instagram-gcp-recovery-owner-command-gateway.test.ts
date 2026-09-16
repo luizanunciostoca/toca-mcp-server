@@ -11,7 +11,7 @@ describe('Instagram GCP recovery owner-command gateway', () => {
     const guards = [
       'issue_comment:',
       '      - created',
-      "github.event.issue.number == 862",
+      'github.event.issue.number == 862',
       "github.actor == 'luizanunciostoca'",
       "github.event.comment.user.login == 'luizanunciostoca'",
       "github.event.comment.author_association == 'OWNER'",
@@ -43,6 +43,6 @@ describe('Instagram GCP recovery owner-command gateway', () => {
     expect(workflow).toContain('test "$live_main_sha" = "$AUTHORIZED_SOURCE_SHA"');
     expect(workflow).toContain('instagram-gcp-publication-recovery-preflight.yml');
     expect(workflow).toContain('/dispatches');
-    expect(workflow).toContain("test \"$http_status\" = '204'");
+    expect(workflow).toContain('test "$http_status" = \'204\'');
   });
 });
