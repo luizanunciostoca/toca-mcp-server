@@ -1,0 +1,182 @@
+name: Instagram GCP Publication Execution Runtime Readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorization:
+        description: Exact owner authorization phrase
+        required: true
+        type: string
+      expected_source_sha:
+        description: Exact protected main SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: instagram-gcp-publication-execution-runtime-readiness
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+
+jobs:
+  execution-runtime-readiness:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact protected main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Guard exact owner authorization and non-mutating boundary
+        shell: bash
+        env:
+          READINESS_AUTHORIZATION: ${{ inputs.authorization }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$EXPECTED_SOURCE_SHA" = "$GITHUB_SHA"
+          test "$READINESS_AUTHORIZATION" = 'AUTHORIZE_GCP_INSTAGRAM_EXECUTION_RUNTIME_READINESS'
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          probe=src/instagram-publication-execution-readiness.ts
+          test -f "$probe"
+          grep -Fq "begin read only" "$probe"
+          grep -Fq "databaseMutationAttempted: false" "$probe"
+          grep -Fq "providerCredentialsMounted: false" "$probe"
+          grep -Fq "providerWriteAttempted: false" "$probe"
+          if grep -Eiq "insert[[:space:]]+into|delete[[:space:]]+from|alter[[:space:]]+table|create[[:space:]]+table|drop[[:space:]]+table|truncate[[:space:]]+table" "$probe"; then
+            echo 'GCP_PUBLICATION_EXECUTION_READINESS_MUTATING_SQL_FORBIDDEN'
+            exit 1
+          fi
+          echo 'GCP_PUBLICATION_EXECUTION_READINESS_BOUNDARY=VERIFIED'
+
+      - name: Authenticate production deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Build and push exact application image by immutable digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          IMAGE_REPOSITORY="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/instagram-gcp-execution-readiness"
+          IMAGE_TAG="${IMAGE_REPOSITORY}:${GITHUB_SHA}"
+          docker build -t "$IMAGE_TAG" .
+          docker push "$IMAGE_TAG"
+          IMAGE_DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" --format='value(image_summary.digest)')"
+          case "$IMAGE_DIGEST" in
+            sha256:*) ;;
+            *) echo 'GCP_PUBLICATION_EXECUTION_READINESS_IMAGE_DIGEST_INVALID'; exit 1 ;;
+          esac
+          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
+          echo "IMMUTABLE_IMAGE=${IMAGE_REPOSITORY}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
+          echo "JOB_NAME=toca-instagram-exec-ready-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Execute Cloud SQL readiness under production runtime identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p gcp-execution-readiness-evidence
+          cleanup() {
+            gcloud run jobs delete "$JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --quiet >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMMUTABLE_IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --command node \
+            --args dist/src/instagram-publication-execution-readiness.js \
+            --set-env-vars "SOURCE_SHA=$GITHUB_SHA" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+
+          gcloud run jobs execute "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+
+          result_line=''
+          for _ in $(seq 1 18); do
+            result_line="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"GCP_PUBLICATION_EXECUTION_RUNTIME_READINESS=\"" \
+              --project "$GCP_PROJECT_ID" \
+              --freshness=20m \
+              --limit=20 \
+              --order=desc \
+              --format='value(textPayload)' | grep 'GCP_PUBLICATION_EXECUTION_RUNTIME_READINESS=' | head -n1 || true)"
+            [ -n "$result_line" ] && break
+            sleep 5
+          done
+          test -n "$result_line"
+          result_json="${result_line#GCP_PUBLICATION_EXECUTION_RUNTIME_READINESS=}"
+          printf '%s\n' "$result_json" | jq -e \
+            --arg sha "$GITHUB_SHA" '
+              .schemaVersion == 1 and
+              .sourceSha == $sha and
+              .cloudSqlConnected == true and
+              .databaseSecretMounted == true and
+              .transactionReadOnly == true and
+              .requiredTablesPresent == true and
+              .requiredColumnsPresent == true and
+              .idempotencyUnique == true and
+              .requiredPrivilegesPresent == true and
+              .tenantDefaultsPresent == true and
+              .databaseRoleNonSuperuser == true and
+              .databaseMutationAttempted == false and
+              .providerCredentialsMounted == false and
+              .providerWriteAttempted == false and
+              .result == "PASS"
+            ' >/dev/null
+
+          printf '%s\n' "$result_json" | jq \
+            --arg imageDigest "$IMAGE_DIGEST" \
+            --arg cloudSqlInstance "$CLOUD_SQL_INSTANCE" \
+            '. + {imageDigest:$imageDigest,cloudSqlInstance:$cloudSqlInstance}' \
+            > gcp-execution-readiness-evidence/execution-runtime-readiness.json
+          jq -e '.imageDigest | startswith("sha256:")' \
+            gcp-execution-readiness-evidence/execution-runtime-readiness.json >/dev/null
+          echo 'GCP_PUBLICATION_EXECUTION_RUNTIME_READINESS=VERIFIED'
+
+      - name: Upload sanitized execution-runtime readiness evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instagram-gcp-execution-runtime-readiness-${{ github.run_id }}
+          path: gcp-execution-readiness-evidence/execution-runtime-readiness.json
+          if-no-files-found: error
+          retention-days: 90
