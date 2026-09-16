@@ -6,6 +6,7 @@ on:
       - ops/roll-forward-marketing-canary-1500-20260916
     paths:
       - .github/workflows/tmp-roll-forward-canary.yml
+      - .github/tmp-roll-forward-canary.py
 
 permissions:
   contents: write
@@ -31,15 +32,29 @@ jobs:
       - name: Format and validate roll-forward
         run: |
           set -euo pipefail
-          pnpm exec prettier --write control/marketing-autopilot-scheduler-policy.json test/marketing-autopilot-scheduler-restoration.test.ts
-          pnpm exec prettier --check control/marketing-autopilot-scheduler-policy.json test/marketing-autopilot-scheduler-restoration.test.ts
-          pnpm exec eslint test/marketing-autopilot-scheduler-restoration.test.ts
-          pnpm exec vitest run test/marketing-autopilot-scheduler-restoration.test.ts test/github-native-instagram-publication-boundary.test.ts test/marketing-publish-now-hardening.test.ts
+          pnpm exec prettier --write \
+            control/marketing-autopilot-scheduler-policy.json \
+            test/marketing-autopilot-scheduler-restoration.test.ts \
+            test/github-native-instagram-publication-boundary.test.ts
+          pnpm exec prettier --check \
+            control/marketing-autopilot-scheduler-policy.json \
+            test/marketing-autopilot-scheduler-restoration.test.ts \
+            test/github-native-instagram-publication-boundary.test.ts
+          pnpm exec eslint \
+            test/marketing-autopilot-scheduler-restoration.test.ts \
+            test/github-native-instagram-publication-boundary.test.ts
+          pnpm exec vitest run \
+            test/marketing-autopilot-scheduler-restoration.test.ts \
+            test/github-native-instagram-publication-boundary.test.ts \
+            test/marketing-publish-now-hardening.test.ts
       - name: Commit validated production policy
         run: |
           set -euo pipefail
           git config user.name 'TOCA OS Automation'
           git config user.email 'actions@users.noreply.github.com'
-          git add control/marketing-autopilot-scheduler-policy.json test/marketing-autopilot-scheduler-restoration.test.ts
+          git add \
+            control/marketing-autopilot-scheduler-policy.json \
+            test/marketing-autopilot-scheduler-restoration.test.ts \
+            test/github-native-instagram-publication-boundary.test.ts
           git commit -m 'fix(marketing): roll canary forward to 15:00 after stale window'
           git push origin HEAD:ops/roll-forward-marketing-canary-1500-20260916
