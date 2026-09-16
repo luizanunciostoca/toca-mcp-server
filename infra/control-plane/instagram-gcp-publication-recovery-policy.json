@@ -2,6 +2,10 @@
   "schemaVersion": 1,
   "status": "AUTHORIZED_RECOVERY",
   "authorizedAt": "2026-09-16",
+  "authorization": {
+    "mode": "WORKFLOW_DISPATCH_EXACT_SHA",
+    "phrase": "AUTHORIZE_GCP_INSTAGRAM_RECOVERY_PREFLIGHT"
+  },
   "projectId": "toca-mcp-production",
   "region": "southamerica-east1",
   "artifactRepository": "toca-mcp",
@@ -28,6 +32,7 @@
   },
   "preflight": {
     "providerReadOnly": true,
+    "metaGraphApiVersion": "v24.0",
     "requiredMetaScopes": [
       "instagram_basic",
       "instagram_content_publish",
@@ -43,6 +48,7 @@
   "forbidden": {
     "projectOwner": true,
     "projectEditor": true,
+    "projectSecretAccessor": true,
     "serviceAccountKeys": true,
     "providerWriteDuringRecovery": true,
     "secretValueLogging": true,
