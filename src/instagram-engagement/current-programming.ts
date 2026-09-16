@@ -36,13 +36,16 @@ export function resolveCurrentProgrammingKnowledge(
 
   const now = options.now ?? new Date();
   const timeZone = options.timeZone ?? 'America/Bahia';
-  const weekday = weekdayInTimeZone(now, timeZone);
-  const answer = programmingAnswer(weekday);
+  const localClock = localClockInTimeZone(now, timeZone);
+  const fridayPartyCarryover = localClock.weekday === 'sat' && localClock.hour < 6;
+  const answer = programmingAnswer(localClock.weekday, fridayPartyCarryover);
   const sources =
-    weekday === 'sat' ? `${OPERATIONS_SOURCE}; ${SATURDAY_SOURCE}` : OPERATIONS_SOURCE;
+    localClock.weekday === 'sat'
+      ? `${OPERATIONS_SOURCE}; ${SATURDAY_SOURCE}`
+      : OPERATIONS_SOURCE;
 
   return {
-    faqId: `DYNAMIC:PROGRAMMING_TODAY:${weekday.toUpperCase()}`,
+    faqId: `DYNAMIC:PROGRAMMING_TODAY:${localClock.weekday.toUpperCase()}${fridayPartyCarryover ? ':FRIDAY_CARRYOVER' : ''}`,
     intent: 'EVENT_INFO',
     answer,
     source: sources,
@@ -52,12 +55,17 @@ export function resolveCurrentProgrammingKnowledge(
   };
 }
 
-function programmingAnswer(weekday: Weekday): string {
+function programmingAnswer(weekday: Weekday, fridayPartyCarryover: boolean): string {
   const parts = [
     'Pela programação regular canônica, hoje tem Sunset na Toca do Morcego a partir das 16:30, no horário da Bahia.',
   ];
   if (weekday === 'fri') {
     parts.push('Às sextas-feiras, a The Party acontece das 23:59 às 06:00.');
+  }
+  if (fridayPartyCarryover) {
+    parts.push(
+      'Se você está falando de agora, a The Party de sexta-feira ainda está dentro da janela regular canônica, que segue até 06:00 de sábado.',
+    );
   }
   if (weekday === 'sat') {
     parts.push('Aos sábados, o Sunset tem samba e pagode.');
@@ -70,15 +78,30 @@ function programmingAnswer(weekday: Weekday): string {
 
 type Weekday = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat';
 
-function weekdayInTimeZone(now: Date, timeZone: string): Weekday {
-  const value = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone })
-    .format(now)
-    .toLowerCase()
-    .slice(0, 3);
-  if (['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].includes(value)) {
-    return value as Weekday;
+interface LocalClock {
+  readonly weekday: Weekday;
+  readonly hour: number;
+}
+
+function localClockInTimeZone(now: Date, timeZone: string): LocalClock {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    hour: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+    timeZone,
+  }).formatToParts(now);
+  const weekdayValue = parts.find((part) => part.type === 'weekday')?.value.toLowerCase().slice(0, 3);
+  const hourValue = Number(parts.find((part) => part.type === 'hour')?.value);
+
+  if (!weekdayValue || !['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].includes(weekdayValue)) {
+    throw new Error('INSTAGRAM_ENGAGEMENT_PROGRAMMING_WEEKDAY_INVALID');
   }
-  throw new Error('INSTAGRAM_ENGAGEMENT_PROGRAMMING_WEEKDAY_INVALID');
+  if (!Number.isInteger(hourValue) || hourValue < 0 || hourValue > 23) {
+    throw new Error('INSTAGRAM_ENGAGEMENT_PROGRAMMING_HOUR_INVALID');
+  }
+
+  return { weekday: weekdayValue as Weekday, hour: hourValue };
 }
 
 function normalize(value: string): string {
