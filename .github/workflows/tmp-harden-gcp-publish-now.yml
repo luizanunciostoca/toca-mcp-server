@@ -22,6 +22,26 @@ jobs:
           persist-credentials: true
           fetch-depth: 1
 
+      - name: Normalize temporary patcher delimiter
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/tmp-harden-gcp-publish-now.py')
+          text = path.read_text(encoding='utf-8')
+          start = "wrapper = r'''#!/usr/bin/env bash"
+          end = "exec bash \"$PATCHED\"\n'''\nwrapper_path.write_text(wrapper, encoding='utf-8')"
+          if text.count(start) != 1 or text.count(end) != 1:
+              raise SystemExit('temporary wrapper delimiter anchors did not match exactly once')
+          text = text.replace(start, 'wrapper = r\"\"\"#!/usr/bin/env bash', 1)
+          text = text.replace(
+              end,
+              "exec bash \"$PATCHED\"\n\"\"\"\nwrapper_path.write_text(wrapper, encoding='utf-8')",
+              1,
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+          python3 -m py_compile scripts/tmp-harden-gcp-publish-now.py
+
       - name: Apply deterministic hardening patch
         run: python3 scripts/tmp-harden-gcp-publish-now.py
 
