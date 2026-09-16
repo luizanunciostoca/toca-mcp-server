@@ -30,9 +30,7 @@
       "roles/logging.viewer"
     ],
     "deployerArtifactRepositoryRole": "roles/artifactregistry.writer",
-    "runtimeProjectRoles": [
-      "roles/cloudsql.client"
-    ],
+    "runtimeProjectRoles": ["roles/cloudsql.client"],
     "runtimeBucketRoles": [
       "roles/storage.objectCreator",
       "roles/storage.objectViewer"
