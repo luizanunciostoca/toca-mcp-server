@@ -94,7 +94,9 @@ describe('Instagram engagement open-today routing', () => {
     const classification = classifySocialEngagement('A The Party funciona hoje?');
 
     expect(classification.intent).toBe('LOCATION_HOURS');
-    expect(resolveKnowledgeRows('A The Party funciona hoje?', classification.intent, ROWS)).toBeNull();
+    expect(
+      resolveKnowledgeRows('A The Party funciona hoje?', classification.intent, ROWS),
+    ).toBeNull();
   });
 
   it('preserves gastronomy routing for today wording', () => {
