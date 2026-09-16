@@ -351,21 +351,23 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
                 ? 'PUBLIC_FIGURE'
                 : complaint || support
                   ? 'COMPLAINT'
-                  : partnership || reservation || commercialIntent === 'HIGH'
+                  : partnership || reservation
                     ? 'COMMERCIAL_LEAD'
                     : ticket || (price && eventInterest !== 'NONE')
                       ? 'TICKET_INFO'
-                      : locationHours
-                        ? 'LOCATION_HOURS'
-                        : lineupInfo || eventInterest !== 'NONE'
-                          ? 'EVENT_INFO'
-                          : operationalFaq || gastronomy || careers || price
-                            ? 'FAQ_OPERATIONAL'
-                            : institutionalFaq
-                              ? 'GENERAL_SOCIAL'
-                              : materialUnknown || spam
-                                ? 'UNKNOWN'
-                                : 'GENERAL_SOCIAL';
+                      : commercialIntent === 'HIGH'
+                        ? 'COMMERCIAL_LEAD'
+                        : locationHours
+                          ? 'LOCATION_HOURS'
+                          : lineupInfo || eventInterest !== 'NONE'
+                            ? 'EVENT_INFO'
+                            : operationalFaq || gastronomy || careers || price
+                              ? 'FAQ_OPERATIONAL'
+                              : institutionalFaq
+                                ? 'GENERAL_SOCIAL'
+                                : materialUnknown || spam
+                                  ? 'UNKNOWN'
+                                  : 'GENERAL_SOCIAL';
 
   const topic: SocialTopic = refund
     ? 'REFUND'
@@ -383,10 +385,10 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
                 ? 'CAREERS'
                 : reservation
                   ? 'RESERVATION'
-                  : price && !informationalPrice
-                    ? 'PRICE'
-                    : ticket || (price && eventInterest !== 'NONE')
-                      ? 'TICKETS'
+                  : ticket || (price && eventInterest !== 'NONE')
+                    ? 'TICKETS'
+                    : price && !informationalPrice
+                      ? 'PRICE'
                       : gastronomy
                         ? 'GASTRONOMY'
                         : locationHours
