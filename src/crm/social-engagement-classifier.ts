@@ -11,6 +11,17 @@ interface CanonicalRoute {
   readonly addConversationIntents?: readonly SocialConversationIntent[];
 }
 
+const NON_AUTONOMOUS_CORE_INTENTS = new Set<SocialEngagementClassification['intent']>([
+  'COMMERCIAL_LEAD',
+  'COMPLAINT',
+  'REFUND',
+  'LEGAL',
+  'SAFETY_INCIDENT',
+  'PRESS',
+  'PUBLIC_FIGURE',
+  'HARASSMENT_OR_THREAT',
+]);
+
 const REFUND_FAIL_CLOSED_PATTERNS = ['dinheiro de volta', 'devolver meu dinheiro'];
 
 const TICKET_INFO_PATTERNS = ['quanto pago para entrar'];
@@ -116,6 +127,12 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
       conversationIntents: mergeConversationIntents(base.conversationIntents, ['SUPPORT']),
     };
   }
+
+  // Never let a low-risk canonical FAQ/event pattern downgrade a core route that
+  // policy intentionally keeps out of autonomous reply. UNKNOWN remains eligible
+  // for exact canonical rescue patterns below; all other non-autonomous intents
+  // retain the core classifier's stricter route.
+  if (NON_AUTONOMOUS_CORE_INTENTS.has(base.intent)) return base;
 
   const route = canonicalRoute(normalized);
   if (!route) return base;
