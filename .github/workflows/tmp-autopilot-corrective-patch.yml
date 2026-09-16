@@ -125,7 +125,7 @@ jobs:
             baseline_run_id='NONE'
             echo 'MARKETING_AUTOPILOT_PROVIDER_BASELINE=NOT_APPLICABLE_STRICT_HISTORY_SCAN'
           fi
-'''
+          '''
           text = text[:start] + replacement + text[end:]
           workflow.write_text(text)
 
