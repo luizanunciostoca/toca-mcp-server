@@ -32,6 +32,8 @@ const OFFICIAL_OPERATIONAL_PATTERNS = [
   'qual o arroba da toca',
   'como falo com atendimento',
   'quero falar com a toca',
+  'tem restaurante',
+  'tem jantar',
   'tem bar',
   'onde vejo a programacao e informacoes oficiais',
   'onde vejo a agenda',
