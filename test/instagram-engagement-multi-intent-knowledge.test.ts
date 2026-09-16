@@ -22,9 +22,12 @@ describe('Instagram grounded multi-intent knowledge', () => {
     expect(classification.intent).toBe('PRESS');
 
     const delegateResolve = vi.fn().mockResolvedValue(null);
-    const source = new MultiIntentInstagramEngagementKnowledgeSource({ resolve: delegateResolve }, {
-      now: () => new Date('2026-09-16T14:30:00Z'),
-    });
+    const source = new MultiIntentInstagramEngagementKnowledgeSource(
+      { resolve: delegateResolve },
+      {
+        now: () => new Date('2026-09-16T14:30:00Z'),
+      },
+    );
 
     const match = await source.resolve(
       'Sou jornalista, qual a programação de hoje?',
