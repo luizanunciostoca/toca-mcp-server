@@ -7,18 +7,26 @@
   "spreadsheetId": "1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw",
   "contentSheet": "CONTENT_ITEMS",
   "schedulerExecutionLogSheet": "SCHEDULER_EXECUTION_LOG",
+  "schedulerAuthority": {
+    "workflow": ".github/workflows/marketing-autopilot-publication.yml",
+    "providerPublicationWriteAuthorized": false,
+    "metaCredentialAccessAuthorized": false,
+    "directCloudRunPublicationAuthorized": false,
+    "canonicalWriterDispatchAuthorized": true,
+    "requireScheduledRunProvenance": true
+  },
   "canonicalWriter": {
     "transport": "gcp-instagram-publish-now",
     "workflow": ".github/workflows/marketing-publish-now.yml",
     "durableCommandFile": "control/marketing-publish-now-command.json",
     "durableCommandRequiredState": "NOOP",
     "ephemeralCommandAllowed": true,
-    "providerPublicationWriteAuthorized": false
+    "providerPublicationWriteAuthorized": true
   },
   "instagramAccountId": "17841402033495654",
   "schedule": {
     "preparationLeadSeconds": 300,
-    "lateWindowSeconds": 1200,
+    "lateWindowSeconds": 1800,
     "maxCandidatesPerRun": 1,
     "cron": "3/5 * * * *"
   },
