@@ -20,7 +20,12 @@ describe('Instagram Direct canary opportunity watch trigger broker', () => {
   });
 
   it('uses only the GitHub control plane and has no provider/database credentials', () => {
-    for (const required of ['actions: write', 'issues: read', 'contents: read', 'GH_TOKEN: ${{ github.token }}']) {
+    for (const required of [
+      'actions: write',
+      'issues: read',
+      'contents: read',
+      'GH_TOKEN: ${{ github.token }}',
+    ]) {
       expect(workflow).toContain(required);
     }
     for (const forbidden of [
@@ -71,7 +76,9 @@ describe('Instagram Direct canary opportunity watch trigger broker', () => {
       'actions/workflows/instagram-engagement-direct-canary-opportunity-watch.yml/dispatches',
     );
     expect(workflow).toContain('-f ref=main');
-    expect(workflow).toContain('TARGET_WORKFLOW=instagram-engagement-direct-canary-opportunity-watch.yml');
+    expect(workflow).toContain(
+      'TARGET_WORKFLOW=instagram-engagement-direct-canary-opportunity-watch.yml',
+    );
     expect(workflow).toContain('TARGET_REF=main');
     expect(workflow).not.toContain('provider-canary.yml/dispatches');
     expect(workflow).not.toContain('INSTAGRAM_ENGAGEMENT_REAL_DIRECT_CANARY=AUTHORIZED');
