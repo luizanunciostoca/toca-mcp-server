@@ -60,11 +60,9 @@ jobs:
             echo '{}' > /tmp/account.json
           fi
 
-          ARTIFACTREGISTRY_SERVICE_ENABLED=false
-          ARTIFACTREGISTRY_SERVICE_STATE="$(gcloud services describe artifactregistry.googleapis.com --project "$PROJECT_ID" --format='value(state)' 2>/tmp/artifactregistry-service.err || true)"
-          if [[ "$ARTIFACTREGISTRY_SERVICE_STATE" == "ENABLED" ]]; then
-            ARTIFACTREGISTRY_SERVICE_ENABLED=true
-          fi
+          gcloud services list --enabled --project "$PROJECT_ID" --format=json > /tmp/enabled-services.json
+          ARTIFACTREGISTRY_SERVICE_ENABLED="$(jq -r 'any(.[]; ((.config.name // .name // "") | endswith("artifactregistry.googleapis.com")) and ((.state // "ENABLED") == "ENABLED"))' /tmp/enabled-services.json)"
+          ARTIFACTREGISTRY_SERVICE_STATE="$(jq -r '[.[] | select((.config.name // .name // "") | endswith("artifactregistry.googleapis.com")) | (.state // "ENABLED")] | first // "NOT_FOUND"' /tmp/enabled-services.json)"
 
           REPOSITORY_READABLE=false
           REPOSITORY_ERROR_CLASS=NONE
@@ -91,7 +89,7 @@ jobs:
             --argjson artifactRegistryServiceEnabled "$ARTIFACTREGISTRY_SERVICE_ENABLED" \
             --argjson repositoryReadable "$REPOSITORY_READABLE" \
             --arg repositoryErrorClass "$REPOSITORY_ERROR_CLASS" \
-            '{schemaVersion:"toca.ag01.production-billing-service-readback.v2",billingEnabled:$billingEnabled,billingAccountLinked:$billingAccountLinked,billingAccountOpen:(if $billingAccountOpen=="true" then true elif $billingAccountOpen=="false" then false else null end),artifactRegistryServiceState:$artifactRegistryServiceState,artifactRegistryServiceEnabled:$artifactRegistryServiceEnabled,repositoryReadable:$repositoryReadable,repositoryErrorClass:$repositoryErrorClass}' \
+            '{schemaVersion:"toca.ag01.production-billing-service-readback.v3",billingEnabled:$billingEnabled,billingAccountLinked:$billingAccountLinked,billingAccountOpen:(if $billingAccountOpen=="true" then true elif $billingAccountOpen=="false" then false else null end),artifactRegistryServiceState:$artifactRegistryServiceState,artifactRegistryServiceEnabled:$artifactRegistryServiceEnabled,repositoryReadable:$repositoryReadable,repositoryErrorClass:$repositoryErrorClass}' \
             > ag01-billing-service-readback/state.json
 
           jq -n \
