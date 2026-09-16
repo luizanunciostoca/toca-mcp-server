@@ -140,9 +140,8 @@ describe('Instagram AG-01 grounded fallback', () => {
     const delegate: InstagramEngagementKnowledgeSource = {
       resolve: vi.fn().mockResolvedValue(deterministic),
     };
-    const fallback: InstagramEngagementKnowledgeSource = {
-      resolve: vi.fn().mockResolvedValue(null),
-    };
+    const fallbackResolve = vi.fn().mockResolvedValue(null);
+    const fallback: InstagramEngagementKnowledgeSource = { resolve: fallbackResolve };
     const source = new MultiIntentInstagramEngagementKnowledgeSource(delegate, {
       groundedFallback: fallback,
     });
@@ -150,16 +149,15 @@ describe('Instagram AG-01 grounded fallback', () => {
     await expect(source.resolve('Pergunta conhecida', 'FAQ_OPERATIONAL')).resolves.toEqual(
       deterministic,
     );
-    expect(fallback.resolve).not.toHaveBeenCalled();
+    expect(fallbackResolve).not.toHaveBeenCalled();
   });
 
   it('keeps the deterministic current-programming resolver ahead of AG-01', async () => {
     const delegate: InstagramEngagementKnowledgeSource = {
       resolve: vi.fn().mockResolvedValue(null),
     };
-    const fallback: InstagramEngagementKnowledgeSource = {
-      resolve: vi.fn().mockResolvedValue(null),
-    };
+    const fallbackResolve = vi.fn().mockResolvedValue(null);
+    const fallback: InstagramEngagementKnowledgeSource = { resolve: fallbackResolve };
     const source = new MultiIntentInstagramEngagementKnowledgeSource(delegate, {
       groundedFallback: fallback,
       now: () => new Date('2026-09-18T15:00:00-03:00'),
@@ -167,6 +165,6 @@ describe('Instagram AG-01 grounded fallback', () => {
 
     const result = await source.resolve('Qual a programação de hoje?', 'EVENT_INFO');
     expect(result?.factsVerified).toBe(true);
-    expect(fallback.resolve).not.toHaveBeenCalled();
+    expect(fallbackResolve).not.toHaveBeenCalled();
   });
 });
