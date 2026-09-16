@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   issues: write
   id-token: write
 
@@ -23,10 +24,10 @@ env:
   CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
   DATABASE_SECRET_ID: toca-database-url
   DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
-  CONTROL_PLANE_ISSUE: '640'
   EVIDENCE_LEDGER_ISSUE: '641'
   AUTHORIZATION_ISSUE: ${{ github.event.issue.number }}
-  RECOVERY_RESERVATION: FAQ_KNOWLEDGE_RECOVERY_${{ github.run_id }}_${{ github.run_attempt }}
+  ENGAGEMENT_RESERVATION: FAQ_KNOWLEDGE_RECOVERY_${{ github.run_id }}_${{ github.run_attempt }}
+  INSTAGRAM_FAQ_GUARD_PROFILE: FAQ_KNOWLEDGE_RECOVERY
 
 jobs:
   recover-knowledge:
@@ -45,7 +46,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Validate authorization and acquire shared engagement reservation
+      - name: Revalidate live authorization and acquire shared engagement reservation
         id: auth
         env:
           GH_TOKEN: ${{ github.token }}
@@ -54,53 +55,14 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = 'refs/heads/main'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-
-          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
-          BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON")"
-          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
-          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
-
-          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
-          BACKUP_KEY="$(grep '^BACKUP_KEY=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
-          EXPECTED_ACTIVE_REVISION="$(grep '^EXPECTED_ACTIVE_REVISION=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
+          GUARD_OUTPUT="$(bash scripts/instagram-faq-refresh-production-guard.sh ACQUIRE)"
+          printf '%s\n' "$GUARD_OUTPUT"
+          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$GUARD_OUTPUT" | tail -1 | cut -d= -f2-)"
+          BACKUP_KEY="$(grep '^BACKUP_KEY=' <<< "$GUARD_OUTPUT" | tail -1 | cut -d= -f2-)"
+          EXPECTED_ACTIVE_REVISION="$(grep '^EXPECTED_ACTIVE_REVISION=' <<< "$GUARD_OUTPUT" | tail -1 | cut -d= -f2-)"
           [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$BACKUP_KEY" =~ ^[0-9]+_[0-9]+$ ]]
           [[ "$EXPECTED_ACTIVE_REVISION" =~ ^toca-managed-instagram-daemon-[a-z0-9-]+$ ]]
-
-          required_lines=(
-            "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
-            "AUTHORIZATION_STATE=ACTIVE"
-            "INSTAGRAM_FAQ_EXPANSION_KNOWLEDGE_RECOVERY=AUTHORIZED"
-            "RUNTIME_SOURCE_SHA=$GITHUB_SHA"
-            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
-            "BACKUP_KEY=$BACKUP_KEY"
-            "EXPECTED_ACTIVE_REVISION=$EXPECTED_ACTIVE_REVISION"
-            "DATABASE_MUTATIONS_AUTHORIZED=true"
-            "SERVICE_DEPLOY_AUTHORIZED=false"
-            "SCHEDULER_MUTATION_AUTHORIZED=false"
-            "PROVIDER_WRITES_AUTHORIZED=false"
-            "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
-            "GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false"
-          )
-          for required in "${required_lines[@]}"; do
-            grep -Fxq "$required" <<< "$BODY" || {
-              echo "Missing exact authorization field: $required" >&2
-              exit 1
-            }
-          done
-
-          CONTROL_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${CONTROL_PLANE_ISSUE}")"
-          CONTROL_BODY="$(jq -r '.body // ""' <<< "$CONTROL_JSON")"
-          grep -Fxq "EVALUATED_MAIN_SHA=$GITHUB_SHA" <<< "$CONTROL_BODY"
-          grep -Fxq 'MAIN_STABILITY=PASS' <<< "$CONTROL_BODY"
-          grep -Fxq 'ENGAGEMENT_AUTONOMY_STAGE=LIMITED' <<< "$CONTROL_BODY"
-          grep -Fxq 'ENGAGEMENT_AUTO_REPLY_CHANNELS=DIRECT,COMMENT' <<< "$CONTROL_BODY"
-          grep -Fxq 'GENERAL_AUTONOMY=false' <<< "$CONTROL_BODY"
-          grep -Fxq 'MERGE_RESERVATION=NONE' <<< "$CONTROL_BODY"
-          NEW_CONTROL_BODY="$(sed "s/^MERGE_RESERVATION=NONE$/MERGE_RESERVATION=$RECOVERY_RESERVATION/" <<< "$CONTROL_BODY")"
-          grep -Fxq "MERGE_RESERVATION=$RECOVERY_RESERVATION" <<< "$NEW_CONTROL_BODY"
-          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${CONTROL_PLANE_ISSUE}" -f body="$NEW_CONTROL_BODY" >/dev/null
-
           echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
           echo "runtime_image=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
           echo "backup_key=$BACKUP_KEY" >> "$GITHUB_OUTPUT"
@@ -117,12 +79,14 @@ jobs:
 
       - name: Verify immutable image and unchanged LIMITED runtime
         env:
+          GH_TOKEN: ${{ github.token }}
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
           RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
           EXPECTED_ACTIVE_REVISION: ${{ steps.auth.outputs.expected_active_revision }}
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT >/dev/null
           DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
           test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
           SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
@@ -141,11 +105,13 @@ jobs:
       - name: Inspect preserved failed-refresh backup without mutation
         id: inspect
         env:
+          GH_TOKEN: ${{ github.token }}
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
           BACKUP_KEY: ${{ steps.auth.outputs.backup_key }}
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT >/dev/null
           JOB="toca-ig-faq-recovery-inspect-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
           trap cleanup EXIT
@@ -159,21 +125,22 @@ jobs:
           gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet >/dev/null
           sleep 3
           LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format=json || true)"
-          LINE="$(printf '%s' "$LOGS" | jq -r '.[] | .textPayload // empty' | grep '"validation":"instagram-faq-expansion-knowledge-state"' | grep '"operation":"INSPECT"' | tail -1 || true)"
-          test -n "$LINE"
-          jq -e '.status == "PASS" and .backupPresent == true' <<< "$LINE" >/dev/null
-          echo "backup_faq=$(jq -r '.backupFaqCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
-          echo "backup_documents=$(jq -r '.backupDocumentCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
-          echo "backup_chunks=$(jq -r '.backupChunkCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
-          echo "active_faq_before=$(jq -r '.activeFaqCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
-          echo "active_documents_before=$(jq -r '.activeDocumentCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
-          echo "active_chunks_before=$(jq -r '.activeChunkCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
+          RESULT="$(printf '%s' "$LOGS" | jq -c '[.[] | (.jsonPayload // ((.textPayload // "") | fromjson?)) | select(.validation? == "instagram-faq-expansion-knowledge-state" and .operation? == "INSPECT" and .status? == "PASS")] | last // empty')"
+          test -n "$RESULT"
+          jq -e '.backupPresent == true and .providerWriteAttempted == false' <<< "$RESULT" >/dev/null
+          echo "backup_faq=$(jq -r '.backupFaqCount' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          echo "backup_documents=$(jq -r '.backupDocumentCount' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          echo "backup_chunks=$(jq -r '.backupChunkCount' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          echo "active_faq_before=$(jq -r '.activeFaqCount' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          echo "active_documents_before=$(jq -r '.activeDocumentCount' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          echo "active_chunks_before=$(jq -r '.activeChunkCount' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
           cleanup
           trap - EXIT
 
       - name: Restore preserved knowledge snapshot transactionally
         id: restore
         env:
+          GH_TOKEN: ${{ github.token }}
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
           BACKUP_KEY: ${{ steps.auth.outputs.backup_key }}
           EXPECTED_FAQ: ${{ steps.inspect.outputs.backup_faq }}
@@ -182,6 +149,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT >/dev/null
           JOB="toca-ig-faq-recovery-restore-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
           trap cleanup EXIT
@@ -195,27 +163,28 @@ jobs:
           gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet >/dev/null
           sleep 3
           LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=200 --order=asc --format=json || true)"
-          LINE="$(printf '%s' "$LOGS" | jq -r '.[] | .textPayload // empty' | grep '"validation":"instagram-faq-expansion-knowledge-state"' | grep '"operation":"RESTORE"' | tail -1 || true)"
-          test -n "$LINE"
+          RESULT="$(printf '%s' "$LOGS" | jq -c '[.[] | (.jsonPayload // ((.textPayload // "") | fromjson?)) | select(.validation? == "instagram-faq-expansion-knowledge-state" and .operation? == "RESTORE" and .status? == "PASS")] | last // empty')"
+          test -n "$RESULT"
           jq -e --argjson faq "$EXPECTED_FAQ" --argjson documents "$EXPECTED_DOCUMENTS" --argjson chunks "$EXPECTED_CHUNKS" '
-            .status == "PASS" and
             .faqCount == $faq and
             .documentCount == $documents and
             .chunkCount == $chunks and
             .providerWriteAttempted == false
-          ' <<< "$LINE" >/dev/null
-          echo "restored_faq=$(jq -r '.faqCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
-          echo "restored_documents=$(jq -r '.documentCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
-          echo "restored_chunks=$(jq -r '.chunkCount' <<< "$LINE")" >> "$GITHUB_OUTPUT"
+          ' <<< "$RESULT" >/dev/null
+          echo "restored_faq=$(jq -r '.faqCount' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          echo "restored_documents=$(jq -r '.documentCount' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
+          echo "restored_chunks=$(jq -r '.chunkCount' <<< "$RESULT")" >> "$GITHUB_OUTPUT"
           cleanup
           trap - EXIT
 
       - name: Verify runtime traffic remained unchanged after database recovery
         env:
+          GH_TOKEN: ${{ github.token }}
           EXPECTED_ACTIVE_REVISION: ${{ steps.auth.outputs.expected_active_revision }}
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT >/dev/null
           SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           ACTIVE_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end')"
           test "$ACTIVE_REVISION" = "$EXPECTED_ACTIVE_REVISION"
@@ -236,6 +205,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT >/dev/null
           printf -v COMMENT '%s\n' \
             'FAQ_EXPANSION_KNOWLEDGE_RECOVERY_STATUS=PASS' \
             "CONTROLLER_SHA=$GITHUB_SHA" \
@@ -276,12 +246,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          CONTROL_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${CONTROL_PLANE_ISSUE}" 2>/dev/null)"
-          CONTROL_BODY="$(jq -r '.body // ""' <<< "$CONTROL_JSON" 2>/dev/null)"
-          if grep -Fxq "MERGE_RESERVATION=$RECOVERY_RESERVATION" <<< "$CONTROL_BODY"; then
-            NEW_CONTROL_BODY="$(sed "s/^MERGE_RESERVATION=$RECOVERY_RESERVATION$/MERGE_RESERVATION=NONE/" <<< "$CONTROL_BODY")"
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${CONTROL_PLANE_ISSUE}" -f body="$NEW_CONTROL_BODY" >/dev/null 2>&1
-          fi
+          bash scripts/instagram-faq-refresh-production-guard.sh RELEASE >/dev/null 2>&1
           ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" 2>/dev/null)"
           ISSUE_BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON" 2>/dev/null)"
           if grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$ISSUE_BODY"; then
