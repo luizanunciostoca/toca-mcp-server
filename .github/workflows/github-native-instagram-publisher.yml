@@ -2,7 +2,7 @@ name: GitHub Native Instagram Publisher
 
 on:
   schedule:
-    - cron: '2/5 * * * *'
+    - cron: '4/5 * * * *'
       timezone: 'America/Bahia'
   repository_dispatch:
     types:
