@@ -16,11 +16,11 @@ describe('Instagram GCP execution-runtime readiness', () => {
     expect(workflow).toContain('workflow_dispatch:');
     expect(workflow).toContain('authorization:');
     expect(workflow).toContain('expected_source_sha:');
-    expect(workflow).toContain("test \"$GITHUB_EVENT_NAME\" = 'workflow_dispatch'");
-    expect(workflow).toContain("test \"$GITHUB_REF\" = 'refs/heads/main'");
+    expect(workflow).toContain('test "$GITHUB_EVENT_NAME" = \'workflow_dispatch\'');
+    expect(workflow).toContain('test "$GITHUB_REF" = \'refs/heads/main\'');
     expect(workflow).toContain('test "$EXPECTED_SOURCE_SHA" = "$GITHUB_SHA"');
     expect(workflow).toContain(
-      "test \"$READINESS_AUTHORIZATION\" = 'AUTHORIZE_GCP_INSTAGRAM_EXECUTION_RUNTIME_READINESS'",
+      'test "$READINESS_AUTHORIZATION" = \'AUTHORIZE_GCP_INSTAGRAM_EXECUTION_RUNTIME_READINESS\'',
     );
     expect(workflow).not.toMatch(/on:\s*\n\s*push:/);
     expect(workflow).not.toContain('schedule:');
@@ -57,8 +57,12 @@ describe('Instagram GCP execution-runtime readiness', () => {
     expect(probe).toContain("client.query('rollback')");
     expect(probe).toContain("to_regclass('public.provider_publications')");
     expect(probe).toContain("to_regclass('public.audit_events')");
-    expect(probe).toContain("has_table_privilege(current_user, 'public.provider_publications', 'INSERT')");
-    expect(probe).toContain("has_table_privilege(current_user, 'public.provider_publications', 'UPDATE')");
+    expect(probe).toContain(
+      "has_table_privilege(current_user, 'public.provider_publications', 'INSERT')",
+    );
+    expect(probe).toContain(
+      "has_table_privilege(current_user, 'public.provider_publications', 'UPDATE')",
+    );
     expect(probe).toContain("has_table_privilege(current_user, 'public.audit_events', 'INSERT')");
     expect(probe).toContain('databaseMutationAttempted: false');
     expect(probe).toContain('providerCredentialsMounted: false');
