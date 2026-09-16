@@ -10,6 +10,7 @@ import {
 import { salesFunnelMessage } from './sales-funnel.js';
 
 const INSTAGRAM_SAFE_WINDOW_MS = 23 * 60 * 60 * 1000;
+const REENGAGEMENT_CLOCK_SKEW_MS = 5_000;
 
 export interface InstagramSalesFunnelDispatcherOptions {
   readonly store: PostgresInstagramSalesFunnelStore;
@@ -71,13 +72,13 @@ export class InstagramSalesFunnelDispatcher {
 
     const nowMs = Date.parse(now);
     const inboundMs = Date.parse(proof.latestInboundAt);
-    const dueMs = Date.parse(action.dueAt);
+    const createdMs = Date.parse(action.createdAt);
     const ageMs = nowMs - inboundMs;
     if (ageMs < 0 || ageMs > INSTAGRAM_SAFE_WINDOW_MS) {
       await this.cancel(action, now, 'INSTAGRAM_USER_WINDOW_CLOSED');
       return 'CANCELED';
     }
-    if (inboundMs > dueMs) {
+    if (inboundMs > createdMs + REENGAGEMENT_CLOCK_SKEW_MS) {
       await this.cancel(action, now, 'USER_REENGAGED_AFTER_ACTION_SCHEDULED');
       return 'CANCELED';
     }
@@ -104,13 +105,10 @@ export class InstagramSalesFunnelDispatcher {
       return 'SENT';
     } catch (error) {
       const code = safeErrorCode(error);
+      const ambiguous = isAmbiguousProviderFailure(error);
       await this.options.store.cancel({ action, now, reason: `SEND_OUTCOME_${code}` });
-      await this.recordActivity(
-        action,
-        now,
-        isAmbiguousProviderFailure(error) ? 'AMBIGUOUS' : 'FAILED',
-      );
-      return isAmbiguousProviderFailure(error) ? 'AMBIGUOUS' : 'CANCELED';
+      await this.recordActivity(action, now, ambiguous ? 'AMBIGUOUS' : 'FAILED');
+      return ambiguous ? 'AMBIGUOUS' : 'CANCELED';
     }
   }
 
