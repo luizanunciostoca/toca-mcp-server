@@ -169,7 +169,10 @@ function validateBoundItem(item, contentItemId) {
   assert(text(item.copy_id) === binding.copyId, 'AUTOPILOT_COPY_BINDING_MISMATCH');
   assert(text(item.message) === binding.registryMessage, 'AUTOPILOT_MESSAGE_BINDING_MISMATCH');
   assert(text(item.cta) === binding.registryCta, 'AUTOPILOT_CTA_BINDING_MISMATCH');
-  assert(text(item.correlation_id) === binding.correlationId, 'AUTOPILOT_CORRELATION_BINDING_MISMATCH');
+  assert(
+    text(item.correlation_id) === binding.correlationId,
+    'AUTOPILOT_CORRELATION_BINDING_MISMATCH',
+  );
   assert(text(item.master_asset_id) === binding.masterAssetId, 'AUTOPILOT_MASTER_ASSET_MISMATCH');
   assert(text(item.master_drive_file_id) === binding.driveFileId, 'AUTOPILOT_DRIVE_FILE_MISMATCH');
   assert(text(item.master_status) === required.masterStatus, 'AUTOPILOT_MASTER_STATUS_INVALID');
@@ -396,16 +399,12 @@ function canonicalScheduledAt(value) {
     const ss = pad2(utc.getUTCSeconds());
     return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}-03:00`;
   }
-  const isoWallClock = raw.match(
-    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/,
-  );
+  const isoWallClock = raw.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
   if (isoWallClock) {
     const [, yyyy, mm, dd, hh, mi, ss = '00'] = isoWallClock;
     return assertBahiaWallClock(`${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}-03:00`);
   }
-  const brWallClock = raw.match(
-    /^(\d{2})\/(\d{2})\/(\d{4})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/,
-  );
+  const brWallClock = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
   if (brWallClock) {
     const [, dd, mm, yyyy, hh, mi, ss = '00'] = brWallClock;
     return assertBahiaWallClock(`${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}-03:00`);
