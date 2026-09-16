@@ -82,17 +82,28 @@ jobs:
           test "$merge_sha" != 'null'
           echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
 
+      - name: Dispatch first controlled CANARY
+        id: first_dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          before=$(date -u +%s)
+          jq -n --arg item "$TARGET_ITEM" '{event_type:"github-native-instagram-publish-controlled",client_payload:{mode:"CANARY",writes_enabled:"true",canary_content_item_id:$item}}' \
+            | gh api --method POST "repos/$REPO/dispatches" --input -
+          echo "before=$before" >> "$GITHUB_OUTPUT"
+
       - name: Await first publisher run without retry
         id: first
         shell: bash
         env:
           MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
+          BEFORE: ${{ steps.first_dispatch.outputs.before }}
         run: |
           set -euo pipefail
           run_id=''
           for _ in $(seq 1 60); do
-            runs=$(gh api "repos/$REPO/actions/workflows/github-native-instagram-publisher.yml/runs?event=push&branch=main&per_page=20")
-            run_id=$(jq -r --arg sha "$MERGE_SHA" '[.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last | .id // empty' <<<"$runs")
+            runs=$(gh api "repos/$REPO/actions/workflows/github-native-instagram-publisher.yml/runs?event=repository_dispatch&branch=main&per_page=20")
+            run_id=$(jq -r --arg sha "$MERGE_SHA" --argjson before "$BEFORE" '[.workflow_runs[] | select(.head_sha == $sha) | select((.created_at | fromdateiso8601) >= $before)] | sort_by(.created_at) | last | .id // empty' <<<"$runs")
             [ -n "$run_id" ] && break
             sleep 5
           done
@@ -141,6 +152,7 @@ jobs:
         id: second
         shell: bash
         env:
+          MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
           FIRST_RUN_ID: ${{ steps.first.outputs.run_id }}
           BEFORE: ${{ steps.second_dispatch.outputs.before }}
         run: |
@@ -148,7 +160,7 @@ jobs:
           run_id=''
           for _ in $(seq 1 60); do
             runs=$(gh api "repos/$REPO/actions/workflows/github-native-instagram-publisher.yml/runs?event=repository_dispatch&branch=main&per_page=20")
-            run_id=$(jq -r --arg first "$FIRST_RUN_ID" --argjson before "$BEFORE" '[.workflow_runs[] | select((.id|tostring) != $first) | select((.created_at | fromdateiso8601) >= $before)] | sort_by(.created_at) | last | .id // empty' <<<"$runs")
+            run_id=$(jq -r --arg sha "$MERGE_SHA" --arg first "$FIRST_RUN_ID" --argjson before "$BEFORE" '[.workflow_runs[] | select(.head_sha == $sha) | select((.id|tostring) != $first) | select((.created_at | fromdateiso8601) >= $before)] | sort_by(.created_at) | last | .id // empty' <<<"$runs")
             [ -n "$run_id" ] && break
             sleep 5
           done
