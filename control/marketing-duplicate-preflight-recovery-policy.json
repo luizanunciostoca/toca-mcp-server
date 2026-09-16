@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "status": "FIX_PENDING_CERTIFICATION",
+  "singleWriter": "MARKETING_PUBLISH_NOW_GCP",
+  "providerWriteDuringFix": false,
+  "requiredChecks": [
+    "quality",
+    "dependency-review",
+    "vulnerability-secret-container-sbom",
+    "codeql",
+    "autonomy-safety"
+  ],
+  "mergeRequiresExactHeadGreen": true,
+  "retryRequiresFreshEnvelopeAfterMerge": true
+}
