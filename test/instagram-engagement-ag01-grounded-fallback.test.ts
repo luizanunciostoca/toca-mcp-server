@@ -30,7 +30,8 @@ function groundedBody(overrides: Record<string, unknown> = {}): Record<string, u
 
 function createFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>) {
   return vi.fn((input: string | URL | Request, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     return Promise.resolve(handler(url, init));
   }) as unknown as typeof fetch;
 }
