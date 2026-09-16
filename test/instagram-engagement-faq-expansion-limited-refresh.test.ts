@@ -14,16 +14,16 @@ const verifier = readFileSync(verifierPath, 'utf8');
 describe('Instagram FAQ expansion LIMITED refresh', () => {
   it('keeps the production authorization narrow and live', () => {
     expect(workflow).toContain('actions: read');
-    expect(workflow).toContain('INSTAGRAM_FAQ_EXPANSION_LIMITED_REFRESH=AUTHORIZED');
-    expect(workflow).toContain('AUTO_REPLY_CHANNELS=DIRECT,COMMENT');
-    expect(workflow).toContain('GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false');
-    expect(workflow).toContain('SCHEDULER_MUTATION_AUTHORIZED=false');
-    expect(workflow).toContain('ZERO_TRAFFIC_STAGE_REQUIRED=true');
-    expect(workflow).toContain('BATCH_SIZE=1');
     expect(workflow).toContain('AUTHORIZATION_ISSUE: ${{ github.event.issue.number }}');
     expect(workflow).toContain('instagram-faq-refresh-production-guard.sh ACQUIRE');
     expect(workflow).toContain('instagram-faq-refresh-production-guard.sh ASSERT');
     expect(workflow).toContain('instagram-faq-refresh-production-guard.sh RELEASE');
+    expect(guard).toContain('INSTAGRAM_FAQ_EXPANSION_LIMITED_REFRESH=AUTHORIZED');
+    expect(guard).toContain('AUTO_REPLY_CHANNELS=DIRECT,COMMENT');
+    expect(guard).toContain('GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false');
+    expect(guard).toContain('SCHEDULER_MUTATION_AUTHORIZED=false');
+    expect(guard).toContain('ZERO_TRAFFIC_STAGE_REQUIRED=true');
+    expect(guard).toContain('BATCH_SIZE=1');
     expect(guard).toContain('gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}"');
     expect(guard).toContain('.state == "open"');
     expect(guard).toContain('AUTHORIZATION_STATE=ACTIVE');
