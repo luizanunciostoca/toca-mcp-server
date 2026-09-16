@@ -134,7 +134,7 @@ describe('Instagram publication single-writer boundary', () => {
         phase: 'CANARY',
         blindRetryAuthorized: false,
         automaticFallbackAuthorized: false,
-        allowedContentItemIds: ['MKT-20260917-SUNSET-FEED-0900'],
+        allowedContentItemIds: ['MKT-20260916-SUNSET-FEED-1500'],
       },
     });
   });

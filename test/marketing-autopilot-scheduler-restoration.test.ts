@@ -11,6 +11,9 @@ const policy = JSON.parse(
 ) as {
   dailyRollout?: {
     canaryContentItemId?: string;
+    canaryScheduledAt?: string;
+    rollForwardFromContentItemId?: string;
+    rollForwardReason?: string;
     promoteToLimitedAfterVerifiedCanary?: boolean;
     generalAutonomy?: boolean;
     limited?: { generalAutonomy?: boolean };
@@ -22,6 +25,7 @@ const policy = JSON.parse(
   };
 };
 
+const productionCanaryId = 'MKT-20260916-SUNSET-FEED-1500';
 const canaryId = 'MKT-20260916-SUNSET-FEED-0900';
 const storyId = 'MKT-20260916-SUNSET-STORY-1100';
 const feedSha = '1c6c961dff3ed10ce0edfa13e2096c2849ade51ff99ade6a6fe14688cd2d1226';
@@ -132,13 +136,20 @@ function runScheduler({
 }) {
   const directory = mkdtempSync(join(tmpdir(), 'toca-daily-autopilot-'));
   const fixture = join(directory, 'registry.json');
+  const policyFixture = join(directory, 'policy.json');
   writeFileSync(fixture, `${JSON.stringify(rows)}\n`, 'utf8');
+  const testPolicy = JSON.parse(JSON.stringify(policy)) as typeof policy;
+  if (!testPolicy.dailyRollout) throw new Error('AUTOPILOT_TEST_DAILY_ROLLOUT_REQUIRED');
+  testPolicy.dailyRollout.canaryContentItemId = canaryId;
+  testPolicy.dailyRollout.canaryScheduledAt = '2026-09-16T09:00:00-03:00';
+  writeFileSync(policyFixture, `${JSON.stringify(testPolicy)}\n`, 'utf8');
   return spawnSync('node', [script, mode], {
     cwd: process.cwd(),
     encoding: 'utf8',
     env: {
       ...process.env,
       MARKETING_AUTOPILOT_REGISTRY_FIXTURE: fixture,
+      MARKETING_AUTOPILOT_POLICY_PATH: policyFixture,
       MARKETING_AUTOPILOT_NOW: now,
       ...extraEnv,
     },
@@ -164,7 +175,10 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     expect(workflow).toContain('workflow_dispatch|push) mode=PRECHECK');
     expect(workflow).not.toContain('REQUESTED_MODE');
     expect(policy.dailyRollout).toMatchObject({
-      canaryContentItemId: canaryId,
+      canaryContentItemId: productionCanaryId,
+      canaryScheduledAt: '2026-09-16T15:00:00-03:00',
+      rollForwardFromContentItemId: canaryId,
+      rollForwardReason: 'STALE_WINDOW_NO_SCHEDULE_RUN',
       promoteToLimitedAfterVerifiedCanary: true,
       generalAutonomy: false,
       limited: { generalAutonomy: false },
