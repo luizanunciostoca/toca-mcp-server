@@ -34,34 +34,16 @@ jobs:
           set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
+          import re
 
           registry = Path('scripts/marketing-autopilot-registry.mjs')
           text = registry.read_text()
-          old = '''async function recordPrecheck() {
-            const binding = policy.bindings?.[contentItemId];
-            assert(binding, 'AUTOPILOT_EXACT_BINDING_REQUIRED');
-            const now = formatBahia(new Date());
-            await appendSchedulerLog([
-              `AUTOPILOT-PRECHECK-${process.env.GITHUB_RUN_ID ?? 'local'}`,
-              now,
-              contentItemId,
-              process.env.GITHUB_RUN_ID ?? '',
-              'GITHUB_ACTIONS_CONTROL_PLANE',
-              binding.expectedScheduledAt,
-              'PRECHECK',
-              'CANARY_READY',
-              '0',
-              '0',
-              '',
-              'NOT_CALLED',
-              '',
-              '',
-              `run=${process.env.GITHUB_RUN_ID ?? ''};sha=${process.env.GITHUB_SHA ?? ''};provider_called=false;writer=${policy.canonicalWriter.workflow}`,
-              'GCP_PUBLISH_NOW_AUTOPILOT_CANARY',
-            ]);
-          }
-          '''
-          new = '''async function recordPrecheck() {
+
+          record_pattern = re.compile(
+              r"async function recordPrecheck\(\) \{.*?\n\}\n\nasync function reconcilePublication\(\) \{",
+              re.S,
+          )
+          record_replacement = '''async function recordPrecheck() {
             const sheet = await readContentSheet();
             const item = findRow(sheet, contentItemId).object;
             const scheduledAt = text(item.scheduled_at);
@@ -91,44 +73,52 @@ jobs:
               policy.policyId,
             ]);
           }
-          '''
-          if text.count(old) != 1:
-              raise SystemExit('recordPrecheck block mismatch')
-          text = text.replace(old, new, 1)
-          old = '''  assert(
-            text(row.object.master_drive_file_id) === command.driveFileId,
-            'AUTOPILOT_REGISTRY_DRIVE_FILE_DRIFT',
-          );
-          '''
-          new = '''  const deliveryDriveFileId =
+
+          async function reconcilePublication() {'''
+          text, count = record_pattern.subn(record_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'recordPrecheck block mismatch count={count}')
+
+          drive_pattern = re.compile(
+              r"\s{2}assert\(\n\s{4}text\(row\.object\.master_drive_file_id\) === command\.driveFileId,\n\s{4}'AUTOPILOT_REGISTRY_DRIVE_FILE_DRIFT',\n\s{2}\);"
+          )
+          drive_replacement = '''  const deliveryDriveFileId =
             text(row.object.format) === 'STORY'
               ? text(row.object.story_drive_file_id)
               : text(row.object.master_drive_file_id);
-          assert(deliveryDriveFileId === command.driveFileId, 'AUTOPILOT_REGISTRY_DRIVE_FILE_DRIFT');
-          '''
-          if text.count(old) != 1:
-              raise SystemExit('drive binding block mismatch')
-          text = text.replace(old, new, 1)
-          text = text.replace("scheduling_policy: 'GCP_PUBLISH_NOW_AUTOPILOT_CANARY',", 'scheduling_policy: policy.policyId,', 1)
-          text = text.replace("    'GCP_PUBLISH_NOW_AUTOPILOT_CANARY',\n  ]);", '    policy.policyId,\n  ]);', 1)
+          assert(deliveryDriveFileId === command.driveFileId, 'AUTOPILOT_REGISTRY_DRIVE_FILE_DRIFT');'''
+          text, count = drive_pattern.subn(drive_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'drive binding block mismatch count={count}')
+
+          old_policy = "scheduling_policy: 'GCP_PUBLISH_NOW_AUTOPILOT_CANARY',"
+          if text.count(old_policy) != 1:
+              raise SystemExit(f'scheduling policy write mismatch count={text.count(old_policy)}')
+          text = text.replace(old_policy, 'scheduling_policy: policy.policyId,', 1)
+
+          old_log_policy = "    'GCP_PUBLISH_NOW_AUTOPILOT_CANARY',\n  ]);"
+          if text.count(old_log_policy) != 1:
+              raise SystemExit(f'scheduler log policy mismatch count={text.count(old_log_policy)}')
+          text = text.replace(old_log_policy, '    policy.policyId,\n  ]);', 1)
           registry.write_text(text)
 
           workflow = Path('.github/workflows/marketing-autopilot-publication.yml')
           text = workflow.read_text()
-          old = '''          baseline_run_id="$(jq -r '.rollout.providerReconciliationBaseline.runId' "$POLICY_PATH")"
-                    baseline_completed_at="$(jq -r '.rollout.providerReconciliationBaseline.completedAt' "$POLICY_PATH")"
-                    baseline_content_item="$(jq -r '.rollout.providerReconciliationBaseline.contentItemId' "$POLICY_PATH")"
-                    test "$baseline_content_item" = "$CONTENT_ITEM_ID"
-                    gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${baseline_run_id}" > /tmp/baseline-run.json
-                    jq -e \\
-                      --arg completed "$baseline_completed_at" '
-                        .name == "Instagram GCP Publication Recovery Preflight" and
-                        .status == "completed" and
-                        .conclusion == "success" and
-                        .updated_at == $completed
-                      ' /tmp/baseline-run.json >/dev/null
-          '''
-          new = '''          baseline_run_id="$(jq -r '.rollout.providerReconciliationBaseline.runId' "$POLICY_PATH")"
+          baseline_pattern = re.compile(
+              r'''          baseline_run_id="\$\(jq -r '\.rollout\.providerReconciliationBaseline\.runId' "\$POLICY_PATH"\)"\n'''
+              r'''          baseline_completed_at="\$\(jq -r '\.rollout\.providerReconciliationBaseline\.completedAt' "\$POLICY_PATH"\)"\n'''
+              r'''          baseline_content_item="\$\(jq -r '\.rollout\.providerReconciliationBaseline\.contentItemId' "\$POLICY_PATH"\)"\n'''
+              r'''          test "\$baseline_content_item" = "\$CONTENT_ITEM_ID"\n'''
+              r'''          gh api "repos/\$\{GITHUB_REPOSITORY\}/actions/runs/\$\{baseline_run_id\}" > /tmp/baseline-run\.json\n'''
+              r'''          jq -e \\\n'''
+              r'''            --arg completed "\$baseline_completed_at" '\n'''
+              r'''              \.name == "Instagram GCP Publication Recovery Preflight" and\n'''
+              r'''              \.status == "completed" and\n'''
+              r'''              \.conclusion == "success" and\n'''
+              r'''              \.updated_at == \$completed\n'''
+              r'''            ' /tmp/baseline-run\.json >/dev/null\n'''
+          )
+          baseline_replacement = '''          baseline_run_id="$(jq -r '.rollout.providerReconciliationBaseline.runId' "$POLICY_PATH")"
                     baseline_completed_at="$(jq -r '.rollout.providerReconciliationBaseline.completedAt' "$POLICY_PATH")"
                     baseline_content_item="$(jq -r '.rollout.providerReconciliationBaseline.contentItemId' "$POLICY_PATH")"
                     if [ "$baseline_content_item" = "$CONTENT_ITEM_ID" ]; then
@@ -147,9 +137,9 @@ jobs:
                       echo 'MARKETING_AUTOPILOT_PROVIDER_BASELINE=NOT_APPLICABLE_STRICT_HISTORY_SCAN'
                     fi
           '''
-          if text.count(old) != 1:
-              raise SystemExit('baseline guard block mismatch')
-          text = text.replace(old, new, 1)
+          text, count = baseline_pattern.subn(baseline_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'baseline guard block mismatch count={count}')
           workflow.write_text(text)
           PY
       - name: Format and validate touched files
