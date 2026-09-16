@@ -109,7 +109,7 @@ jobs:
           done
           test -n "$run_id" || { echo 'PUBLISHER_RUN_NOT_FOUND'; exit 1; }
 
-          for _ in $(seq 1 120); do
+          for _ in $(seq 1 180); do
             run=$(gh api "repos/$REPO/actions/runs/$run_id")
             status=$(jq -r '.status' <<<"$run")
             if [ "$status" = 'completed' ]; then
@@ -166,7 +166,7 @@ jobs:
           done
           test -n "$run_id" || { echo 'RECONCILIATION_RUN_NOT_FOUND'; exit 1; }
 
-          for _ in $(seq 1 120); do
+          for _ in $(seq 1 180); do
             run=$(gh api "repos/$REPO/actions/runs/$run_id")
             status=$(jq -r '.status' <<<"$run")
             if [ "$status" = 'completed' ]; then
