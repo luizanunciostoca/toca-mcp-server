@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from 'node:fs';
+import { hashRegistrySnapshot } from './marketing-autopilot-registry-binding.mjs';
 
 const MODE = process.argv[2] ?? '';
 const POLICY_PATH =
   process.env.MARKETING_AUTOPILOT_POLICY_PATH ??
   'control/marketing-autopilot-scheduler-policy.json';
+const COMMAND_PATH =
+  process.env.MARKETING_AUTOPILOT_COMMAND_PATH ?? 'control/marketing-publish-now-command.json';
+const SHEETS_BASE_URL =
+  process.env.MARKETING_AUTOPILOT_SHEETS_BASE_URL?.replace(/\/$/, '') ??
+  'https://sheets.googleapis.com/v4/spreadsheets';
 const policy = JSON.parse(readFileSync(POLICY_PATH, 'utf8'));
 const token = process.env.GOOGLE_ACCESS_TOKEN?.trim() ?? '';
 const contentItemId = process.env.MARKETING_AUTOPILOT_CONTENT_ITEM_ID?.trim() ?? '';
@@ -53,7 +59,7 @@ async function recordPrecheck() {
 }
 
 async function reconcilePublication() {
-  const command = JSON.parse(readFileSync('control/marketing-publish-now-command.json', 'utf8'));
+  const command = JSON.parse(readFileSync(COMMAND_PATH, 'utf8'));
   const publication = JSON.parse(
     readFileSync(requiredPath('MARKETING_AUTOPILOT_PUBLICATION_EVIDENCE'), 'utf8'),
   );
@@ -63,6 +69,16 @@ async function reconcilePublication() {
 
   assert(command.action === 'PUBLISH_NOW', 'AUTOPILOT_RECONCILE_COMMAND_NOT_PUBLISH_NOW');
   assert(command.contentItemId === contentItemId, 'AUTOPILOT_RECONCILE_CONTENT_ITEM_MISMATCH');
+  assert(
+    command.schedulerBinding?.source === 'MARKETING_AUTOPILOT_GCP',
+    'AUTOPILOT_RECONCILE_SCHEDULER_SOURCE_INVALID',
+  );
+  const sourceRunId = text(command.schedulerBinding?.sourceRunId);
+  assert(sourceRunId, 'AUTOPILOT_RECONCILE_SOURCE_RUN_ID_REQUIRED');
+  assert(
+    /^[a-f0-9]{64}$/.test(text(command.schedulerBinding?.registrySnapshotSha256)),
+    'AUTOPILOT_RECONCILE_REGISTRY_SNAPSHOT_REQUIRED',
+  );
   assert(publication.status === 'PUBLISHED', 'AUTOPILOT_PROVIDER_STATUS_NOT_PUBLISHED');
   assert(text(publication.publicationId), 'AUTOPILOT_PROVIDER_PUBLICATION_ID_REQUIRED');
   assert(
@@ -95,6 +111,29 @@ async function reconcilePublication() {
 
   const sheet = await readContentSheet();
   const row = findRow(sheet, contentItemId);
+  const liveSnapshotSha256 = hashRegistrySnapshot(row.object);
+  assert(
+    liveSnapshotSha256 === command.schedulerBinding.registrySnapshotSha256,
+    'AUTOPILOT_REGISTRY_SNAPSHOT_DRIFT',
+  );
+  assert(text(row.object.status) === 'PRODUCED', 'AUTOPILOT_REGISTRY_STATUS_DRIFT');
+  assert(text(row.object.approval_status) === 'APPROVED', 'AUTOPILOT_REGISTRY_APPROVAL_DRIFT');
+  assert(
+    text(row.object.approval_mode) === 'EXPLICIT_APPROVAL',
+    'AUTOPILOT_REGISTRY_APPROVAL_MODE_DRIFT',
+  );
+  assert(
+    text(row.object.correlation_id) === command.correlationId,
+    'AUTOPILOT_REGISTRY_CORRELATION_DRIFT',
+  );
+  assert(
+    text(row.object.master_drive_file_id) === command.driveFileId,
+    'AUTOPILOT_REGISTRY_DRIVE_FILE_DRIFT',
+  );
+  assert(
+    text(row.object.output_sha256) === command.expectedAssetSha256,
+    'AUTOPILOT_REGISTRY_ASSET_SHA_DRIFT',
+  );
   const currentPublicationId = text(row.object.publication_id);
   const currentProviderExternalId = text(row.object.provider_external_id);
   const providerId = text(publication.publicationId);
@@ -105,19 +144,22 @@ async function reconcilePublication() {
   }
 
   const updatedAt = formatBahia(new Date());
+  const writerRunId = process.env.GITHUB_RUN_ID ?? '';
   const evidenceSummary = [
-    `writer_run=${process.env.GITHUB_RUN_ID ?? ''}`,
+    `scheduler_run=${sourceRunId}`,
+    `writer_run=${writerRunId}`,
     `provider_id=${providerId}`,
-    `readback=PUBLISHED`,
-    `write_disabled=true`,
+    'readback=PUBLISHED',
+    'write_disabled=true',
     `outcome=${reconciliation.outcome}`,
+    `registry_snapshot=${liveSnapshotSha256}`,
   ].join(';');
 
   const updates = {
     status: 'PUBLISHED',
     publication_id: providerId,
     provider_external_id: providerId,
-    execution_id: `GH-${process.env.GITHUB_RUN_ID ?? 'UNKNOWN'}`,
+    execution_id: `GH-${writerRunId || 'UNKNOWN'}`,
     correlation_id: command.correlationId,
     last_error: '',
     updated_at: updatedAt,
@@ -125,9 +167,9 @@ async function reconcilePublication() {
     permalink: text(publication.permalink),
     prepared_request_sha256: text(reconciliation.approvedRequestSha256),
     production_idempotency_key: command.idempotencyKey,
-    registry_revision: `MKTREG-GCP-${process.env.GITHUB_RUN_ID ?? 'UNKNOWN'}`,
+    registry_revision: `MKTREG-GCP-${writerRunId || 'UNKNOWN'}`,
     decision_reason: 'GCP_AUTOPILOT_PUBLISHED_VERIFIED',
-    scheduled_run_id: process.env.GITHUB_RUN_ID ?? '',
+    scheduled_run_id: sourceRunId,
     scheduling_mode: 'GCP_AUTOPILOT',
     scheduling_status: 'PUBLISHED_VERIFIED',
     scheduling_evidence: evidenceSummary,
@@ -140,10 +182,10 @@ async function reconcilePublication() {
 
   await batchUpdateRow(sheet, row.rowNumber, updates);
   await appendSchedulerLog([
-    `AUTOPILOT-PUBLISH-${process.env.GITHUB_RUN_ID ?? 'local'}`,
+    `AUTOPILOT-PUBLISH-${writerRunId || 'local'}`,
     updatedAt,
     contentItemId,
-    process.env.GITHUB_RUN_ID ?? '',
+    sourceRunId,
     'GITHUB_ACTIONS_CONTROL_PLANE',
     command.scheduledAt,
     'APPROVED',
@@ -173,14 +215,25 @@ async function reconcilePublication() {
     text(readback.provider_status) === 'PUBLISHED',
     'AUTOPILOT_REGISTRY_PROVIDER_STATUS_READBACK_FAILED',
   );
+  assert(
+    text(readback.scheduled_run_id) === sourceRunId,
+    'AUTOPILOT_REGISTRY_SCHEDULER_RUN_READBACK_FAILED',
+  );
+  assert(
+    text(readback.execution_id) === `GH-${writerRunId || 'UNKNOWN'}`,
+    'AUTOPILOT_REGISTRY_WRITER_RUN_READBACK_FAILED',
+  );
 
   writeEvidence({
     status: 'PUBLISHED_RECONCILED',
     contentItemId,
+    schedulerRunId: sourceRunId,
+    writerRunId,
     providerPublicationId: providerId,
     providerPermalink: text(publication.permalink),
     providerReadback: 'PUBLISHED',
     finalWriteCapabilityDisabled: true,
+    registrySnapshotSha256: liveSnapshotSha256,
     updatedAt,
   });
 }
@@ -235,7 +288,7 @@ async function appendSchedulerLog(row) {
 
 async function sheetsRequest(path, init) {
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(policy.spreadsheetId)}/${path}`,
+    `${SHEETS_BASE_URL}/${encodeURIComponent(policy.spreadsheetId)}/${path}`,
     {
       ...init,
       headers: {
