@@ -11,11 +11,14 @@ const TODAY_PROGRAMMING_PATTERNS = [
   'programacao hoje',
   'qual a programacao de hoje',
   'qual e a programacao de hoje',
+  'tem evento hoje',
+] as const;
+
+const EXACT_TODAY_PROGRAMMING_PATTERNS = [
   'o que tem hoje',
   'hoje tem o que',
   'o que acontece hoje',
   'tem algo hoje',
-  'tem evento hoje',
   'agenda de hoje',
   'agenda hoje',
 ] as const;
@@ -32,7 +35,13 @@ export function resolveCurrentProgrammingKnowledge(
 ): InstagramEngagementKnowledgeMatch | null {
   if (expectedIntent !== 'EVENT_INFO') return null;
   const normalized = normalize(text);
-  if (!TODAY_PROGRAMMING_PATTERNS.some((pattern) => normalized.includes(pattern))) return null;
+  const matchesProgramming = TODAY_PROGRAMMING_PATTERNS.some((pattern) =>
+    normalized.includes(pattern),
+  );
+  const matchesExactAlias = EXACT_TODAY_PROGRAMMING_PATTERNS.includes(
+    normalized as (typeof EXACT_TODAY_PROGRAMMING_PATTERNS)[number],
+  );
+  if (!matchesProgramming && !matchesExactAlias) return null;
 
   const now = options.now ?? new Date();
   const timeZone = options.timeZone ?? 'America/Bahia';
