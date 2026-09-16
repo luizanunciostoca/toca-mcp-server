@@ -88,9 +88,14 @@ jobs:
 
           close_watch() {
             local status="$1"
-            local updated_body
-            updated_body="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
-            if ! grep -Fxq 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$updated_body"; then
+            local current_json current_body updated_body
+            current_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" 2>/dev/null || true)"
+            if [[ -z "$current_json" || "$(jq -r '.state // empty' <<< "$current_json" 2>/dev/null || true)" != 'open' ]]; then
+              return 0
+            fi
+            current_body="$(jq -r '.body // ""' <<< "$current_json")"
+            updated_body="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$current_body")"
+            if [[ "$(grep -Fxc 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$updated_body" || true)" = '0' ]]; then
               updated_body+=$'\nAUTHORIZATION_STATE=CONSUMED_AND_CLOSED'
             fi
             printf -v report '%s\n' \
@@ -104,9 +109,35 @@ jobs:
               -f state=closed -f state_reason=completed -f body="$updated_body" >/dev/null
           }
 
-          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
-          RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
-          WATCH_EXPIRES_AT="$(grep '^WATCH_EXPIRES_AT=' <<< "$BODY" | tail -1 | cut -d= -f2- || true)"
+          require_unique_exact() {
+            local expected="$1"
+            local count
+            count="$(grep -Fxc "$expected" <<< "$BODY" || true)"
+            if [[ "$count" != '1' ]]; then
+              close_watch 'INVALID_AUTHORIZATION'
+              echo "Expected exactly one authorization marker: $expected; found $count" >&2
+              exit 1
+            fi
+          }
+
+          read_unique_field() {
+            local field="$1"
+            local matches count
+            matches="$(grep "^${field}=" <<< "$BODY" || true)"
+            count="$(grep -c "^${field}=" <<< "$BODY" || true)"
+            if [[ "$count" != '1' ]]; then
+              close_watch 'INVALID_AUTHORIZATION'
+              echo "Expected exactly one authorization field: $field; found $count" >&2
+              exit 1
+            fi
+            printf '%s' "${matches#*=}"
+          }
+
+          if [[ "$(grep -Fxc 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$BODY" || true)" != '0' ]]; then
+            close_watch 'INVALID_AUTHORIZATION'
+            echo 'Consumed authorization state cannot coexist with ACTIVE' >&2
+            exit 1
+          fi
 
           required=(
             'AUTHORIZATION_STATE=ACTIVE'
@@ -129,12 +160,12 @@ jobs:
             'PERSISTENT_DIRECT_PROMOTION_AUTHORIZED=false'
           )
           for marker in "${required[@]}"; do
-            if ! grep -Fxq "$marker" <<< "$BODY"; then
-              close_watch 'INVALID_AUTHORIZATION'
-              echo "Missing exact Direct watch authorization field: $marker" >&2
-              exit 1
-            fi
+            require_unique_exact "$marker"
           done
+
+          RUNTIME_SHA="$(read_unique_field RUNTIME_SOURCE_SHA)"
+          RUNTIME_DIGEST="$(read_unique_field RUNTIME_IMAGE_DIGEST)"
+          WATCH_EXPIRES_AT="$(read_unique_field WATCH_EXPIRES_AT)"
 
           if [[ "$RUNTIME_SHA" != "$GITHUB_SHA" ]]; then
             close_watch 'STALE_MAIN'
@@ -143,23 +174,47 @@ jobs:
           fi
           if ! [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             close_watch 'INVALID_RUNTIME_DIGEST'
+            echo 'Runtime digest is invalid' >&2
             exit 1
           fi
-          if [[ -z "$WATCH_EXPIRES_AT" || -z "$CREATED_AT" ]]; then
+          if [[ -z "$CREATED_AT" ]]; then
             close_watch 'INVALID_EXPIRY'
+            echo 'Authorization created_at is missing' >&2
             exit 1
           fi
-
-          CREATED_EPOCH="$(date -u -d "$CREATED_AT" +%s)"
-          EXPIRES_EPOCH="$(date -u -d "$WATCH_EXPIRES_AT" +%s)"
+          if ! CREATED_EPOCH="$(date -u -d "$CREATED_AT" +%s 2>/dev/null)"; then
+            close_watch 'INVALID_EXPIRY'
+            echo 'Authorization created_at is invalid' >&2
+            exit 1
+          fi
+          if ! EXPIRES_EPOCH="$(date -u -d "$WATCH_EXPIRES_AT" +%s 2>/dev/null)"; then
+            close_watch 'INVALID_EXPIRY'
+            echo 'WATCH_EXPIRES_AT is invalid' >&2
+            exit 1
+          fi
           NOW_EPOCH="$(date -u +%s)"
           if (( EXPIRES_EPOCH <= CREATED_EPOCH || EXPIRES_EPOCH - CREATED_EPOCH > 43200 )); then
             close_watch 'INVALID_EXPIRY_WINDOW'
+            echo 'Watch lifetime must be greater than zero and at most 12 hours' >&2
             exit 1
           fi
           if (( NOW_EPOCH >= EXPIRES_EPOCH )); then
             close_watch 'EXPIRED'
             echo 'active=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CONTROL_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640")"
+          CONTROL_BODY="$(printf '%s' "$CONTROL_JSON" | jq -r '.body // ""')"
+          CONTROL_STATE="$(printf '%s' "$CONTROL_JSON" | jq -r '.state // empty')"
+          CONTROL_OK=true
+          [[ "$CONTROL_STATE" = 'open' ]] || CONTROL_OK=false
+          [[ "$(grep -Fxc 'MAIN_STABILITY=PASS' <<< "$CONTROL_BODY" || true)" = '1' ]] || CONTROL_OK=false
+          [[ "$(grep -Fxc "EVALUATED_MAIN_SHA=$GITHUB_SHA" <<< "$CONTROL_BODY" || true)" = '1' ]] || CONTROL_OK=false
+          [[ "$(grep -Fxc 'MERGE_RESERVATION=NONE' <<< "$CONTROL_BODY" || true)" = '1' ]] || CONTROL_OK=false
+          if [[ "$CONTROL_OK" != 'true' ]]; then
+            echo 'active=false' >> "$GITHUB_OUTPUT"
+            echo 'DIRECT_CANARY_OPPORTUNITY_WATCH=BLOCKED_CONTROL_PLANE' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
@@ -215,19 +270,29 @@ jobs:
 
           for attempt in 1 2; do
             JOB="${BASE_JOB}-${attempt}"
-            gcloud run jobs deploy "$JOB" \
+            DEPLOYED_JOBS+=("$JOB")
+            echo "jobs=${DEPLOYED_JOBS[*]}" >> "$GITHUB_OUTPUT"
+            echo "execution_attempts=$attempt" >> "$GITHUB_OUTPUT"
+
+            if ! gcloud run jobs deploy "$JOB" \
               --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
               --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
               --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
               --set-env-vars "^#^INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true#INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false#INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID#INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID#INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID#INSTAGRAM_ENGAGEMENT_KNOWLEDGE_SPREADSHEET_ID=$CANONICAL_FAQ_SPREADSHEET_ID#INSTAGRAM_ENGAGEMENT_CANARY_MAX_AGE_MINUTES=30#INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_MINUTES=120" \
               --command node --args dist/src/ops/instagram-engagement-canary-eligibility-readonly.js \
-              --tasks 1 --max-retries 0 --task-timeout 120s --quiet
-            DEPLOYED_JOBS+=("$JOB")
-            echo "jobs=${DEPLOYED_JOBS[*]}" >> "$GITHUB_OUTPUT"
-            echo "execution_attempts=$attempt" >> "$GITHUB_OUTPUT"
+              --tasks 1 --max-retries 0 --task-timeout 120s --quiet; then
+              if [[ "$attempt" = '1' ]]; then
+                echo 'PROBE_DEPLOY_RECOVERY_ATTEMPT=2' >> "$GITHUB_STEP_SUMMARY"
+                sleep 5
+                continue
+              fi
+              echo 'PROBE_DEPLOY_TERMINAL_FAILURE=true' >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
 
             if gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet; then
               echo "job=$JOB" >> "$GITHUB_OUTPUT"
+              echo "PROBE_EXECUTION_ATTEMPTS=$attempt" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             if [[ "$attempt" = '1' ]]; then
@@ -249,29 +314,56 @@ jobs:
           MARKERS_COMPLETE=false
           POLL_ATTEMPTS=0
           required_markers=(
-            INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY CANDIDATE_COUNT ELIGIBLE_COUNT
+            INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY
+            CANDIDATE_COUNT CANDIDATE_QUERY_LIMIT CANDIDATE_QUERY_SATURATED ELIGIBLE_COUNT
             READ_ONLY_ELIGIBILITY DATABASE_MUTATIONS PROVIDER_CALLS RAW_USER_DATA_LOGGED
           )
 
           for attempt in 1 2 3 4 5 6; do
             POLL_ATTEMPTS="$attempt"
+            LOG_READ_FAILED=false
             if ! LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB}\"" \
               --project "$GCP_PROJECT_ID" --freshness=1h --limit=300 --order=desc --format=json 2>/dev/null)"; then
               LOGS='[]'
+              LOG_READ_FAILED=true
             fi
-            SAFE_LINES="$(jq -r '.[] | (.textPayload // .jsonPayload.message // empty)' <<< "$LOGS" \
-              | grep -E '^(INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY|CANDIDATE_COUNT|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|REJECTED_[A-Z_]+|RECENT_DIRECT_[A-Z_]+|DIRECT_OUTBOX_[A-Z_]+|DIRECT_ACTION_[A-Z_]+|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|RAW_USER_DATA_LOGGED)=' \
-              || true)"
+
+            if [[ "$LOG_READ_FAILED" != 'true' ]] && ! jq -e 'type == "array"' <<< "$LOGS" >/dev/null 2>&1; then
+              echo 'status=BLOCKED_MALFORMED_LOG_EVIDENCE' >> "$GITHUB_OUTPUT"
+              echo 'DIRECT_CANARY_OPPORTUNITY_WATCH=BLOCKED_MALFORMED_LOG_EVIDENCE' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if ! RAW_LINES="$(jq -r '.[] | (.textPayload // .jsonPayload.message // empty)' <<< "$LOGS" 2>/dev/null)"; then
+              echo 'status=BLOCKED_MALFORMED_LOG_EVIDENCE' >> "$GITHUB_OUTPUT"
+              echo 'DIRECT_CANARY_OPPORTUNITY_WATCH=BLOCKED_MALFORMED_LOG_EVIDENCE' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            SAFE_LINES="$(grep -E '^(INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY|CANDIDATE_COUNT|CANDIDATE_QUERY_LIMIT|CANDIDATE_QUERY_SATURATED|ELIGIBLE_COUNT|ELIGIBLE_TARGET_SHA256|REJECTED_[A-Z_]+|RECENT_DIRECT_[A-Z_]+|DIRECT_OUTBOX_[A-Z_]+|DIRECT_ACTION_[A-Z_]+|READ_ONLY_ELIGIBILITY|DATABASE_MUTATIONS|PROVIDER_CALLS|RAW_USER_DATA_LOGGED)=' <<< "$RAW_LINES" || true)"
+
             MARKERS_COMPLETE=true
             for marker in "${required_markers[@]}"; do
               count="$(grep -c "^${marker}=" <<< "$SAFE_LINES" || true)"
-              if [[ "$count" != '1' ]]; then
+              if (( count > 1 )); then
+                echo 'status=BLOCKED_AMBIGUOUS_EVIDENCE' >> "$GITHUB_OUTPUT"
+                echo "AMBIGUOUS_MARKER=$marker" >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              if [[ "$count" = '0' ]]; then
                 MARKERS_COMPLETE=false
-                break
               fi
             done
-            if [[ "$MARKERS_COMPLETE" == 'true' ]]; then break; fi
-            if [[ "$attempt" != '6' ]]; then sleep 10; fi
+            target_count="$(grep -c '^ELIGIBLE_TARGET_SHA256=' <<< "$SAFE_LINES" || true)"
+            if (( target_count > 1 )); then
+              echo 'status=BLOCKED_AMBIGUOUS_EVIDENCE' >> "$GITHUB_OUTPUT"
+              echo 'AMBIGUOUS_MARKER=ELIGIBLE_TARGET_SHA256' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if [[ "$MARKERS_COMPLETE" == 'true' ]]; then
+              break
+            fi
+            if [[ "$attempt" != '6' ]]; then
+              sleep 10
+            fi
           done
 
           if [[ "$MARKERS_COMPLETE" != 'true' ]]; then
@@ -302,25 +394,51 @@ jobs:
 
           STATUS="$(read_single_marker INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY)"
           CANDIDATE_COUNT="$(read_numeric CANDIDATE_COUNT)"
+          QUERY_LIMIT="$(read_numeric CANDIDATE_QUERY_LIMIT)"
+          QUERY_SATURATED="$(read_single_marker CANDIDATE_QUERY_SATURATED)"
           ELIGIBLE_COUNT="$(read_numeric ELIGIBLE_COUNT)"
-          TARGET_SHA="$(grep '^ELIGIBLE_TARGET_SHA256=' <<< "$SAFE_LINES" | head -1 | cut -d= -f2- || true)"
+          TARGET_COUNT="$(grep -c '^ELIGIBLE_TARGET_SHA256=' <<< "$SAFE_LINES" || true)"
+          TARGET_SHA='NONE'
+          if [[ "$TARGET_COUNT" = '1' ]]; then
+            TARGET_SHA="$(read_single_marker ELIGIBLE_TARGET_SHA256)"
+          fi
+
           [[ "$STATUS" =~ ^(READY|NO_ELIGIBLE_TARGET|MULTIPLE_ELIGIBLE_TARGETS)$ ]]
+          [[ "$QUERY_SATURATED" =~ ^(true|false)$ ]]
+          (( QUERY_LIMIT > 0 ))
+          (( CANDIDATE_COUNT <= QUERY_LIMIT ))
           read_exact_marker READ_ONLY_ELIGIBILITY true
           read_exact_marker DATABASE_MUTATIONS false
           read_exact_marker PROVIDER_CALLS false
           read_exact_marker RAW_USER_DATA_LOGGED false
 
+          if [[ "$QUERY_SATURATED" = 'true' && "$CANDIDATE_COUNT" -lt "$QUERY_LIMIT" ]]; then
+            echo 'status=BLOCKED_AMBIGUOUS_EVIDENCE' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$QUERY_SATURATED" = 'false' && "$CANDIDATE_COUNT" -ge "$QUERY_LIMIT" ]]; then
+            echo 'status=BLOCKED_AMBIGUOUS_EVIDENCE' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           if [[ "$STATUS" = 'READY' ]]; then
             test "$ELIGIBLE_COUNT" = '1'
+            test "$TARGET_COUNT" = '1'
             [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]
+            if [[ "$QUERY_SATURATED" = 'true' ]]; then
+              echo 'status=BLOCKED_CANDIDATE_QUERY_SATURATED' >> "$GITHUB_OUTPUT"
+              echo 'DIRECT_CANARY_OPPORTUNITY_WATCH=BLOCKED_CANDIDATE_QUERY_SATURATED' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
           else
-            [[ -z "$TARGET_SHA" || "$TARGET_SHA" = 'NONE' ]]
+            test "$TARGET_COUNT" = '0'
+            test "$TARGET_SHA" = 'NONE'
           fi
 
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           echo "candidate_count=$CANDIDATE_COUNT" >> "$GITHUB_OUTPUT"
           echo "eligible_count=$ELIGIBLE_COUNT" >> "$GITHUB_OUTPUT"
-          echo "target_sha=${TARGET_SHA:-NONE}" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Delete temporary Direct opportunity jobs
         if: always()
@@ -345,11 +463,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           close_watch() {
-            local terminal_status="$1" issue_json body updated_body
-            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}")"
-            body="$(printf '%s' "$issue_json" | jq -r '.body // ""')"
+            local terminal_status="$1"
+            local issue_json body updated_body
+            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}" 2>/dev/null || true)"
+            if [[ -z "$issue_json" || "$(jq -r '.state // empty' <<< "$issue_json" 2>/dev/null || true)" != 'open' ]]; then
+              return 0
+            fi
+            body="$(jq -r '.body // ""' <<< "$issue_json")"
             updated_body="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$body")"
+            if [[ "$(grep -Fxc 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$updated_body" || true)" = '0' ]]; then
+              updated_body+=$'\nAUTHORIZATION_STATE=CONSUMED_AND_CLOSED'
+            fi
             printf -v report '%s\n' \
               "DIRECT_CANARY_OPPORTUNITY_WATCH_STATUS=$terminal_status" \
               "CONTROLLER_SHA=$GITHUB_SHA" \
@@ -363,6 +489,41 @@ jobs:
               -f state=closed -f state_reason=completed -f body="$updated_body" >/dev/null
           }
 
+          revalidate_watch() {
+            local issue_json body current_main runtime_sha runtime_digest expires_at expires_epoch now_epoch
+            local control_json control_body
+            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}")" || return 1
+            [[ "$(jq -r '.state // empty' <<< "$issue_json")" = 'open' ]] || return 1
+            [[ "$(jq -r '.user.login // empty' <<< "$issue_json")" = "$GITHUB_REPOSITORY_OWNER" ]] || return 1
+            [[ "$(jq -r '.title // empty' <<< "$issue_json")" == PRODUCTION\ AUTHORIZATION\ —\ Instagram\ DIRECT\ canary\ opportunity\ watch\ READONLY\ AUTO* ]] || return 1
+            body="$(jq -r '.body // ""' <<< "$issue_json")"
+            [[ "$(grep -Fxc 'AUTHORIZATION_STATE=ACTIVE' <<< "$body" || true)" = '1' ]] || return 1
+            [[ "$(grep -Fxc 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$body" || true)" = '0' ]] || return 1
+            [[ "$(grep -Fxc 'INSTAGRAM_ENGAGEMENT_DIRECT_CANARY_OPPORTUNITY_WATCH=AUTHORIZED' <<< "$body" || true)" = '1' ]] || return 1
+            [[ "$(grep -Fxc 'AUTO_REAL_CANARY_AUTHORIZED=false' <<< "$body" || true)" = '1' ]] || return 1
+            [[ "$(grep -Fxc 'PROVIDER_CALLS_AUTHORIZED=false' <<< "$body" || true)" = '1' ]] || return 1
+            [[ "$(grep -Fxc 'EXTERNAL_REPLY_WRITES_AUTHORIZED=false' <<< "$body" || true)" = '1' ]] || return 1
+            [[ "$(grep -c '^RUNTIME_SOURCE_SHA=' <<< "$body" || true)" = '1' ]] || return 1
+            [[ "$(grep -c '^RUNTIME_IMAGE_DIGEST=' <<< "$body" || true)" = '1' ]] || return 1
+            [[ "$(grep -c '^WATCH_EXPIRES_AT=' <<< "$body" || true)" = '1' ]] || return 1
+            runtime_sha="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$body" | cut -d= -f2-)"
+            runtime_digest="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$body" | cut -d= -f2-)"
+            expires_at="$(grep '^WATCH_EXPIRES_AT=' <<< "$body" | cut -d= -f2-)"
+            [[ "$runtime_sha" = "$GITHUB_SHA" ]] || return 1
+            [[ "$runtime_digest" = "$RUNTIME_DIGEST" ]] || return 1
+            expires_epoch="$(date -u -d "$expires_at" +%s 2>/dev/null)" || return 1
+            now_epoch="$(date -u +%s)"
+            (( now_epoch < expires_epoch )) || return 1
+            current_main="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')" || return 1
+            [[ "$current_main" = "$GITHUB_SHA" ]] || return 1
+            control_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640")" || return 1
+            [[ "$(jq -r '.state // empty' <<< "$control_json")" = 'open' ]] || return 1
+            control_body="$(jq -r '.body // ""' <<< "$control_json")"
+            [[ "$(grep -Fxc 'MAIN_STABILITY=PASS' <<< "$control_body" || true)" = '1' ]] || return 1
+            [[ "$(grep -Fxc "EVALUATED_MAIN_SHA=$GITHUB_SHA" <<< "$control_body" || true)" = '1' ]] || return 1
+            [[ "$(grep -Fxc 'MERGE_RESERVATION=NONE' <<< "$control_body" || true)" = '1' ]] || return 1
+          }
+
           if [[ "$STATUS" = 'BLOCKED_LOG_PROPAGATION' || "$STATUS" = 'NO_ELIGIBLE_TARGET' ]]; then
             echo "DIRECT_CANARY_OPPORTUNITY_WATCH_RESULT=$STATUS" >> "$GITHUB_STEP_SUMMARY"
             echo 'WATCH_REMAINS_ACTIVE=true' >> "$GITHUB_STEP_SUMMARY"
@@ -374,6 +535,12 @@ jobs:
           if [[ "$STATUS" = 'READY' ]]; then
             test "$ELIGIBLE_COUNT" = '1'
             [[ "$TARGET_SHA" =~ ^[0-9a-f]{64}$ ]]
+            if ! revalidate_watch; then
+              close_watch 'BLOCKED_REVALIDATION'
+              echo 'Direct opportunity watch failed live revalidation before opportunity creation' >&2
+              exit 1
+            fi
+
             TARGET_SHORT="${TARGET_SHA:0:12}"
             TITLE="INSTAGRAM DIRECT CANARY OPPORTUNITY — ${GITHUB_SHA:0:8} — ${TARGET_SHORT}"
             QUERY="repo:${GITHUB_REPOSITORY} is:issue is:open in:title \"${TITLE}\""
@@ -381,6 +548,13 @@ jobs:
             DUPLICATES="$(jq --arg title "$TITLE" '[.items[] | select(.pull_request == null) | select(.title == $title)] | length' <<< "$SEARCH_JSON")"
             if [[ "$DUPLICATES" != '0' ]]; then
               close_watch 'BLOCKED_DUPLICATE_OPPORTUNITY'
+              echo "Expected zero existing open sanitized opportunity issues, found $DUPLICATES" >&2
+              exit 1
+            fi
+
+            if ! revalidate_watch; then
+              close_watch 'BLOCKED_REVALIDATION'
+              echo 'Direct opportunity watch failed final revalidation immediately before issue creation' >&2
               exit 1
             fi
 
@@ -420,9 +594,14 @@ jobs:
           set -euo pipefail
           test -n "${WATCH_ISSUE:-}"
           ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${WATCH_ISSUE}")"
-          if [[ "$(printf '%s' "$ISSUE_JSON" | jq -r '.state')" != 'open' ]]; then exit 0; fi
+          if [[ "$(printf '%s' "$ISSUE_JSON" | jq -r '.state')" != 'open' ]]; then
+            exit 0
+          fi
           BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
           UPDATED_BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
+          if [[ "$(grep -Fxc 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$UPDATED_BODY" || true)" = '0' ]]; then
+            UPDATED_BODY+=$'\nAUTHORIZATION_STATE=CONSUMED_AND_CLOSED'
+          fi
           printf -v report '%s\n' \
             'DIRECT_CANARY_OPPORTUNITY_WATCH_STATUS=PROBE_OR_CONTROLLER_FAILURE' \
             "CONTROLLER_SHA=$GITHUB_SHA" \
