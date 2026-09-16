@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import * as z from 'zod/v4';
 import { ROUTE_IDS } from '../governance/types.js';
+import { AG01_GROUNDED_KNOWLEDGE_INTENTS } from './grounded-knowledge.js';
 import type { Ag01ProductionRuntime } from './production-runtime.js';
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -19,6 +20,14 @@ const executeSchema = z
 const resumeSchema = z
   .object({
     conversationId: z.string().trim().min(1).max(300),
+  })
+  .strict();
+const groundedKnowledgeSchema = z
+  .object({
+    idempotencyKey: z.string().trim().min(1).max(300),
+    message: z.string().trim().min(1).max(10_000),
+    expectedIntent: z.enum(AG01_GROUNDED_KNOWLEDGE_INTENTS),
+    correlationId: z.string().trim().min(1).max(300).optional(),
   })
   .strict();
 
@@ -91,6 +100,29 @@ async function routeRequest(
     log('ag01.followups.tick.completed', {
       firedTimerCount: result.firedTimerIds.length,
       processedWorkflowCount: result.processedWorkflowIds.length,
+      durationMs: Date.now() - startedAt,
+    });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/v1/knowledge/answer') {
+    const input = groundedKnowledgeSchema.parse(await readJsonBody(request));
+    const result = await runtime.answerGroundedKnowledge(input);
+    if (input.correlationId) response.setHeader('x-correlation-id', input.correlationId);
+    writeJson(response, 200, {
+      status: result ? 'GROUNDED' : 'NO_GROUNDED_ANSWER',
+      answer: result?.answer ?? null,
+      confidence: result?.confidence ?? 0,
+      citedResourceIds: result?.citedResourceIds ?? [],
+      evidence: result?.evidence ?? [],
+      modelResponseId: result?.modelResponseId ?? null,
+      model: result?.model ?? null,
+    });
+    log('ag01.grounded_knowledge.completed', {
+      correlationId: input.correlationId ?? null,
+      expectedIntent: input.expectedIntent,
+      status: result ? 'GROUNDED' : 'NO_GROUNDED_ANSWER',
+      citedResourceCount: result?.citedResourceIds.length ?? 0,
       durationMs: Date.now() - startedAt,
     });
     return;
@@ -199,8 +231,15 @@ function normalizeHttpError(error: unknown): { readonly status: number; readonly
   if (error instanceof z.ZodError) return { status: 400, code: 'invalid_request' };
   const message = error instanceof Error ? error.message : 'AG01_RUNTIME_ERROR';
   const code = (message.split(':')[0] || 'AG01_RUNTIME_ERROR').replace(/[^A-Z0-9_.-]/gi, '_');
-  if (code === 'AG01_MODEL_TIMEOUT') return { status: 504, code };
-  if (code === 'AG01_MODEL_PROVIDER_UNAVAILABLE' || code === 'AG01_TOCA_OS_REGISTRY_TIMEOUT') {
+  if (code === 'AG01_MODEL_TIMEOUT' || code === 'AG01_GROUNDED_MODEL_TIMEOUT') {
+    return { status: 504, code };
+  }
+  if (
+    code === 'AG01_MODEL_PROVIDER_UNAVAILABLE' ||
+    code === 'AG01_TOCA_OS_REGISTRY_TIMEOUT' ||
+    code.startsWith('AG01_GROUNDED_MODEL_HTTP_ERROR') ||
+    code.includes('DRIVE_')
+  ) {
     return { status: 503, code };
   }
   if (code.startsWith('AG01_MODEL_PROVIDER_HTTP_ERROR')) return { status: 503, code };
@@ -210,7 +249,9 @@ function normalizeHttpError(error: unknown): { readonly status: number; readonly
     code.includes('MODEL_AGENT') ||
     code.includes('MODEL_RISK') ||
     code.includes('MODEL_APPROVAL') ||
-    code.includes('MODEL_EXPECTED_READBACK')
+    code.includes('MODEL_EXPECTED_READBACK') ||
+    code.includes('GROUNDED_MODEL_INVALID') ||
+    code.includes('GROUNDED_MODEL_UNKNOWN_CITATION')
   ) {
     return { status: 502, code };
   }
