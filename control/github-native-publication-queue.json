@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "timezone": "America/Bahia",
-  "generatedAt": "2026-09-15T23:56:12-03:00",
+  "generatedAt": "2026-09-16T00:05:00-03:00",
   "items": [
     {
       "contentItemId": "MKT-20260917-SUNSET-FEED-0900",
-      "scheduledAt": "2026-09-16T00:20:00-03:00",
-      "expiresAt": "2026-09-16T00:30:00-03:00",
+      "scheduledAt": "2026-09-16T00:35:00-03:00",
+      "expiresAt": "2026-09-16T00:45:00-03:00",
       "operation": "SUNSET",
       "channel": "INSTAGRAM",
       "contentStatus": "PRODUCED",
