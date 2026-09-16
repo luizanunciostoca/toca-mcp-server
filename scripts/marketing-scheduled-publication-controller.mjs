@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 const queuePath =
   process.env.SCHEDULED_PUBLICATION_QUEUE_PATH ?? 'control/gcp-instagram-publication-queue.json';
@@ -10,6 +10,8 @@ const commandPath =
 const summaryPath =
   process.env.SCHEDULED_PUBLICATION_SUMMARY_PATH ??
   '/tmp/marketing-scheduled-publication-summary.json';
+const creativeStandardsDirectory =
+  process.env.CREATIVE_STANDARDS_DIRECTORY ?? 'control/creative-standards';
 const nowIso = process.env.SCHEDULED_PUBLICATION_NOW ?? new Date().toISOString();
 const nowMs = Date.parse(nowIso);
 
@@ -23,6 +25,8 @@ if (!queue.enabled) {
   console.log('GCP_SCHEDULED_PUBLICATION=DISABLED');
   process.exit(0);
 }
+
+validateUniqueIdentities(queue.items);
 
 const maxDelayMs = queue.maxDelayMinutes * 60_000;
 const due = [];
@@ -40,7 +44,10 @@ if (expired.length > 0) {
   fail(false, `SCHEDULED_PUBLICATION_WINDOW_EXPIRED:${expired.join(',')}`);
 }
 if (due.length > 1) {
-  fail(false, `SCHEDULED_PUBLICATION_AMBIGUOUS:${due.map((item) => item.contentItemId).join(',')}`);
+  fail(
+    false,
+    `SCHEDULED_PUBLICATION_AMBIGUOUS:${due.map((item) => item.contentItemId).join(',')}`,
+  );
 }
 if (due.length === 0) {
   writeSummary({ due: false, reason: 'NO_ITEM_DUE', mode: queue.mode, now: nowIso });
@@ -98,7 +105,10 @@ function validateQueue(value) {
     'SCHEDULED_PUBLICATION_QUEUE_INVALID',
   );
   fail(value.schemaVersion === 1, 'SCHEDULED_PUBLICATION_QUEUE_SCHEMA_INVALID');
-  fail(value.mode === 'CANARY' || value.mode === 'LIMITED', 'SCHEDULED_PUBLICATION_MODE_INVALID');
+  fail(
+    value.mode === 'CANARY' || value.mode === 'LIMITED',
+    'SCHEDULED_PUBLICATION_MODE_INVALID',
+  );
   fail(typeof value.enabled === 'boolean', 'SCHEDULED_PUBLICATION_ENABLED_INVALID');
   fail(value.timezone === 'America/Bahia', 'SCHEDULED_PUBLICATION_TIMEZONE_INVALID');
   fail(Number.isInteger(value.maxDelayMinutes), 'SCHEDULED_PUBLICATION_MAX_DELAY_INVALID');
@@ -107,8 +117,27 @@ function validateQueue(value) {
     'SCHEDULED_PUBLICATION_MAX_DELAY_INVALID',
   );
   fail(Array.isArray(value.items), 'SCHEDULED_PUBLICATION_ITEMS_INVALID');
-  if (value.mode === 'CANARY')
+  if (value.mode === 'CANARY') {
     fail(value.items.length <= 1, 'SCHEDULED_PUBLICATION_CANARY_ITEM_LIMIT');
+  }
+}
+
+function validateUniqueIdentities(items) {
+  for (const field of ['contentItemId', 'commandId', 'correlationId', 'idempotencyKey']) {
+    const seen = new Set();
+    for (const item of items) {
+      const value = item?.[field];
+      fail(
+        typeof value === 'string' && value.length > 0,
+        `SCHEDULED_PUBLICATION_${field.toUpperCase()}_REQUIRED`,
+      );
+      fail(
+        !seen.has(value),
+        `SCHEDULED_PUBLICATION_DUPLICATE_${field.toUpperCase()}:${value}`,
+      );
+      seen.add(value);
+    }
+  }
 }
 
 function validateItem(item, mode, currentMs) {
@@ -116,11 +145,12 @@ function validateItem(item, mode, currentMs) {
     item && typeof item === 'object' && !Array.isArray(item),
     'SCHEDULED_PUBLICATION_ITEM_INVALID',
   );
+
+  const writerIdentityPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
   for (const field of [
     'commandId',
     'contentItemId',
     'assetId',
-    'driveFileId',
     'caption',
     'correlationId',
     'idempotencyKey',
@@ -131,14 +161,12 @@ function validateItem(item, mode, currentMs) {
       `SCHEDULED_PUBLICATION_${field.toUpperCase()}_REQUIRED`,
     );
   }
-  fail(
-    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(item.commandId),
-    'SCHEDULED_PUBLICATION_COMMAND_ID_INVALID',
-  );
-  fail(
-    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(item.contentItemId),
-    'SCHEDULED_PUBLICATION_CONTENT_ITEM_ID_INVALID',
-  );
+  for (const field of ['commandId', 'contentItemId', 'assetId', 'correlationId', 'idempotencyKey']) {
+    fail(
+      writerIdentityPattern.test(item[field]),
+      `SCHEDULED_PUBLICATION_${field.toUpperCase()}_INVALID`,
+    );
+  }
   fail(
     /^[A-Za-z0-9_-]{10,128}$/.test(item.driveFileId),
     'SCHEDULED_PUBLICATION_DRIVE_FILE_ID_INVALID',
@@ -147,8 +175,10 @@ function validateItem(item, mode, currentMs) {
     /^[a-f0-9]{64}$/.test(item.expectedAssetSha256 ?? ''),
     'SCHEDULED_PUBLICATION_ASSET_SHA_INVALID',
   );
-  fail(/^[a-f0-9]{40}$/.test(item.targetCodeSha), 'SCHEDULED_PUBLICATION_TARGET_CODE_SHA_INVALID');
-  fail(!/^0{40}$/.test(item.targetCodeSha), 'SCHEDULED_PUBLICATION_TARGET_CODE_SHA_INVALID');
+  fail(
+    /^[a-f0-9]{40}$/.test(item.targetCodeSha) && !/^0{40}$/.test(item.targetCodeSha),
+    'SCHEDULED_PUBLICATION_TARGET_CODE_SHA_INVALID',
+  );
   fail(
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}-03:00$/.test(item.scheduledAt ?? ''),
     'SCHEDULED_PUBLICATION_SCHEDULE_INVALID',
@@ -173,7 +203,9 @@ function validateItem(item, mode, currentMs) {
     item.publicationStatus === 'NOT_PUBLISHED',
     'SCHEDULED_PUBLICATION_ALREADY_MARKED_PUBLISHED',
   );
-  if (mode === 'CANARY') fail(item.canary === true, 'SCHEDULED_PUBLICATION_CANARY_FLAG_REQUIRED');
+  if (mode === 'CANARY') {
+    fail(item.canary === true, 'SCHEDULED_PUBLICATION_CANARY_FLAG_REQUIRED');
+  }
 
   const truth = item.creativeTruthBinding;
   fail(truth && typeof truth === 'object', 'SCHEDULED_PUBLICATION_CREATIVE_TRUTH_REQUIRED');
@@ -191,6 +223,7 @@ function validateItem(item, mode, currentMs) {
   fail(truth.venueFidelityStatus === 'PASSED', 'SCHEDULED_PUBLICATION_VENUE_GATE_FAILED');
   fail(truth.qualityGateStatus === 'PASSED', 'SCHEDULED_PUBLICATION_QUALITY_GATE_FAILED');
   fail(truth.exactAssetBinding === true, 'SCHEDULED_PUBLICATION_EXACT_ASSET_BINDING_REQUIRED');
+  validateCreativeStandardScope(item, truth);
 
   const rights = item.rightsClearance;
   fail(rights && typeof rights === 'object', 'SCHEDULED_PUBLICATION_RIGHTS_REQUIRED');
@@ -247,6 +280,10 @@ function validateItem(item, mode, currentMs) {
     'SCHEDULED_PUBLICATION_REGISTRY_PUBLICATION_INVALID',
   );
   fail(
+    snapshot.scheduledAt === item.scheduledAt,
+    'SCHEDULED_PUBLICATION_REGISTRY_SCHEDULE_TIME_MISMATCH',
+  );
+  fail(
     snapshot.assetSha256 === item.expectedAssetSha256,
     'SCHEDULED_PUBLICATION_REGISTRY_ASSET_MISMATCH',
   );
@@ -254,12 +291,46 @@ function validateItem(item, mode, currentMs) {
     snapshot.captionSha256 === item.captionSha256,
     'SCHEDULED_PUBLICATION_REGISTRY_CAPTION_MISMATCH',
   );
-  fail(
-    /^[a-f0-9]{64}$/.test(item.captionSha256 ?? ''),
-    'SCHEDULED_PUBLICATION_CAPTION_SHA_INVALID',
-  );
+  fail(/^[a-f0-9]{64}$/.test(item.captionSha256 ?? ''), 'SCHEDULED_PUBLICATION_CAPTION_SHA_INVALID');
   const actualCaptionSha256 = createHash('sha256').update(item.caption).digest('hex');
-  fail(actualCaptionSha256 === item.captionSha256, 'SCHEDULED_PUBLICATION_CAPTION_HASH_MISMATCH');
+  fail(
+    actualCaptionSha256 === item.captionSha256,
+    'SCHEDULED_PUBLICATION_CAPTION_HASH_MISMATCH',
+  );
+}
+
+function validateCreativeStandardScope(item, truth) {
+  const matching = [];
+  for (const file of readdirSync(creativeStandardsDirectory)) {
+    if (!file.endsWith('.json')) continue;
+    let candidate;
+    try {
+      candidate = JSON.parse(readFileSync(join(creativeStandardsDirectory, file), 'utf8'));
+    } catch {
+      fail(false, `SCHEDULED_PUBLICATION_CREATIVE_STANDARD_PARSE_FAILED:${file}`);
+    }
+    if (candidate?.standardId === truth.standardId) matching.push(candidate);
+  }
+  fail(matching.length === 1, 'SCHEDULED_PUBLICATION_CREATIVE_STANDARD_NOT_CANONICAL');
+  const standard = matching[0];
+  fail(standard.status === 'ACTIVE_CANONICAL', 'SCHEDULED_PUBLICATION_CREATIVE_STANDARD_INACTIVE');
+  fail(
+    standard.parentPolicyId === truth.policyId,
+    'SCHEDULED_PUBLICATION_CREATIVE_STANDARD_POLICY_MISMATCH',
+  );
+  fail(
+    standard.scope?.operation === item.operation,
+    'SCHEDULED_PUBLICATION_CREATIVE_STANDARD_OPERATION_MISMATCH',
+  );
+  fail(
+    standard.scope?.channel === item.channel || standard.scope?.channel === 'ALL',
+    'SCHEDULED_PUBLICATION_CREATIVE_STANDARD_CHANNEL_MISMATCH',
+  );
+  const allowedFormats = item.format === 'FEED_IMAGE' ? ['SINGLE_IMAGE', 'ALL'] : ['STORIES', 'ALL'];
+  fail(
+    allowedFormats.includes(standard.scope?.format),
+    'SCHEDULED_PUBLICATION_CREATIVE_STANDARD_FORMAT_MISMATCH',
+  );
 }
 
 function nonempty(value) {
