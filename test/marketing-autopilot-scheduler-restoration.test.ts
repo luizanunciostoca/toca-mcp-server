@@ -107,7 +107,7 @@ describe('Marketing Autopilot scheduler restoration', () => {
         source: 'MARKETING_AUTOPILOT_GCP',
         rolloutPhase: 'CANARY',
         notBefore: '2026-09-17T09:00:00-03:00',
-        expiresAt: '2026-09-17T09:20:00-03:00',
+        expiresAt: '2026-09-17T09:30:00-03:00',
       },
     });
     expect(command.idempotencyKey).toBe(
@@ -133,7 +133,7 @@ describe('Marketing Autopilot scheduler restoration', () => {
   });
 
   it('rejects an expired publication window rather than retrying late', () => {
-    const result = runScheduler({ now: '2026-09-17T09:20:01-03:00' });
+    const result = runScheduler({ now: '2026-09-17T09:30:01-03:00' });
     expect(result.status, result.stderr).toBe(0);
     const decision = JSON.parse(result.stdout);
     expect(decision.status).toBe('NO_CANDIDATE');
