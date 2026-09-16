@@ -96,7 +96,9 @@ describe('Instagram GCP execution-runtime readiness', () => {
   });
 
   it('requires exact compatibility tenant defaults instead of substring matching', () => {
-    expect(probe).toContain("pg_get_expr(attribute_default.adbin, attribute_default.adrelid) = '''toca''::text'");
+    expect(probe).toContain(
+      "pg_get_expr(attribute_default.adbin, attribute_default.adrelid) = '''toca''::text'",
+    );
     expect(probe).toContain('provider_tenant_default_toca');
     expect(probe).toContain('audit_tenant_default_toca');
     expect(probe).not.toContain("includes('toca')");
@@ -126,8 +128,12 @@ describe('Instagram GCP execution-runtime readiness', () => {
     expect(gateway).toContain("github.actor == 'luizanunciostoca'");
     expect(gateway).toContain("github.event.comment.author_association == 'OWNER'");
     expect(gateway).toContain('AUTHORIZE_GCP_INSTAGRAM_EXECUTION_RUNTIME_READINESS');
-    expect(gateway).toContain('authorized_source_sha: ${{ steps.guard.outputs.authorized_source_sha }}');
-    expect(gateway).toContain('uses: ./.github/workflows/instagram-gcp-publication-execution-readiness.yml');
+    expect(gateway).toContain(
+      'authorized_source_sha: ${{ steps.guard.outputs.authorized_source_sha }}',
+    );
+    expect(gateway).toContain(
+      'uses: ./.github/workflows/instagram-gcp-publication-execution-readiness.yml',
+    );
     expect(gateway).toContain(
       'expected_source_sha: ${{ needs.authorize-owner-command.outputs.authorized_source_sha }}',
     );
