@@ -1,7 +1,10 @@
 import * as z from 'zod/v4';
 import type { VertexRuntimeCostObserver } from '../finops/ag01-runtime-cost-observer.js';
 import type { AiTextUsage } from '../finops/cost-estimator.js';
-import { GcpMetadataAccessTokenProvider, type VertexAccessTokenProvider } from './vertex-gemini-decision-adapter.js';
+import {
+  GcpMetadataAccessTokenProvider,
+  type VertexAccessTokenProvider,
+} from './vertex-gemini-decision-adapter.js';
 import type {
   TocaOsCanonicalResource,
   TocaOsRegistryClient,
@@ -430,7 +433,10 @@ export class VertexGroundedKnowledgeAnswerAdapter {
         });
         if (!response.ok) {
           const error = new Error(`AG01_GROUNDED_MODEL_HTTP_ERROR:${response.status}`);
-          if ((response.status === 408 || response.status === 429 || response.status >= 500) && attempt < this.options.maxRetries) {
+          if (
+            (response.status === 408 || response.status === 429 || response.status >= 500) &&
+            attempt < this.options.maxRetries
+          ) {
             lastError = error;
             await this.#sleep(Math.min(250 * 2 ** attempt, 2_000));
             continue;
@@ -438,7 +444,10 @@ export class VertexGroundedKnowledgeAnswerAdapter {
           throw error;
         }
         const body = (await response.json()) as VertexResponse;
-        if (typeof body.promptFeedback?.blockReason === 'string' && body.promptFeedback.blockReason) {
+        if (
+          typeof body.promptFeedback?.blockReason === 'string' &&
+          body.promptFeedback.blockReason
+        ) {
           return null;
         }
         const text = body.candidates?.[0]?.content?.parts?.find(
@@ -452,7 +461,8 @@ export class VertexGroundedKnowledgeAnswerAdapter {
           throw new Error('AG01_GROUNDED_MODEL_INVALID_JSON');
         }
         const parsed = answerSchema.parse(raw);
-        if (!parsed.answer || parsed.confidence < 0.85 || parsed.citedResourceIds.length === 0) return null;
+        if (!parsed.answer || parsed.confidence < 0.85 || parsed.citedResourceIds.length === 0)
+          return null;
         if (parsed.citedResourceIds.some((resourceId) => !allowedIds.has(resourceId))) {
           throw new Error('AG01_GROUNDED_MODEL_UNKNOWN_CITATION');
         }
@@ -490,7 +500,10 @@ export class VertexGroundedKnowledgeAnswerAdapter {
         };
       } catch (error) {
         const normalized = error instanceof Error ? error : new Error('AG01_GROUNDED_MODEL_FAILED');
-        if ((normalized.name === 'AbortError' || normalized.message.includes('fetch')) && attempt < this.options.maxRetries) {
+        if (
+          (normalized.name === 'AbortError' || normalized.message.includes('fetch')) &&
+          attempt < this.options.maxRetries
+        ) {
           lastError = normalized;
           await this.#sleep(Math.min(250 * 2 ** attempt, 2_000));
           continue;
@@ -573,20 +586,62 @@ export function rankResources(
     .filter((resource) => /^(DOC-|SOP-|PIPE-|ENGINE-)/.test(resource.resourceId))
     .map((resource) => ({ resource, score: resourceScore(resource, queryTokens, hints) }))
     .filter((item) => item.score > 0)
-    .sort((left, right) => right.score - left.score || left.resource.resourceId.localeCompare(right.resource.resourceId))
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.resource.resourceId.localeCompare(right.resource.resourceId),
+    )
     .map((item) => item.resource);
 }
 
 const INTENT_HINTS: Readonly<Record<Ag01GroundedKnowledgeIntent, readonly string[]>> = {
-  FAQ_OPERATIONAL: ['operacao', 'operacional', 'gastronomia', 'cardapio', 'estrutura', 'produto', 'atendimento'],
+  FAQ_OPERATIONAL: [
+    'operacao',
+    'operacional',
+    'gastronomia',
+    'cardapio',
+    'estrutura',
+    'produto',
+    'atendimento',
+  ],
   EVENT_INFO: ['evento', 'programacao', 'sunset', 'party', 'festa', 'agenda', 'atracao'],
   TICKET_INFO: ['ingresso', 'ticket', 'bilhete', 'entrada', 'venda', 'valor', 'preco'],
-  LOCATION_HOURS: ['horario', 'funcionamento', 'abertura', 'abre', 'localizacao', 'operacao', 'sunset'],
+  LOCATION_HOURS: [
+    'horario',
+    'funcionamento',
+    'abertura',
+    'abre',
+    'localizacao',
+    'operacao',
+    'sunset',
+  ],
 };
 
 const STOP_WORDS = new Set([
-  'para', 'como', 'qual', 'quais', 'quando', 'onde', 'hoje', 'amanha', 'voces', 'voces', 'toca',
-  'morcego', 'uma', 'uns', 'das', 'dos', 'que', 'tem', 'com', 'por', 'mais', 'isso', 'essa', 'esse',
+  'para',
+  'como',
+  'qual',
+  'quais',
+  'quando',
+  'onde',
+  'hoje',
+  'amanha',
+  'voces',
+  'voces',
+  'toca',
+  'morcego',
+  'uma',
+  'uns',
+  'das',
+  'dos',
+  'que',
+  'tem',
+  'com',
+  'por',
+  'mais',
+  'isso',
+  'essa',
+  'esse',
 ]);
 
 function resourceScore(
@@ -624,7 +679,8 @@ function parseUsage(metadata: VertexResponse['usageMetadata']): AiTextUsage | nu
   const candidateTokens = safeCount(metadata.candidatesTokenCount);
   const cached = optionalCount(metadata.cachedContentTokenCount);
   const thoughts = optionalCount(metadata.thoughtsTokenCount);
-  if (inputTokens === null || candidateTokens === null || cached === null || thoughts === null) return null;
+  if (inputTokens === null || candidateTokens === null || cached === null || thoughts === null)
+    return null;
   if (cached > inputTokens) return null;
   const outputTokens = candidateTokens + thoughts;
   if (!Number.isSafeInteger(outputTokens)) return null;
