@@ -85,7 +85,10 @@ if (eventRun.head_sha && run?.head_sha !== eventRun.head_sha) {
   fail('MARKETING_AUTOPILOT_HEARTBEAT_RUN_SHA_MISMATCH');
 }
 
-const updatedAt = requireString(run?.updated_at, 'MARKETING_AUTOPILOT_HEARTBEAT_UPDATED_AT_MISSING');
+const updatedAt = requireString(
+  run?.updated_at,
+  'MARKETING_AUTOPILOT_HEARTBEAT_UPDATED_AT_MISSING',
+);
 const updatedEpoch = Date.parse(updatedAt);
 const nowEpoch = nowValue ? Date.parse(nowValue) : Date.now();
 if (!Number.isFinite(updatedEpoch) || !Number.isFinite(nowEpoch)) {
