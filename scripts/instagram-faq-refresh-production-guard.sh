@@ -112,7 +112,7 @@ if [[ "$MODE" == 'ASSERT' ]]; then
 fi
 
 test "$(grep -Fxc 'MERGE_RESERVATION=NONE' <<< "$CONTROL_BODY" || true)" = '1'
-test "$(grep -Foc '"'"'"mergeReservation"'"'":null' <<< "$CONTROL_BODY" || true)" = '1'
+test "$(grep -Foc '"'"'mergeReservation"'"':null' <<< "$CONTROL_BODY" || true)" = '1'
 UPDATED_BODY="$(printf '%s' "$CONTROL_BODY" \
   | sed "s/^MERGE_RESERVATION=NONE$/MERGE_RESERVATION=${ENGAGEMENT_RESERVATION}/" \
   | sed "s/\"mergeReservation\":null/\"mergeReservation\":\"${ENGAGEMENT_RESERVATION}\"/")"
