@@ -8,6 +8,9 @@ PUBLICATION_EVIDENCE="marketing-publish-now-publication.json"
 RECONCILIATION_EVIDENCE="marketing-publish-now-reconciliation.json"
 DOCKER_REGISTRY="${REGION}-docker.pkg.dev"
 
+: "${DATABASE_SECRET_VERSION:?DATABASE_SECRET_VERSION_REQUIRED}"
+printf '%s' "$DATABASE_SECRET_VERSION" | grep -Eq '^[1-9][0-9]*$'
+
 cleanup() {
   local rc=$?
   trap - EXIT
@@ -35,7 +38,8 @@ retry_command() {
 
 write_run_evidence() {
   local state="$1"
-  local extra_json="${2:-{}}"
+  local extra_json="${2:-}"
+  [ -n "$extra_json" ] || extra_json='{}'
   jq -n \
     --arg commandId "$COMMAND_ID" \
     --arg contentItemId "$CONTENT_ITEM_ID" \
@@ -139,11 +143,17 @@ bind_source_asset() {
 }
 
 build_images() {
-  APP_IMAGE="$DOCKER_REGISTRY/$PROJECT_ID/$REPOSITORY/server:publish-now-app-${GITHUB_SHA}"
-  PREP_IMAGE="$DOCKER_REGISTRY/$PROJECT_ID/$REPOSITORY/server:publish-now-prepare-${GITHUB_SHA}"
+  local app_image_tag prep_image_tag
+  app_image_tag="$DOCKER_REGISTRY/$PROJECT_ID/$REPOSITORY/server:publish-now-app-${GITHUB_SHA}"
+  prep_image_tag="$DOCKER_REGISTRY/$PROJECT_ID/$REPOSITORY/server:publish-now-prepare-${GITHUB_SHA}"
 
-  docker build -t "$APP_IMAGE" .
-  retry_command 3 5 docker push "$APP_IMAGE"
+  docker build -t "$app_image_tag" .
+  retry_command 3 5 docker push "$app_image_tag"
+  APP_IMAGE_DIGEST="$(gcloud artifacts docker images describe "$app_image_tag" \
+    --project "$PROJECT_ID" \
+    --format='value(image_summary.digest)')"
+  [[ "$APP_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+  APP_IMAGE="${app_image_tag%:*}@${APP_IMAGE_DIGEST}"
 
   cat >/tmp/publish-now-prepare.Dockerfile <<'DOCKERFILE'
 ARG BASE_IMAGE
@@ -157,8 +167,18 @@ DOCKERFILE
   docker build \
     --build-arg "BASE_IMAGE=$APP_IMAGE" \
     -f /tmp/publish-now-prepare.Dockerfile \
-    -t "$PREP_IMAGE" .
-  retry_command 3 5 docker push "$PREP_IMAGE"
+    -t "$prep_image_tag" .
+  retry_command 3 5 docker push "$prep_image_tag"
+  PREP_IMAGE_DIGEST="$(gcloud artifacts docker images describe "$prep_image_tag" \
+    --project "$PROJECT_ID" \
+    --format='value(image_summary.digest)')"
+  [[ "$PREP_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+  PREP_IMAGE="${prep_image_tag%:*}@${PREP_IMAGE_DIGEST}"
+
+  write_run_evidence "IMAGES_BOUND" "$(jq -n \
+    --arg appImage "$APP_IMAGE" \
+    --arg prepareImage "$PREP_IMAGE" \
+    '{appImage:$appImage,prepareImage:$prepareImage}')"
 }
 
 deploy_prepare_job() {
@@ -249,7 +269,7 @@ deploy_execute_job() {
     --command node \
     --args dist/src/instagram-controlled-publication.js \
     --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=true~INSTAGRAM_PUBLICATION_APPROVED_REQUEST_SHA256=$APPROVED_REQUEST_SHA256~INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID~INSTAGRAM_PUBLICATION_REQUEST_BASE64=$REQUEST_BASE64~META_APP_ID=2281930145887404~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$REDIRECT_URI~META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$PROJECT_ID" \
-    --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+    --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION" \
     --tasks 1 \
     --max-retries 0 \
     --task-timeout 180s \
@@ -267,12 +287,25 @@ deploy_execute_job() {
   ' >/dev/null
 }
 
+verify_writes_disabled() {
+  local job_json
+  job_json="$(gcloud run jobs describe "$EXECUTE_JOB_NAME" \
+    --project "$PROJECT_ID" \
+    --region "$REGION" \
+    --format=json)"
+  printf '%s' "$job_json" | jq -e '
+    .spec.template.spec.template.spec.containers[0] as $container |
+    ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"])
+  ' >/dev/null
+}
+
 disable_writes() {
   gcloud run jobs update "$EXECUTE_JOB_NAME" \
     --project "$PROJECT_ID" \
     --region "$REGION" \
     --update-env-vars INSTAGRAM_PUBLICATION_WRITES_ENABLED=false \
     --quiet
+  verify_writes_disabled
 }
 
 run_provider_readback() {
@@ -285,7 +318,7 @@ run_provider_readback() {
     --command node \
     --args dist/src/instagram-first-publication-verify.js \
     --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID~INSTAGRAM_FIRST_PUBLICATION_APPROVED_REQUEST_SHA256=$APPROVED_REQUEST_SHA256~INSTAGRAM_FIRST_PUBLICATION_CORRELATION_ID=$CORRELATION_ID~INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY=$IDEMPOTENCY_KEY~META_APP_ID=2281930145887404~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$REDIRECT_URI~META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$PROJECT_ID" \
-    --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+    --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION" \
     --tasks 1 \
     --max-retries 0 \
     --task-timeout 120s \
@@ -328,7 +361,9 @@ run_provider_readback() {
 
 execute_and_reconcile() {
   local execute_rc=0
+  local disable_rc=0
   local readback_rc=0
+  local final_disable_rc=0
   EXECUTE_ATTEMPTED=1
 
   set +e
@@ -336,15 +371,20 @@ execute_and_reconcile() {
   execute_rc=$?
   set -e
 
-  disable_writes || true
+  set +e
+  disable_writes
+  disable_rc=$?
+  set -e
 
   set +e
   run_provider_readback
   readback_rc=$?
+  verify_writes_disabled
+  final_disable_rc=$?
   set -e
 
   local outcome
-  if [ "$readback_rc" -eq 0 ]; then
+  if [ "$disable_rc" -eq 0 ] && [ "$readback_rc" -eq 0 ] && [ "$final_disable_rc" -eq 0 ]; then
     if [ "$execute_rc" -eq 0 ]; then
       outcome="PUBLISHED_VERIFIED"
     else
@@ -360,18 +400,32 @@ execute_and_reconcile() {
     --arg correlationId "$CORRELATION_ID" \
     --arg idempotencyKey "$IDEMPOTENCY_KEY" \
     --arg approvedRequestSha256 "$APPROVED_REQUEST_SHA256" \
+    --arg appImage "$APP_IMAGE" \
+    --arg prepareImage "$PREP_IMAGE" \
     --arg outcome "$outcome" \
     --argjson executeExitCode "$execute_rc" \
+    --argjson disableExitCode "$disable_rc" \
     --argjson readbackExitCode "$readback_rc" \
-    '{commandId:$commandId,contentItemId:$contentItemId,correlationId:$correlationId,idempotencyKey:$idempotencyKey,approvedRequestSha256:$approvedRequestSha256,sideEffectAttempted:true,writeCapabilityDisabledAfterAttempt:true,providerReadbackAttempted:true,executeExitCode:$executeExitCode,readbackExitCode:$readbackExitCode,outcome:$outcome}' \
+    --argjson finalDisableVerificationExitCode "$final_disable_rc" \
+    --argjson writeCapabilityDisabledAfterAttempt "$([ "$disable_rc" -eq 0 ] && printf true || printf false)" \
+    --argjson finalWriteCapabilityDisabled "$([ "$final_disable_rc" -eq 0 ] && printf true || printf false)" \
+    '{commandId:$commandId,contentItemId:$contentItemId,correlationId:$correlationId,idempotencyKey:$idempotencyKey,approvedRequestSha256:$approvedRequestSha256,appImage:$appImage,prepareImage:$prepareImage,sideEffectAttempted:true,writeCapabilityDisabledAfterAttempt:$writeCapabilityDisabledAfterAttempt,finalWriteCapabilityDisabled:$finalWriteCapabilityDisabled,providerReadbackAttempted:true,executeExitCode:$executeExitCode,disableExitCode:$disableExitCode,readbackExitCode:$readbackExitCode,finalDisableVerificationExitCode:$finalDisableVerificationExitCode,outcome:$outcome}' \
     > "$RECONCILIATION_EVIDENCE"
 
-  if [ "$readback_rc" -ne 0 ]; then
-    write_run_evidence "RECONCILIATION_REQUIRED" "$(jq -n --arg approvedRequestSha256 "$APPROVED_REQUEST_SHA256" '{approvedRequestSha256:$approvedRequestSha256}')"
+  if [ "$disable_rc" -ne 0 ] || [ "$readback_rc" -ne 0 ] || [ "$final_disable_rc" -ne 0 ]; then
+    write_run_evidence "RECONCILIATION_REQUIRED" "$(jq -n \
+      --arg approvedRequestSha256 "$APPROVED_REQUEST_SHA256" \
+      --arg appImage "$APP_IMAGE" \
+      --arg prepareImage "$PREP_IMAGE" \
+      '{approvedRequestSha256:$approvedRequestSha256,appImage:$appImage,prepareImage:$prepareImage}')"
     return 1
   fi
 
-  write_run_evidence "PUBLISHED_VERIFIED" "$(jq -n --arg approvedRequestSha256 "$APPROVED_REQUEST_SHA256" '{approvedRequestSha256:$approvedRequestSha256}')"
+  write_run_evidence "PUBLISHED_VERIFIED" "$(jq -n \
+    --arg approvedRequestSha256 "$APPROVED_REQUEST_SHA256" \
+    --arg appImage "$APP_IMAGE" \
+    --arg prepareImage "$PREP_IMAGE" \
+    '{approvedRequestSha256:$approvedRequestSha256,appImage:$appImage,prepareImage:$prepareImage}')"
   return 0
 }
 
