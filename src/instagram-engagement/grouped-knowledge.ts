@@ -7,7 +7,8 @@ import type {
 } from './knowledge.js';
 import { TOCA_OFFICIAL_INFORMATION_URL } from './ticket-information.js';
 
-const HUMAN_REQUIRED_INTENTS = new Set<EngagementIntent>([
+const NON_AUTONOMOUS_INTENTS = new Set<EngagementIntent>([
+  'COMMERCIAL_LEAD',
   'COMPLAINT',
   'REFUND',
   'LEGAL',
@@ -20,6 +21,7 @@ const HUMAN_REQUIRED_INTENTS = new Set<EngagementIntent>([
 
 const MAX_KNOWLEDGE_SEGMENTS = 8;
 const MAX_SPLIT_RESULTS = MAX_KNOWLEDGE_SEGMENTS + 1;
+const MAX_REPLY_MESSAGE_LENGTH = 2_000;
 
 const UNRESOLVED_NOTICE =
   `Não encontrei informação canônica suficiente para confirmar todos os outros pontos agora. ` +
@@ -96,15 +98,16 @@ export async function resolveGroupedKnowledge(input: {
     (item) => item.knowledge?.factsVerified === true,
   ).length;
   const hasUnresolvedSafeSegment = resolvedSegmentCount < safeCount;
+  const knowledge = hasUnsafe
+    ? null
+    : composeKnowledge(unique, hasUnresolvedSafeSegment, classification.intent);
 
   return {
     classification,
-    knowledge: hasUnsafe
-      ? null
-      : composeKnowledge(unique, hasUnresolvedSafeSegment, classification.intent),
+    knowledge,
     segmentCount: segments.length,
     resolvedSegmentCount,
-    autoReplySafe: !hasUnsafe && unique.length > 0,
+    autoReplySafe: knowledge !== null,
     hasUnresolvedSafeSegment,
   };
 }
@@ -139,7 +142,7 @@ function splitConjunctionQuestions(value: string): readonly string[] {
 
 function isUnsafeForAutonomousReply(classification: SocialEngagementClassification): boolean {
   return (
-    HUMAN_REQUIRED_INTENTS.has(classification.intent) ||
+    NON_AUTONOMOUS_INTENTS.has(classification.intent) ||
     classification.containsPotentialSensitiveData ||
     classification.urgency === 'CRITICAL' ||
     classification.urgency === 'HIGH'
@@ -168,13 +171,16 @@ function composeKnowledge(
   if (matches.length === 0) return null;
   const answers = [...new Set(matches.map((match) => match.answer.trim()).filter(Boolean))];
   if (hasUnresolvedSafeSegment) answers.push(UNRESOLVED_NOTICE);
+  const answer = answers.join('\n\n');
+  if (answer.length > MAX_REPLY_MESSAGE_LENGTH) return null;
+
   const sources = [...new Set(matches.map((match) => match.source.trim()).filter(Boolean))];
   const ids = [...new Set(matches.map((match) => match.faqId.trim()).filter(Boolean))];
 
   return {
     faqId: ids.length === 1 ? ids[0]! : `MULTI:${ids.join('+').slice(0, 180)}`,
     intent: matches[0]?.intent ?? fallbackIntent,
-    answer: answers.join('\n\n'),
+    answer,
     source: sources.join(' | '),
     confidence: Math.min(...matches.map((match) => match.confidence)),
     factsVerified: true,
