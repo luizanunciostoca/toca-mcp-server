@@ -66,12 +66,26 @@ describe('Instagram engagement risk policy', () => {
     }
   });
 
-  it('keeps explicit purchase intent in suggest-only handoff', () => {
+  it('routes explicit ticket purchase through verified TICKET_INFO while preserving commercial lead signals', () => {
     const classification = classifySocialEngagement(
       'Quero comprar ingresso para a The Party, tem disponibilidade?',
     );
-    expect(classification.intent).toBe('COMMERCIAL_LEAD');
+    expect(classification.intent).toBe('TICKET_INFO');
     expect(classification.commercialIntent).toBe('HIGH');
+    expect(classification.conversationIntents).toContain('PURCHASE');
+    const decision = evaluateEngagementPolicy({
+      channel: 'DIRECT',
+      intent: classification.intent,
+      factsVerified: true,
+      writesEnabled: true,
+    });
+    expect(decision.autonomy).toBe('AUTO_REPLY_ALLOWED');
+    expect(decision.risk).toBe('LOW');
+  });
+
+  it('keeps reservations and negotiated commercial requests in suggest-only handoff', () => {
+    const classification = classifySocialEngagement('Quero reservar um camarote para meu aniversário');
+    expect(classification.intent).toBe('COMMERCIAL_LEAD');
     const decision = evaluateEngagementPolicy({
       channel: 'DIRECT',
       intent: classification.intent,
