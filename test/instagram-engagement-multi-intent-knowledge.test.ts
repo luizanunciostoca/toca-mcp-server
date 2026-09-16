@@ -1,12 +1,32 @@
 import { describe, expect, it, vi } from 'vitest';
 import { classifySocialEngagement } from '../src/crm/social-engagement-classifier.js';
+import type { EngagementIntent } from '../src/policy/engagement-policy.js';
 import { resolveCurrentProgrammingKnowledge } from '../src/instagram-engagement/current-programming.js';
-import type { InstagramEngagementKnowledgeSource } from '../src/instagram-engagement/knowledge.js';
+import type {
+  InstagramEngagementKnowledgeMatch,
+  InstagramEngagementKnowledgeSource,
+} from '../src/instagram-engagement/knowledge.js';
 import { MultiIntentInstagramEngagementKnowledgeSource } from '../src/instagram-engagement/multi-intent-knowledge.js';
 import {
   TOCA_OFFICIAL_INFORMATION_URL,
   TOCA_TICKET_INFORMATION_REPLY,
 } from '../src/instagram-engagement/ticket-information.js';
+
+function ticketKnowledgeMatch(
+  answer = TOCA_TICKET_INFORMATION_REPLY,
+  faqId = 'FAQ-003',
+  source = 'TOCA_OS — FAQ-003',
+): InstagramEngagementKnowledgeMatch {
+  return {
+    faqId,
+    intent: 'TICKET_INFO',
+    answer,
+    source,
+    confidence: 1,
+    factsVerified: true,
+    tier: 'FAQ',
+  };
+}
 
 describe('Instagram grounded multi-intent knowledge', () => {
   it('classifies a current-programming question as EVENT_INFO', () => {
@@ -118,20 +138,13 @@ describe('Instagram grounded multi-intent knowledge', () => {
   });
 
   it('reproduces the screenshot scenario and answers both questions in one grounded reply', async () => {
-    const delegateResolve = vi.fn(async (text: string, intent: string) => {
-      if (intent === 'TICKET_INFO' && text.toLowerCase().includes('ingresso')) {
-        return {
-          faqId: 'FAQ-003',
-          intent: 'TICKET_INFO' as const,
-          answer: TOCA_TICKET_INFORMATION_REPLY,
-          source: 'TOCA_OS — FAQ-003',
-          confidence: 1,
-          factsVerified: true,
-          tier: 'FAQ' as const,
-        };
-      }
-      return null;
-    });
+    const delegateResolve = vi.fn((text: string, intent: EngagementIntent) =>
+      Promise.resolve(
+        intent === 'TICKET_INFO' && text.toLowerCase().includes('ingresso')
+          ? ticketKnowledgeMatch()
+          : null,
+      ),
+    );
     const delegate: InstagramEngagementKnowledgeSource = { resolve: delegateResolve };
     const source = new MultiIntentInstagramEngagementKnowledgeSource(delegate, {
       now: () => new Date('2026-09-16T14:30:00Z'),
@@ -153,22 +166,10 @@ describe('Instagram grounded multi-intent knowledge', () => {
   });
 
   it('splits two questions written in one Direct message and resolves both intents', async () => {
-    const delegate: InstagramEngagementKnowledgeSource = {
-      resolve: vi.fn(async (_text, intent) => {
-        if (intent === 'TICKET_INFO') {
-          return {
-            faqId: 'FAQ-003',
-            intent,
-            answer: TOCA_TICKET_INFORMATION_REPLY,
-            source: 'TOCA_OS — FAQ-003',
-            confidence: 1,
-            factsVerified: true,
-            tier: 'FAQ' as const,
-          };
-        }
-        return null;
-      }),
-    };
+    const delegateResolve = vi.fn((_text: string, intent: EngagementIntent) =>
+      Promise.resolve(intent === 'TICKET_INFO' ? ticketKnowledgeMatch() : null),
+    );
+    const delegate: InstagramEngagementKnowledgeSource = { resolve: delegateResolve };
     const source = new MultiIntentInstagramEngagementKnowledgeSource(delegate, {
       now: () => new Date('2026-09-16T14:30:00Z'),
     });
@@ -183,20 +184,9 @@ describe('Instagram grounded multi-intent knowledge', () => {
   });
 
   it('splits conjunction-based questions and resolves ticket plus programming independently', async () => {
-    const delegateResolve = vi.fn(async (_text: string, intent: string) => {
-      if (intent === 'TICKET_INFO') {
-        return {
-          faqId: 'FAQ-003',
-          intent: 'TICKET_INFO' as const,
-          answer: TOCA_TICKET_INFORMATION_REPLY,
-          source: 'TOCA_OS — FAQ-003',
-          confidence: 1,
-          factsVerified: true,
-          tier: 'FAQ' as const,
-        };
-      }
-      return null;
-    });
+    const delegateResolve = vi.fn((_text: string, intent: EngagementIntent) =>
+      Promise.resolve(intent === 'TICKET_INFO' ? ticketKnowledgeMatch() : null),
+    );
     const source = new MultiIntentInstagramEngagementKnowledgeSource(
       { resolve: delegateResolve },
       { now: () => new Date('2026-09-16T14:30:00Z') },
@@ -215,15 +205,7 @@ describe('Instagram grounded multi-intent knowledge', () => {
 
   it('fails closed when a grouped message contains a human-required intent', async () => {
     const delegate: InstagramEngagementKnowledgeSource = {
-      resolve: vi.fn().mockResolvedValue({
-        faqId: 'FAQ-003',
-        intent: 'TICKET_INFO',
-        answer: TOCA_TICKET_INFORMATION_REPLY,
-        source: 'TOCA_OS — FAQ-003',
-        confidence: 1,
-        factsVerified: true,
-        tier: 'FAQ',
-      }),
+      resolve: vi.fn().mockResolvedValue(ticketKnowledgeMatch()),
     };
     const source = new MultiIntentInstagramEngagementKnowledgeSource(delegate, {
       now: () => new Date('2026-09-16T14:30:00Z'),
@@ -238,20 +220,9 @@ describe('Instagram grounded multi-intent knowledge', () => {
   });
 
   it('fails closed when a grouped message contains a commercial lead', async () => {
-    const delegateResolve = vi.fn(async (_text: string, intent: string) => {
-      if (intent === 'TICKET_INFO') {
-        return {
-          faqId: 'FAQ-003',
-          intent: 'TICKET_INFO' as const,
-          answer: TOCA_TICKET_INFORMATION_REPLY,
-          source: 'TOCA_OS — FAQ-003',
-          confidence: 1,
-          factsVerified: true,
-          tier: 'FAQ' as const,
-        };
-      }
-      return null;
-    });
+    const delegateResolve = vi.fn((_text: string, intent: EngagementIntent) =>
+      Promise.resolve(intent === 'TICKET_INFO' ? ticketKnowledgeMatch() : null),
+    );
     const source = new MultiIntentInstagramEngagementKnowledgeSource({ resolve: delegateResolve });
 
     const match = await source.resolve(
@@ -268,15 +239,7 @@ describe('Instagram grounded multi-intent knowledge', () => {
   });
 
   it('fails closed before delegated lookups when segment count exceeds the bound', async () => {
-    const delegateResolve = vi.fn().mockResolvedValue({
-      faqId: 'FAQ-003',
-      intent: 'TICKET_INFO',
-      answer: TOCA_TICKET_INFORMATION_REPLY,
-      source: 'TOCA_OS — FAQ-003',
-      confidence: 1,
-      factsVerified: true,
-      tier: 'FAQ',
-    });
+    const delegateResolve = vi.fn().mockResolvedValue(ticketKnowledgeMatch());
     const source = new MultiIntentInstagramEngagementKnowledgeSource({ resolve: delegateResolve });
     const abusiveGroupedInput = Array.from({ length: 9 }, () => 'Qual o valor do ingresso?').join(
       '\n',
@@ -289,15 +252,15 @@ describe('Instagram grounded multi-intent knowledge', () => {
   });
 
   it('fails closed when a composed verified reply would exceed the provider envelope', async () => {
-    const delegateResolve = vi.fn(async (text: string, intent: string) => ({
-      faqId: `FAQ-${text}`,
-      intent: intent as 'TICKET_INFO',
-      answer: `${text} ${'A'.repeat(300)}`,
-      source: `TOCA_OS — ${text}`,
-      confidence: 1,
-      factsVerified: true,
-      tier: 'FAQ' as const,
-    }));
+    const delegateResolve = vi.fn((text: string, _intent: EngagementIntent) =>
+      Promise.resolve(
+        ticketKnowledgeMatch(
+          `${text} ${'A'.repeat(300)}`,
+          `FAQ-${text}`,
+          `TOCA_OS — ${text}`,
+        ),
+      ),
+    );
     const source = new MultiIntentInstagramEngagementKnowledgeSource({ resolve: delegateResolve });
     const groupedInput = Array.from(
       { length: 8 },
