@@ -181,7 +181,8 @@ export async function runInstagramPublicationExecutionReadiness(
     `);
 
     const capability = capabilityResult.rows[0] as ReadinessCapabilityRow | undefined;
-    if (!capability) throw new Error('GCP_PUBLICATION_EXECUTION_READINESS_CAPABILITY_RESULT_MISSING');
+    if (!capability)
+      throw new Error('GCP_PUBLICATION_EXECUTION_READINESS_CAPABILITY_RESULT_MISSING');
     if (capability.transaction_read_only !== 'on') {
       throw new Error('GCP_PUBLICATION_EXECUTION_READINESS_TRANSACTION_NOT_READ_ONLY');
     }
@@ -192,7 +193,9 @@ export async function runInstagramPublicationExecutionReadiness(
       throw new Error('GCP_PUBLICATION_EXECUTION_READINESS_SCHEMA_USAGE_MISSING');
     }
     if (!capability.provider_select || !capability.provider_insert || !capability.provider_update) {
-      throw new Error('GCP_PUBLICATION_EXECUTION_READINESS_PROVIDER_PUBLICATIONS_PRIVILEGE_MISSING');
+      throw new Error(
+        'GCP_PUBLICATION_EXECUTION_READINESS_PROVIDER_PUBLICATIONS_PRIVILEGE_MISSING',
+      );
     }
     if (!capability.audit_insert) {
       throw new Error('GCP_PUBLICATION_EXECUTION_READINESS_AUDIT_INSERT_PRIVILEGE_MISSING');
