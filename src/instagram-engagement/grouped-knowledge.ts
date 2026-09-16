@@ -89,10 +89,7 @@ export async function resolveGroupedKnowledge(input: {
   };
 }
 
-export function splitMessageSegments(
-  groupedText: string,
-  messageCount: number,
-): readonly string[] {
+export function splitMessageSegments(groupedText: string, messageCount: number): readonly string[] {
   const normalized = groupedText.trim();
   if (!normalized) return [];
 
