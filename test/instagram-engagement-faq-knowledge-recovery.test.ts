@@ -36,7 +36,9 @@ describe('Instagram FAQ expansion knowledge recovery', () => {
     expect(workflow).toContain('instagram-faq-refresh-production-guard.sh ACQUIRE');
     expect(workflow).toContain('instagram-faq-refresh-production-guard.sh ASSERT');
     expect(workflow).toContain('instagram-faq-refresh-production-guard.sh RELEASE');
-    expect(guard).toContain("TITLE_PREFIX='PRODUCTION AUTHORIZATION — Instagram FAQ knowledge RECOVERY AUTO'");
+    expect(guard).toContain(
+      "TITLE_PREFIX='PRODUCTION AUTHORIZATION — Instagram FAQ knowledge RECOVERY AUTO'",
+    );
     expect(guard).toContain('.state == "open"');
     expect(guard).toContain('.user.login == $owner');
     expect(guard).toContain('INSTAGRAM_FAQ_EXPANSION_KNOWLEDGE_RECOVERY=AUTHORIZED');
