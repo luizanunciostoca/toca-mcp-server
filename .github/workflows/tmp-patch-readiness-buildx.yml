@@ -35,48 +35,45 @@ jobs:
           from pathlib import Path
 
           workflow_path = Path('.github/workflows/instagram-gcp-publication-execution-readiness.yml')
-          workflow = workflow_path.read_text()
-          old = """      - name: Setup gcloud
-                uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-
-              - name: Build and push exact application image by verified immutable digest
-          """
-          new = """      - name: Setup gcloud
-                uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-
-              - name: Setup Docker Buildx for provenance and SBOM attestations
-                uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-                with:
-                  driver: docker-container
-
-              - name: Build and push exact application image by verified immutable digest
-          """
-          old = '\n'.join(line[10:] if line.startswith('          ') else line for line in old.splitlines()) + '\n'
-          new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines()) + '\n'
-          if workflow.count(old) != 1:
-              raise SystemExit(f'workflow needle count={workflow.count(old)}')
-          workflow_path.write_text(workflow.replace(old, new, 1))
+          lines = workflow_path.read_text().splitlines()
+          marker = '      - name: Build and push exact application image by verified immutable digest'
+          if lines.count(marker) != 1:
+              raise SystemExit(f'workflow marker count={lines.count(marker)}')
+          idx = lines.index(marker)
+          insert = [
+              '      - name: Setup Docker Buildx for provenance and SBOM attestations',
+              '        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3',
+              '        with:',
+              '          driver: docker-container',
+              '',
+          ]
+          if any('docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f' in line for line in lines):
+              raise SystemExit('workflow already patched')
+          lines[idx:idx] = insert
+          workflow_path.write_text('\n'.join(lines) + '\n')
 
           test_path = Path('test/instagram-gcp-publication-execution-readiness.test.ts')
-          test = test_path.read_text()
-          needle = """  it('binds execution to the build-produced digest and verifies the remote tag before deployment', () => {
-              expect(workflow).toContain('docker buildx build');
-          """
-          replacement = """  it('binds execution to the build-produced digest and verifies the remote tag before deployment', () => {
-              const setupBuildx = workflow.indexOf(
-                'docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f',
-              );
-              const build = workflow.indexOf('docker buildx build');
-              expect(setupBuildx).toBeGreaterThanOrEqual(0);
-              expect(build).toBeGreaterThan(setupBuildx);
-              expect(workflow).toContain('driver: docker-container');
-              expect(workflow).toContain('docker buildx build');
-          """
-          needle = '\n'.join(line[10:] if line.startswith('          ') else line for line in needle.splitlines()) + '\n'
-          replacement = '\n'.join(line[10:] if line.startswith('          ') else line for line in replacement.splitlines()) + '\n'
-          if test.count(needle) != 1:
-              raise SystemExit(f'test needle count={test.count(needle)}')
-          test_path.write_text(test.replace(needle, replacement, 1))
+          test_lines = test_path.read_text().splitlines()
+          method = "  it('binds execution to the build-produced digest and verifies the remote tag before deployment', () => {"
+          if test_lines.count(method) != 1:
+              raise SystemExit(f'test method count={test_lines.count(method)}')
+          method_idx = test_lines.index(method)
+          expectation = "    expect(workflow).toContain('docker buildx build');"
+          candidates = [i for i in range(method_idx + 1, min(len(test_lines), method_idx + 30)) if test_lines[i] == expectation]
+          if len(candidates) != 1:
+              raise SystemExit(f'test expectation count={len(candidates)}')
+          exp_idx = candidates[0]
+          test_insert = [
+              '    const setupBuildx = workflow.indexOf(',
+              "      'docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f',",
+              '    );',
+              "    const build = workflow.indexOf('docker buildx build');",
+              '    expect(setupBuildx).toBeGreaterThanOrEqual(0);',
+              '    expect(build).toBeGreaterThan(setupBuildx);',
+              "    expect(workflow).toContain('driver: docker-container');",
+          ]
+          test_lines[exp_idx:exp_idx] = test_insert
+          test_path.write_text('\n'.join(test_lines) + '\n')
           PY
           pnpm prettier --write \
             .github/workflows/instagram-gcp-publication-execution-readiness.yml \
