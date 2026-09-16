@@ -105,11 +105,15 @@ describe('Instagram GCP publication recovery preflight', () => {
     expect(policy.forbidden.billingMutation).toBe(true);
     expect(workflow).not.toContain('gcloud services enable');
     expect(workflow).not.toContain('gcloud services list --enabled');
+    expect(workflow).not.toContain('add-iam-policy-binding');
+    expect(workflow).not.toContain('get-iam-policy');
     expect(workflow).toContain('requiredApisExternalBootstrap:true');
-    expect(workflow).toContain('GCP_PUBLICATION_RECOVERY_FORBIDDEN_PROJECT_ROLE');
-    expect(workflow).toContain(
-      'GCP_PUBLICATION_RECOVERY_FORBIDDEN_RUNTIME_PROJECT_SECRET_ACCESSOR',
-    );
+    expect(workflow).toContain('iamBindingsExternalBootstrap:true');
+    expect(workflow).toContain('iamMutationAttempted:false');
+    expect(workflow).toContain('iamPolicyInspectionAttempted:false');
+    expect(workflow).toContain('GCP_PUBLICATION_EXTERNAL_BOOTSTRAP_BOUNDARY=VERIFIED');
+    expect(workflow).toContain('bootstrap-contract:');
+    expect(workflow).toContain('needs: bootstrap-contract');
   });
 
   it('binds provider reads to one exact Meta target and scope set', () => {
@@ -128,7 +132,9 @@ describe('Instagram GCP publication recovery preflight', () => {
   it('mounts Meta credentials only inside the Cloud Run runtime', () => {
     expect(workflow).toContain('META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest');
     expect(workflow).toContain('META_APP_SECRET=$APP_SECRET_ID:1');
-    expect(workflow).toContain('DATABASE_URL=$DATABASE_SECRET_ID:latest');
+    expect(workflow).toContain('metaRuntimeSecretsPresent: true');
+    expect(workflow).not.toContain('const databaseUrl = process.env.DATABASE_URL');
+    expect(workflow).not.toContain('DATABASE_URL=$DATABASE_SECRET_ID:latest');
     expect(workflow).toContain('--service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"');
     expect(workflow).not.toContain('${{ secrets.META_ACCESS_TOKEN }}');
   });
