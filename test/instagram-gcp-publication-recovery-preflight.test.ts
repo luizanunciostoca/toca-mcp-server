@@ -1,13 +1,34 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+type RecoveryPolicy = {
+  status: string;
+  bindings: {
+    runtimeSecretRole: string;
+    deployerRuntimeRole: string;
+    deployerArtifactRepositoryRole: string;
+  };
+  forbidden: {
+    projectOwner: boolean;
+    projectEditor: boolean;
+    serviceAccountKeys: boolean;
+    billingMutation: boolean;
+    providerWriteDuringRecovery: boolean;
+  };
+  preflight: {
+    providerReadOnly: boolean;
+    driveFileId: string;
+    expectedAssetSha256: string;
+  };
+};
+
 const workflow = readFileSync(
   '.github/workflows/instagram-gcp-publication-recovery-preflight.yml',
   'utf8',
 );
 const policy = JSON.parse(
   readFileSync('infra/control-plane/instagram-gcp-publication-recovery-policy.json', 'utf8'),
-) as Record<string, any>;
+) as RecoveryPolicy;
 
 describe('Instagram GCP publication recovery preflight', () => {
   it('runs only from protected main changes to the recovery contract', () => {
