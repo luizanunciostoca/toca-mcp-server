@@ -10,6 +10,10 @@ const autopilotPolicy = JSON.parse(
 ) as {
   lifecycleStatus?: string;
   generalAutonomy?: boolean;
+  timezone?: string;
+  schedule?: {
+    cron?: string;
+  };
   canonicalWriter?: {
     transport?: string;
     providerPublicationWriteAuthorized?: boolean;
@@ -106,7 +110,11 @@ describe('Instagram publication single-writer boundary', () => {
   });
 
   it('restores Marketing Autopilot only as an orchestration scheduler', () => {
-    expect(autopilot).toContain("cron: '3/5 * * * *'");
+    expect(autopilotPolicy.timezone).toBe('America/Bahia');
+    expect(autopilotPolicy.schedule?.cron).toBe('2-59/5 * * * *');
+    expect(autopilot).toContain(`cron: '${autopilotPolicy.schedule?.cron}'`);
+    expect(autopilot).toContain(`timezone: '${autopilotPolicy.timezone}'`);
+    expect(autopilot.match(/timezone: 'America\/Bahia'/g)).toHaveLength(1);
     expect(autopilot).toContain('actions: write');
     expect(autopilot).toContain('id-token: write');
     expect(autopilot).toContain('marketing-autopilot-scheduler.mjs scan');
