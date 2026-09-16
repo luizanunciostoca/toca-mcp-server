@@ -274,7 +274,7 @@ export class GoogleDriveCanonicalContentClient {
       });
       if (!response.ok) throw new Error(`AG01_DRIVE_CONTENT_HTTP_ERROR:${response.status}`);
       const text = await response.text();
-      const normalized = text.replace(/\u0000/g, '').trim();
+      const normalized = text.split('\u0000').join('').trim();
       return normalized || null;
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
