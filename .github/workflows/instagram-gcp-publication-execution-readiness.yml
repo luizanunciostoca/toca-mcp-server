@@ -25,6 +25,7 @@ env:
   GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
   DATABASE_SECRET_ID: toca-database-url
+  DATABASE_SECRET_VERSION: '1'
 
 jobs:
   execution-runtime-readiness:
@@ -60,6 +61,7 @@ jobs:
           test "$COMMENT_ASSOCIATION" = 'OWNER'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$EXPECTED_SOURCE_SHA" = "$GITHUB_SHA"
+          test "$DATABASE_SECRET_VERSION" = '1'
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
           expected_command="AUTHORIZE_GCP_INSTAGRAM_EXECUTION_RUNTIME_READINESS ${GITHUB_SHA}"
           test "$COMMENT_BODY" = "$expected_command"
@@ -108,7 +110,7 @@ jobs:
           test "$REMOTE_DIGEST" = "$IMAGE_DIGEST"
           echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
           echo "IMMUTABLE_IMAGE=${IMAGE_REPOSITORY}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
-          echo "JOB_NAME=toca-instagram-exec-ready-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+          echo "JOB_NAME=toca-instagram-exec-ready-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
           echo 'GCP_PUBLICATION_EXECUTION_READINESS_IMAGE_BINDING=VERIFIED'
 
       - name: Execute Cloud SQL readiness under production runtime identity
@@ -117,10 +119,42 @@ jobs:
           set -euo pipefail
           mkdir -p gcp-execution-readiness-evidence
           cleanup() {
+            original_rc=$?
+            trap - EXIT
+            set +e
             gcloud run jobs delete "$JOB_NAME" \
               --project "$GCP_PROJECT_ID" \
               --region "$GCP_REGION" \
               --quiet >/dev/null 2>&1 || true
+
+            cleanup_verified=false
+            for _ in $(seq 1 12); do
+              existing_jobs="$(gcloud run jobs list \
+                --project "$GCP_PROJECT_ID" \
+                --region "$GCP_REGION" \
+                --filter="metadata.name=$JOB_NAME" \
+                --format='value(metadata.name)' 2>/dev/null)"
+              list_rc=$?
+              if [ "$list_rc" -eq 0 ] && [ -z "$existing_jobs" ]; then
+                cleanup_verified=true
+                break
+              fi
+              sleep 2
+            done
+
+            if [ "$cleanup_verified" != 'true' ]; then
+              echo 'GCP_PUBLICATION_EXECUTION_READINESS_CLOUD_RUN_CLEANUP_UNVERIFIED' >&2
+              exit 1
+            fi
+            if [ -f gcp-execution-readiness-evidence/execution-runtime-readiness.json ]; then
+              jq '. + {cloudRunJobCleanupVerified:true}' \
+                gcp-execution-readiness-evidence/execution-runtime-readiness.json \
+                > gcp-execution-readiness-evidence/execution-runtime-readiness.tmp.json
+              mv gcp-execution-readiness-evidence/execution-runtime-readiness.tmp.json \
+                gcp-execution-readiness-evidence/execution-runtime-readiness.json
+            fi
+            echo 'GCP_PUBLICATION_EXECUTION_READINESS_CLOUD_RUN_CLEANUP=VERIFIED'
+            exit "$original_rc"
           }
           trap cleanup EXIT
 
@@ -132,8 +166,8 @@ jobs:
             --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
             --command node \
             --args dist/src/instagram-publication-execution-readiness.js \
-            --set-env-vars "SOURCE_SHA=$GITHUB_SHA" \
-            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "SOURCE_SHA=$GITHUB_SHA,EXPECTED_CLOUD_SQL_INSTANCE=$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION" \
             --tasks 1 \
             --max-retries 0 \
             --task-timeout 120s \
@@ -165,11 +199,13 @@ jobs:
               .sourceSha == $sha and
               .cloudSqlConnected == true and
               .databaseSecretMounted == true and
+              .databaseTargetVerified == true and
               .transactionReadOnly == true and
               .requiredTablesPresent == true and
               .requiredColumnsPresent == true and
               .idempotencyUnique == true and
               .requiredPrivilegesPresent == true and
+              .auditSequencePrivilegePresent == true and
               .tenantDefaultsPresent == true and
               .databaseRoleNonSuperuser == true and
               .databaseMutationAttempted == false and
@@ -181,16 +217,17 @@ jobs:
           printf '%s\n' "$result_json" | jq \
             --arg imageDigest "$IMAGE_DIGEST" \
             --arg cloudSqlInstance "$CLOUD_SQL_INSTANCE" \
-            '. + {imageDigest:$imageDigest,cloudSqlInstance:$cloudSqlInstance}' \
+            --arg databaseSecretVersion "$DATABASE_SECRET_VERSION" \
+            '. + {imageDigest:$imageDigest,cloudSqlInstance:$cloudSqlInstance,databaseSecretVersion:$databaseSecretVersion}' \
             > gcp-execution-readiness-evidence/execution-runtime-readiness.json
           jq -e '.imageDigest | startswith("sha256:")' \
             gcp-execution-readiness-evidence/execution-runtime-readiness.json >/dev/null
-          echo 'GCP_PUBLICATION_EXECUTION_RUNTIME_READINESS=VERIFIED'
+          echo 'GCP_PUBLICATION_EXECUTION_RUNTIME_DATABASE=VERIFIED'
 
       - name: Upload sanitized execution-runtime readiness evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: instagram-gcp-execution-runtime-readiness-${{ github.run_id }}
+          name: instagram-gcp-execution-runtime-readiness-${{ github.run_id }}-${{ github.run_attempt }}
           path: gcp-execution-readiness-evidence/execution-runtime-readiness.json
           if-no-files-found: error
           retention-days: 90
