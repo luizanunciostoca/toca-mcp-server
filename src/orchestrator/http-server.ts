@@ -107,7 +107,12 @@ async function routeRequest(
 
   if (method === 'POST' && url.pathname === '/v1/knowledge/answer') {
     const input = groundedKnowledgeSchema.parse(await readJsonBody(request));
-    const result = await runtime.answerGroundedKnowledge(input);
+    const result = await runtime.answerGroundedKnowledge({
+      idempotencyKey: input.idempotencyKey,
+      message: input.message,
+      expectedIntent: input.expectedIntent,
+      ...(input.correlationId ? { correlationId: input.correlationId } : {}),
+    });
     if (input.correlationId) response.setHeader('x-correlation-id', input.correlationId);
     writeJson(response, 200, {
       status: result ? 'GROUNDED' : 'NO_GROUNDED_ANSWER',
