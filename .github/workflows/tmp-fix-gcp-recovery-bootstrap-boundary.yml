@@ -8,7 +8,7 @@ on:
       - '.github/workflows/tmp-fix-gcp-recovery-bootstrap-boundary.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   patch:
@@ -17,6 +17,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: fix/gcp-recovery-verify-bootstrap-apis-20260916
+          persist-credentials: false
           fetch-depth: 1
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
@@ -98,15 +99,12 @@ jobs:
             .github/workflows/instagram-gcp-publication-recovery-preflight.yml \
             test/instagram-gcp-publication-recovery-preflight.test.ts
           git diff --check
-      - name: Commit exact boundary correction
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'toca-recovery-bootstrap-fixer[bot]'
-          git config user.email 'toca-recovery-bootstrap-fixer[bot]@users.noreply.github.com'
-          git add \
-            .github/workflows/instagram-gcp-publication-recovery-preflight.yml \
+      - name: Upload exact corrected files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gcp-recovery-bootstrap-boundary-fix
+          path: |
+            .github/workflows/instagram-gcp-publication-recovery-preflight.yml
             test/instagram-gcp-publication-recovery-preflight.test.ts
-          git diff --cached --quiet && { echo 'EXPECTED_PATCH_DIFF_MISSING'; exit 1; }
-          git commit -m 'fix(instagram): keep GCP API enablement in external bootstrap'
-          git push origin HEAD:fix/gcp-recovery-verify-bootstrap-apis-20260916
+          if-no-files-found: error
+          retention-days: 1
