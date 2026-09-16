@@ -11,8 +11,8 @@ type ReadinessCapabilityRow = {
   readonly audit_insert: boolean;
   readonly idempotency_unique: boolean;
   readonly is_superuser: boolean;
-  readonly provider_tenant_default: string | null;
-  readonly audit_tenant_default: string | null;
+  readonly provider_tenant_default_toca: boolean;
+  readonly audit_tenant_default_toca: boolean;
 };
 
 type SchemaColumnRow = {
@@ -53,11 +53,23 @@ try {
       has_table_privilege(current_user, 'public.audit_events', 'INSERT') as audit_insert,
       exists (
         select 1
-        from pg_indexes
-        where schemaname = 'public'
-          and tablename = 'provider_publications'
-          and indexdef ilike '%unique%'
-          and indexdef like '%(idempotency_key)%'
+        from pg_index i
+        join pg_class table_class on table_class.oid = i.indrelid
+        join pg_namespace table_namespace on table_namespace.oid = table_class.relnamespace
+        join pg_attribute idempotency_attribute
+          on idempotency_attribute.attrelid = table_class.oid
+         and idempotency_attribute.attname = 'idempotency_key'
+         and not idempotency_attribute.attisdropped
+        where table_namespace.nspname = 'public'
+          and table_class.relname = 'provider_publications'
+          and i.indisunique = true
+          and i.indisvalid = true
+          and i.indisready = true
+          and i.indnkeyatts = 1
+          and i.indnatts = 1
+          and i.indpred is null
+          and i.indexprs is null
+          and i.indkey[0] = idempotency_attribute.attnum
       ) as idempotency_unique,
       exists (
         select 1
@@ -65,20 +77,26 @@ try {
         where rolname = current_user
           and rolsuper = true
       ) as is_superuser,
-      (
-        select column_default
-        from information_schema.columns
-        where table_schema = 'public'
-          and table_name = 'provider_publications'
-          and column_name = 'tenant_id'
-      ) as provider_tenant_default,
-      (
-        select column_default
-        from information_schema.columns
-        where table_schema = 'public'
-          and table_name = 'audit_events'
-          and column_name = 'tenant_id'
-      ) as audit_tenant_default
+      coalesce((
+        select pg_get_expr(attribute_default.adbin, attribute_default.adrelid) = '''toca''::text'
+        from pg_attribute attribute
+        join pg_attrdef attribute_default
+          on attribute_default.adrelid = attribute.attrelid
+         and attribute_default.adnum = attribute.attnum
+        where attribute.attrelid = 'public.provider_publications'::regclass
+          and attribute.attname = 'tenant_id'
+          and not attribute.attisdropped
+      ), false) as provider_tenant_default_toca,
+      coalesce((
+        select pg_get_expr(attribute_default.adbin, attribute_default.adrelid) = '''toca''::text'
+        from pg_attribute attribute
+        join pg_attrdef attribute_default
+          on attribute_default.adrelid = attribute.attrelid
+         and attribute_default.adnum = attribute.attnum
+        where attribute.attrelid = 'public.audit_events'::regclass
+          and attribute.attname = 'tenant_id'
+          and not attribute.attisdropped
+      ), false) as audit_tenant_default_toca
   `);
 
   const capability = capabilityResult.rows[0];
@@ -104,10 +122,10 @@ try {
   if (capability.is_superuser) {
     throw new Error('GCP_PUBLICATION_EXECUTION_READINESS_DATABASE_ROLE_TOO_BROAD');
   }
-  if (!capability.provider_tenant_default?.includes('toca')) {
+  if (!capability.provider_tenant_default_toca) {
     throw new Error('GCP_PUBLICATION_EXECUTION_READINESS_PROVIDER_TENANT_DEFAULT_MISSING');
   }
-  if (!capability.audit_tenant_default?.includes('toca')) {
+  if (!capability.audit_tenant_default_toca) {
     throw new Error('GCP_PUBLICATION_EXECUTION_READINESS_AUDIT_TENANT_DEFAULT_MISSING');
   }
 
