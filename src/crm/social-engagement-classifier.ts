@@ -105,11 +105,13 @@ const EVENT_INFO_PATTERNS = [
   'qual e a programacao de hoje',
   'programacao de hoje',
   'programacao hoje',
-  'o que tem hoje na toca',
-  'hoje tem o que na toca',
-  'o que acontece hoje na toca',
+  'o que tem hoje',
+  'hoje tem o que',
+  'o que acontece hoje',
+  'tem algo hoje',
   'tem evento hoje',
   'agenda de hoje',
+  'agenda hoje',
 ];
 
 export function classifySocialEngagement(text: string): SocialEngagementClassification {
