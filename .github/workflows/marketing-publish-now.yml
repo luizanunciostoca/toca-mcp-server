@@ -96,12 +96,14 @@ jobs:
             echo "target_code_sha=$(jq -r .targetCodeSha "$COMMAND")" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Verify scheduled-run provenance before cloud authentication
+      - name: Verify one-shot scheduled-run authorization before cloud authentication
         if: steps.invocation.outputs.source == 'MARKETING_AUTOPILOT'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ inputs.scheduler_source_run_id }}
+          CONTENT_ITEM_ID: ${{ inputs.scheduler_content_item_id }}
+          SCHEDULED_AT: ${{ inputs.scheduler_scheduled_at }}
         run: |
           set -euo pipefail
           printf '%s' "$SOURCE_RUN_ID" | grep -Eq '^[0-9]+$'
@@ -123,6 +125,45 @@ jobs:
           age=$((now_epoch - created_epoch))
           test "$age" -ge -120
           test "$age" -le 1800
+
+          rm -rf /tmp/source-authorization
+          mkdir -p /tmp/source-authorization
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "marketing-autopilot-writer-authorization-${SOURCE_RUN_ID}" \
+            --dir /tmp/source-authorization
+          authorization=/tmp/source-authorization/marketing-autopilot-writer-authorization.json
+          test -s "$authorization"
+          jq -e \
+            --arg sourceRunId "$SOURCE_RUN_ID" \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg contentItemId "$CONTENT_ITEM_ID" \
+            --arg scheduledAt "$SCHEDULED_AT" '
+              .schemaVersion == 1 and
+              .sourceRunId == $sourceRunId and
+              .sourceSha == $sourceSha and
+              .event == "schedule" and
+              .contentItemId == $contentItemId and
+              .scheduledAt == $scheduledAt and
+              .priorAttemptState == "NONE" and
+              (.registrySnapshotSha256 | test("^[a-f0-9]{64}$")) and
+              (.authorizedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+            ' "$authorization" >/dev/null
+          authorized_at="$(jq -r .authorizedAt "$authorization")"
+          authorized_epoch="$(date -d "$authorized_at" +%s)"
+          authorization_age=$((now_epoch - authorized_epoch))
+          test "$authorization_age" -ge -120
+          test "$authorization_age" -le 900
+
+          expected_title="Marketing Publish Now — ${CONTENT_ITEM_ID}"
+          previous_consumers="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/marketing-publish-now.yml/runs?event=workflow_dispatch&per_page=100" \
+            | jq --arg title "$expected_title" --argjson current "$GITHUB_RUN_ID" --arg authorized "$authorized_at" \
+              '[.workflow_runs[] | select(.display_title == $title and .id != $current and .created_at >= $authorized)] | length')"
+          test "$previous_consumers" -eq 0
+
+          snapshot="$(jq -r .registrySnapshotSha256 "$authorization")"
+          echo "AUTHORIZED_REGISTRY_SNAPSHOT_SHA256=$snapshot" >> "$GITHUB_ENV"
+          echo "AUTHORIZED_SCHEDULER_RUN_ID=$SOURCE_RUN_ID" >> "$GITHUB_ENV"
           echo "MARKETING_AUTOPILOT_SOURCE_RUN_PROVENANCE=VERIFIED run_id=$SOURCE_RUN_ID"
 
       - name: Verify deterministic brand binding before cloud auth
@@ -159,13 +200,20 @@ jobs:
           jq -e \
             --arg id "$MARKETING_AUTOPILOT_CONTENT_ITEM_ID" \
             --arg scheduled "$SCHEDULER_SCHEDULED_AT" \
-            '.status == "COMMAND_READY" and .command.contentItemId == $id and .command.scheduledAt == $scheduled' \
-            /tmp/autopilot-command.json >/dev/null
+            --arg snapshot "$AUTHORIZED_REGISTRY_SNAPSHOT_SHA256" '
+              .status == "COMMAND_READY" and
+              .command.contentItemId == $id and
+              .command.scheduledAt == $scheduled and
+              .command.schedulerBinding.registrySnapshotSha256 == $snapshot
+            ' /tmp/autopilot-command.json >/dev/null
           jq \
             --arg sourceRunId "$SCHEDULER_SOURCE_RUN_ID" \
             '.command | .schedulerBinding.sourceRunId = $sourceRunId' \
             /tmp/autopilot-command.json > control/marketing-publish-now-command.json
-          jq -e '.action == "PUBLISH_NOW" and .publicationIntent == "SHARE_NOW"' control/marketing-publish-now-command.json >/dev/null
+          jq -e \
+            --arg sourceRunId "$AUTHORIZED_SCHEDULER_RUN_ID" \
+            '.action == "PUBLISH_NOW" and .publicationIntent == "SHARE_NOW" and .schedulerBinding.sourceRunId == $sourceRunId' \
+            control/marketing-publish-now-command.json >/dev/null
           echo "command_id=$(jq -r .commandId control/marketing-publish-now-command.json)" >> "$GITHUB_OUTPUT"
           echo 'PUBLISH_NOW_EPHEMERAL_COMMAND=READY'
 
@@ -206,6 +254,7 @@ jobs:
           node scripts/marketing-autopilot-scheduler.mjs verify-command
           node scripts/check-publish-now-brand-determinism.mjs
           node scripts/check-publish-now-rights-clearance.mjs
+          test "$(jq -r .schedulerBinding.registrySnapshotSha256 control/marketing-publish-now-command.json)" = "$AUTHORIZED_REGISTRY_SNAPSHOT_SHA256"
           echo 'MARKETING_AUTOPILOT_REGISTRY_REVALIDATION=PASS'
 
       - name: Provider duplicate read-only preflight
