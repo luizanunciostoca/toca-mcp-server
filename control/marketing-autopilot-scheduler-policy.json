@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "policyId": "TOCA_MARKETING_AUTOPILOT_GCP_SCHEDULER_V1",
+  "lifecycleStatus": "CANARY",
+  "generalAutonomy": false,
+  "timezone": "America/Bahia",
+  "spreadsheetId": "1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw",
+  "contentSheet": "CONTENT_ITEMS",
+  "schedulerExecutionLogSheet": "SCHEDULER_EXECUTION_LOG",
+  "schedulerAuthority": {
+    "workflow": ".github/workflows/marketing-autopilot-publication.yml",
+    "providerPublicationWriteAuthorized": false,
+    "metaCredentialAccessAuthorized": false,
+    "directCloudRunPublicationAuthorized": false,
+    "canonicalWriterDispatchAuthorized": true,
+    "requireScheduledRunProvenance": true,
+    "manualAutopilotAuthorized": false
+  },
+  "canonicalWriter": {
+    "transport": "gcp-instagram-publish-now",
+    "workflow": ".github/workflows/marketing-publish-now.yml",
+    "durableCommandFile": "control/marketing-publish-now-command.json",
+    "durableCommandRequiredState": "NOOP",
+    "ephemeralCommandAllowed": true,
+    "providerPublicationWriteAuthorized": false,
+    "controlPlaneProviderPublicationWriteAuthorized": true
+  },
+  "instagramAccountId": "17841402033495654",
+  "schedule": {
+    "preparationLeadSeconds": 300,
+    "lateWindowSeconds": 1800,
+    "maxCandidatesPerRun": 1,
+    "cron": "3/5 * * * *"
+  },
+  "requiredEligibility": {
+    "status": "PRODUCED",
+    "approvalStatus": "APPROVED",
+    "approvalMode": "EXPLICIT_APPROVAL",
+    "channel": "INSTAGRAM",
+    "creativeTruthPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+    "brandIntegrityStatus": "PASSED",
+    "venueFidelityStatus": "PASSED",
+    "qualityGateStatus": "PASSED",
+    "feedQualityGateStatus": "PASSED",
+    "storyQualityGateStatus": "PREVIEW_QA_PASSED",
+    "exactAssetBinding": "TRUE",
+    "masterStatus": "MASTER_READY",
+    "storyStatus": "APPROVED",
+    "providerExternalIdMustBeBlank": true,
+    "publicationIdMustBeBlank": true
+  },
+  "dailyRollout": {
+    "phase": "CANARY",
+    "canaryContentItemId": "MKT-20260916-SUNSET-FEED-0900",
+    "canaryScheduledAt": "2026-09-16T09:00:00-03:00",
+    "promoteToLimitedAfterVerifiedCanary": true,
+    "verifiedCanarySchedulingStatus": "PUBLISHED_VERIFIED",
+    "limited": {
+      "allowedOperations": ["SUNSET"],
+      "allowedFormats": ["FEED", "STORY"],
+      "allowedChannel": "INSTAGRAM",
+      "maxCandidatesPerRun": 1,
+      "generalAutonomy": false
+    },
+    "generalAutonomy": false,
+    "blindRetryAuthorized": false,
+    "automaticFallbackAuthorized": false
+  },
+  "standingAuthorization": {
+    "enabled": true,
+    "grantedAt": "2026-09-16T08:07:56-03:00",
+    "authority": "USER_EXPLICIT_DAILY_PUBLICATION_AUTHORIZATION_2026-09-16",
+    "scope": "TOCA_OS_APPROVED_INSTAGRAM_ORGANIC_DAILY_PLAN",
+    "rightsScope": "INSTAGRAM_ORGANIC_PUBLICATION",
+    "requireExistingApprovalStatus": "APPROVED",
+    "requireExactAssetSha256": true,
+    "requireCreativeTruthPass": true,
+    "allowCopyMutation": false,
+    "allowAssetMutation": false
+  },
+  "rollout": {
+    "phase": "CANARY",
+    "allowedContentItemIds": ["MKT-20260917-SUNSET-FEED-0900"],
+    "promoteOnlyAfterVerifiedOperations": 3,
+    "blindRetryAuthorized": false,
+    "automaticFallbackAuthorized": false,
+    "providerReconciliationBaseline": {
+      "contentItemId": "MKT-20260917-SUNSET-FEED-0900",
+      "runId": "35069055672",
+      "workflow": "Instagram GCP Publication Recovery Preflight",
+      "headSha": "13abc0edc3e2ced48c49f23c95c018923ae039f4",
+      "completedAt": "2026-09-16T07:34:36Z",
+      "conclusion": "success",
+      "marker": "GCP_PUBLICATION_PROVIDER_READ_PREFLIGHT=VERIFIED",
+      "artifactName": "instagram-gcp-provider-read-35069055672",
+      "artifactId": "10435497245",
+      "artifactDigest": "sha256:024897453af53a81b396c6196db49372e0f3678128da57e64975a62e66d3fdee",
+      "meaning": "Provider-read evidence reconciles publication attempts created before completion of this baseline for this exact canary. Attempts created after the baseline remain strict no-retry boundaries."
+    }
+  },
+  "bindings": {
+    "MKT-20260917-SUNSET-FEED-0900": {
+      "expectedScheduledAt": "2026-09-17T09:00:00-03:00",
+      "operation": "SUNSET",
+      "format": "FEED",
+      "publishNowFormat": "FEED_IMAGE",
+      "contentType": "image/jpeg",
+      "masterAssetId": "MM-SUN-0268-FEED4X5-V1",
+      "driveFileId": "1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK",
+      "outputSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6",
+      "creativeId": "CR-MKT-20260903-SUNSET-FEED-0900-V1",
+      "copyId": "CP-MKT-20260903-SUNSET-FEED-0900-V1",
+      "registryMessage": "O fim de tarde começa no detalhe: um bom drink, a vista de Morro e o tempo desacelerando na Toca.",
+      "registryCta": "Salve este convite e venha viver o Sunset.",
+      "approvedCaption": "O fim de tarde começa no detalhe: um bom drink, a vista de Morro e o tempo desacelerando na Toca.\n\nSalve este convite e venha viver o Sunset.\n\nIngressos limitados! garanta o seu pelo link na bio.\n\n#TocaDoMorcego #MorroDeSaoPaulo #Bahia #Sunset #PorDoSol",
+      "correlationId": "CORR-MKT-20260917-SUNSET-FEED-0900-ROLLOVER-V1",
+      "idempotencyVersion": "V1",
+      "creativeTruthBinding": {
+        "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+        "standardId": "SUNSET_FEED_V1",
+        "creativeId": "CR-MKT-20260903-SUNSET-FEED-0900-V1",
+        "outputSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6",
+        "brandIntegrityStatus": "PASSED",
+        "venueFidelityStatus": "PASSED",
+        "qualityGateStatus": "PASSED",
+        "exactAssetBinding": true
+      },
+      "brandDeterminism": {
+        "status": "VERIFIED",
+        "standardRef": "TOCA_CREATIVE_TRUTH:SUNSET_FEED_V1",
+        "typographyRef": "EDITORIAL_TEXT_V1",
+        "assetSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6"
+      },
+      "rightsClearance": {
+        "status": "CLEARED",
+        "scope": "INSTAGRAM_ORGANIC_PUBLICATION",
+        "evidenceRef": "GOOGLE_DRIVE:1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK",
+        "authority": "USER_EXPLICIT_PUBLICATION_AUTHORIZATION_2026-09-15",
+        "clearedAt": "2026-09-15T16:21:53-03:00",
+        "assetSha256": "a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6"
+      },
+      "bindingSource": {
+        "kind": "PROTECTED_GITHUB_HISTORY",
+        "commit": "87c5dcff748f69459925e4904cef686f171dfda9",
+        "note": "Reuses only exact asset/copy/Creative Truth/brand/rights bindings from the previously approved envelope; runtime identity, issuedAt, targetCodeSha and GCP idempotency are regenerated."
+      }
+    }
+  }
+}

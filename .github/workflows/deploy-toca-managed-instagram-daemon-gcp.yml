@@ -16,7 +16,8 @@ jobs:
           set -euo pipefail
           echo 'LEGACY_GCP_INSTAGRAM_DAEMON_RETIRED=1'
           echo 'Cloud Scheduler/PostgreSQL publication execution is no longer an authorized TOCA OS publication transport.'
-          echo 'Canonical publication transport is .github/workflows/github-native-instagram-publisher.yml'
+          echo 'Canonical publication writer is .github/workflows/marketing-publish-now.yml via gcp-instagram-publish-now.'
+          echo 'Marketing Autopilot may orchestrate the canonical writer but has no provider publication authority.'
 
 # Historical compatibility markers retained only for legacy architecture/cost guards.
 # These strings are comments and MUST NOT be interpreted as executable topology.

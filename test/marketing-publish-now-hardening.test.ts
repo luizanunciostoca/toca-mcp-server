@@ -69,9 +69,9 @@ describe('Marketing Publish Now hardening contract', () => {
     expect(workflow).not.toContain('GITHUB_SHA: ${{ env.AUDITED_CODE_SHA }}');
   });
 
-  it('fails closed before cloud authentication when deterministic brand truth is absent', () => {
-    const brandStep = workflow.indexOf('Verify deterministic brand binding');
-    const authStep = workflow.indexOf('Authenticate to Google Cloud and Drive');
+  it('keeps protected-command brand validation before cloud authentication', () => {
+    const brandStep = workflow.indexOf('Verify deterministic brand binding before cloud auth');
+    const authStep = workflow.indexOf('Authenticate to Google Cloud, Drive and Content Registry');
 
     expect(brandStep).toBeGreaterThan(-1);
     expect(authStep).toBeGreaterThan(brandStep);
@@ -82,9 +82,9 @@ describe('Marketing Publish Now hardening contract', () => {
     expect(brandGate).toContain('BRAND_DETERMINISM_ASSET_BINDING_MISMATCH');
   });
 
-  it('fails closed before cloud authentication when rights clearance is absent or stale', () => {
-    const rightsStep = workflow.indexOf('Verify rights clearance gate');
-    const authStep = workflow.indexOf('Authenticate to Google Cloud and Drive');
+  it('keeps protected-command rights validation before cloud authentication', () => {
+    const rightsStep = workflow.indexOf('Verify rights clearance before cloud auth');
+    const authStep = workflow.indexOf('Authenticate to Google Cloud, Drive and Content Registry');
 
     expect(rightsStep).toBeGreaterThan(-1);
     expect(authStep).toBeGreaterThan(rightsStep);
@@ -94,6 +94,14 @@ describe('Marketing Publish Now hardening contract', () => {
     expect(rightsGate).toContain('RIGHTS_CLEARANCE_ASSET_BINDING_MISMATCH');
     expect(rightsGate).toContain('RIGHTS_CLEARANCE_EXPIRED');
     expect(rightsGate).toContain("clearance.scope === 'INSTAGRAM_ORGANIC_PUBLICATION'");
+  });
+
+  it('rebuilds and revalidates an autopilot envelope before hardened execution', () => {
+    expect(workflow).toContain('PUBLISH_NOW_DURABLE_COMMAND=NOOP');
+    expect(workflow).toContain('marketing-autopilot-scheduler.mjs build-command');
+    expect(workflow).toContain('marketing-autopilot-scheduler.mjs verify-command');
+    expect(workflow).toContain('MARKETING_AUTOPILOT_REGISTRY_REVALIDATION=PASS');
+    expect(workflow).toContain('marketing-publish-now-command-envelope.json');
   });
 
   it('disables and verifies write capability before and after provider readback', () => {
@@ -120,8 +128,9 @@ describe('Marketing Publish Now hardening contract', () => {
   });
 
   it('uploads evidence even when the hardened execution step fails', () => {
-    expect(workflow).toContain("if: always() && steps.command.outputs.action == 'PUBLISH_NOW'");
+    expect(workflow).toContain("if: always() && steps.invocation.outputs.action == 'PUBLISH_NOW'");
     expect(workflow).toContain('marketing-publish-now-*.json');
+    expect(workflow).toContain('marketing-autopilot-registry-reconciliation.json');
     expect(script).toContain('providerReadbackAttempted:true');
     expect(script).toContain('appImage:$appImage');
     expect(script).toContain('prepareImage:$prepareImage');
