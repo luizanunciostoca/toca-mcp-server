@@ -26,7 +26,9 @@ async function listen(runtime: Ag01ProductionRuntime): Promise<string> {
   return `http://127.0.0.1:${address.port}`;
 }
 
-function runtime(answerGroundedKnowledge: Ag01ProductionRuntime['answerGroundedKnowledge']): Ag01ProductionRuntime {
+function runtime(
+  answerGroundedKnowledge: Ag01ProductionRuntime['answerGroundedKnowledge'],
+): Ag01ProductionRuntime {
   return {
     serviceName: 'test-ag01',
     serviceVersion: '0.3.0-test',
