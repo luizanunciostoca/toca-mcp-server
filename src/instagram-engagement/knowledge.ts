@@ -99,6 +99,7 @@ export function resolveKnowledgeRows(
   if (!normalized) return null;
   const genericOperatingHours = isGenericOperatingHoursQuery(normalized, expectedIntent);
   const todayOperatingHours = isTodayOperatingHoursQuery(normalized, expectedIntent);
+  const namesSpecificEvent = namesSpecificEventQuery(normalized);
   let best: InstagramEngagementKnowledgeRow | undefined;
   let bestScore = 0;
 
@@ -106,7 +107,7 @@ export function resolveKnowledgeRows(
     if (!row.factsVerified || row.intent !== expectedIntent || HUMAN_INTENTS.has(row.intent))
       continue;
     let score = Math.max(...row.prompts.map((prompt) => similarity(normalized, prompt)), 0);
-    if (todayOperatingHours && isVerifiedRegularTocaHoursRow(row)) {
+    if (todayOperatingHours && !namesSpecificEvent && isVerifiedRegularTocaHoursRow(row)) {
       score = Math.max(score, 0.95);
     } else if (
       (genericOperatingHours || todayOperatingHours) &&
@@ -231,8 +232,7 @@ function isGenericOperatingHoursQuery(
   const hasHours = tokens.has('horario') || tokens.has('horarios') || tokens.has('hora');
   const hasOperating =
     tokens.has('funcionamento') || tokens.has('funciona') || tokens.has('funcionar');
-  const namesSpecificEvent = tokens.has('sunset') || tokens.has('party') || tokens.has('festa');
-  return hasHours && hasOperating && !namesSpecificEvent;
+  return hasHours && hasOperating && !namesSpecificEventQuery(normalized);
 }
 
 function isTodayOperatingHoursQuery(normalized: string, expectedIntent: EngagementIntent): boolean {
@@ -253,6 +253,11 @@ function isTodayOperatingHoursQuery(normalized: string, expectedIntent: Engageme
     'funcionar',
     'funcionando',
   ].some((token) => tokens.has(token));
+}
+
+function namesSpecificEventQuery(normalized: string): boolean {
+  const tokens = new Set(normalized.split(' '));
+  return tokens.has('sunset') || tokens.has('party') || tokens.has('festa');
 }
 
 function isVerifiedRegularTocaHoursRow(row: InstagramEngagementKnowledgeRow): boolean {
