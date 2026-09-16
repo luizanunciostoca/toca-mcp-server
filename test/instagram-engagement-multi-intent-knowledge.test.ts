@@ -48,11 +48,22 @@ describe('Instagram grounded multi-intent knowledge', () => {
     ['O que tem hoje para comer?', 'FAQ_OPERATIONAL', 'GASTRONOMY'],
     ['O que tem hoje para beber?', 'FAQ_OPERATIONAL', 'GASTRONOMY'],
     ['Hoje tem o que para comer?', 'FAQ_OPERATIONAL', 'GASTRONOMY'],
-  ])('does not widen gastronomy question "%s" into EVENT_INFO', (text, expectedIntent, expectedTopic) => {
-    const classification = classifySocialEngagement(text);
+  ])(
+    'does not widen gastronomy question "%s" into EVENT_INFO',
+    (text, expectedIntent, expectedTopic) => {
+      const classification = classifySocialEngagement(text);
 
-    expect(classification.intent).toBe(expectedIntent);
-    expect(classification.topic).toBe(expectedTopic);
+      expect(classification.intent).toBe(expectedIntent);
+      expect(classification.topic).toBe(expectedTopic);
+    },
+  );
+
+  it('rejects ambiguous gastronomy in the temporal resolver even if EVENT_INFO is supplied', () => {
+    const match = resolveCurrentProgrammingKnowledge('O que tem hoje para comer?', 'EVENT_INFO', {
+      now: new Date('2026-09-16T14:30:00Z'),
+    });
+
+    expect(match).toBeNull();
   });
 
   it('resolves a generic today alias through the grounded programming source', async () => {
