@@ -1,90 +1,61 @@
-# Marketing Publish Now — fast path
+# Marketing Publish Now — canonical GCP writer
 
-Status: implementation candidate.
+Status: **LIMITED / canonical writer**.
 
-## Goal
+`Marketing Publish Now` is the only TOCA OS Instagram provider-write transport. GitHub-native publication is SHADOW/read-only and the former direct GCP autopilot publisher topology is retired.
 
-Provide a routine operational lane for direct Instagram publication that is substantially faster than the historical first-production validation flow while retaining the controls that materially prevent a wrong or duplicate external side effect.
+## Invocation modes
 
-User experience target:
+The workflow supports two governed invocation modes:
 
-`publish now request -> one approved command -> one protected merge -> one workflow -> provider readback -> publication evidence`
+1. **Protected command file** — a deliberately merged `control/marketing-publish-now-command.json` containing `PUBLISH_NOW`.
+2. **Marketing Autopilot scheduler dispatch** — `main` must remain durably `NOOP`; the workflow receives only the exact scheduled Content Registry item ID and generates a fresh PUBLISH_NOW envelope ephemerally from protected policy + the live registry.
 
-The legacy `PREPARE -> external hash approval -> PUBLISH` lane remains available for scheduled or exceptional validation, but it is not the preferred path for routine `SHARE_NOW` publication.
+The second mode does not create a second writer. It reaches the same hardened GCP execution path after the same Creative Truth, rights, exact-asset, idempotency, write-disable and provider-readback controls.
 
 ## Caption policy
 
 Every Instagram caption published through this lane MUST contain:
 
-1. the exact CTA: `Ingressos limitados! garanta o seu pelo link na bio.`
-2. exactly five hashtags relevant to the content and operation.
+1. the exact CTA `Ingressos limitados! garanta o seu pelo link na bio.`;
+2. exactly five hashtags relevant to the approved content.
 
-Missing CTA, modified mandatory CTA, fewer than five hashtags or more than five hashtags fails closed before provider access.
+The scheduler is not allowed to compose or alter copy. Its CANARY binding stores the exact previously approved caption and verifies the registry message/CTA before use.
 
-## Command contract
+## Core execution contract
 
-The execution envelope is `control/marketing-publish-now-command.json`.
+A PUBLISH_NOW envelope requires explicit approval, a fixed production Instagram account, exact Drive file ID, exact SHA-256, approved caption, Creative Truth binding, deterministic brand binding, rights clearance, correlation, idempotency and a fresh `issuedAt`.
 
-Supported actions:
+For scheduler-generated envelopes, the exact protected-main SHA is the `targetCodeSha`; the workflow rechecks the Content Registry after detaching to that audited tree. The durable command file on main remains NOOP.
 
-- `NOOP`
-- `PUBLISH_NOW`
+## Hardened single-attempt flow
 
-`PUBLISH_NOW` requires:
+The writer:
 
-- `approvalMode=EXPLICIT_APPROVAL`
-- `approvalStatus=APPROVED`
-- `publicationIntent=SHARE_NOW`
-- a fixed production Instagram account
-- a Drive file ID
-- `expectedAssetSha256` binding the approval to the exact asset bytes
-- the complete approved caption
-- correlation and idempotency keys
-- a fresh `issuedAt` timestamp; stale commands are rejected.
+1. validates the invocation and command freshness;
+2. authenticates through Workload Identity Federation;
+3. binds execution to the exact audited protected-main code SHA;
+4. for scheduler dispatches, revalidates the Content Registry at execution time;
+5. downloads the exact approved Drive asset using an authenticated bearer token;
+6. recalculates SHA-256 and fails on any mismatch;
+7. prepares the provider request with publication writes disabled;
+8. resolves immutable Artifact Registry image digests;
+9. enables publication only for the exact approved request;
+10. executes one idempotent publication attempt;
+11. disables publication writes immediately after the attempt;
+12. performs provider readback;
+13. verifies publication writes remain disabled;
+14. declares success only for a verified PUBLISHED result with provider publication ID;
+15. persists immutable evidence.
 
-## Single-run execution
+Any ambiguous outcome is `RECONCILIATION_REQUIRED`; there is no blind retry.
 
-The workflow performs the following in one run:
+## Registry reconciliation
 
-1. validates the approved command and caption policy;
-2. rejects commands older than 30 minutes or more than 2 minutes in the future;
-3. downloads the Drive JPEG privately;
-4. validates MIME type and exact SHA-256 against `expectedAssetSha256`;
-5. builds one application image and one small immutable preparation wrapper;
-6. runs preparation with Instagram publication writes disabled;
-7. captures the prepared manifest using bounded retry/backoff;
-8. derives the exact request SHA-256 inside the same approved execution;
-9. deploys the execution job with writes enabled only for that exact request SHA-256;
-10. executes one idempotent publication;
-11. disables write capability immediately;
-12. performs read-only provider verification;
-13. requires `PUBLISHED` plus a provider publication ID before success;
-14. retains preparation and publication evidence for 90 days;
-15. removes temporary Cloud Run jobs.
+For Marketing Autopilot dispatches only, a verified provider result is written back to the canonical Content Registry after the provider readback and final write-disable checks pass. The Registry is never marked PUBLISHED from a local execution exit code alone.
 
-## Why this is safe enough for routine direct publication
+If Registry reconciliation fails after provider success, the workflow fails closed as a reconciliation incident. Subsequent scheduler runs detect the prior writer attempt and refuse to republish automatically.
 
-The old two-command mechanism was useful during first production validation because it forced a human to approve a provider-resolved request hash in a second cycle. For a routine direct-publication command, that extra round trip provides little additional protection when the command already binds:
+## CI and protected-main policy
 
-- exact asset bytes by SHA-256;
-- exact caption;
-- fixed account;
-- fixed format;
-- explicit approval;
-- freshness window;
-- idempotency key;
-- fail-closed preparation;
-- exact internally generated request hash;
-- provider readback.
-
-This lane therefore preserves immutability and provider verification but removes the separate PREPARE PR/run, external hash approval and second PUBLISH PR/run.
-
-## CI policy
-
-The operational workflow intentionally does not run `pnpm install` and the full `pnpm quality` suite again after merge. `main` is protected and already requires the repository quality/security contexts before a command can land. Re-running the full code-quality suite inside every social-media operation adds latency without changing the certified application tree.
-
-Any code or workflow change still goes through normal branch protection and CI before merge.
-
-## Future optimization
-
-The remaining GitHub PR/merge cycle exists because the current execution trigger is a command file on protected `main`. The next optimization, once the new lane has provider-verified production evidence, is an authenticated TOCA OS/MCP `instagram.publish_now` operation that accepts the same immutable command contract directly. That would reduce the user experience to one approved TOCA OS action without weakening the exact-asset, idempotency or provider-readback controls.
+Code, workflow and policy changes continue through the normal protected-main PR process and required quality/security checks. Individual scheduled publications do not create a code PR; they use already-reviewed code and protected CANARY policy, plus the live explicit approval recorded in the Content Registry.
