@@ -1,10 +1,17 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const script = 'scripts/marketing-autopilot-scheduler.mjs';
+const workflow = readFileSync('.github/workflows/marketing-autopilot-publication.yml', 'utf8');
+const policy = JSON.parse(
+  readFileSync('control/marketing-autopilot-scheduler-policy.json', 'utf8'),
+) as {
+  canonicalWriter?: { durableCommandRequiredState?: string; ephemeralCommandAllowed?: boolean };
+  schedulerAuthority?: { manualAutopilotAuthorized?: boolean };
+};
 const contentItemId = 'MKT-20260917-SUNSET-FEED-0900';
 const expectedSha = 'a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6';
 
@@ -71,6 +78,18 @@ function parseOutput(value: string): unknown {
 }
 
 describe('Marketing Autopilot scheduler restoration', () => {
+  it('pins manual workflow dispatch to PRECHECK and enforces ephemeral-NOOP policy', () => {
+    expect(workflow).toContain('workflow_dispatch:');
+    expect(workflow).toContain('workflow_dispatch|push) mode=PRECHECK');
+    expect(workflow).not.toContain('REQUESTED_MODE');
+    expect(workflow).not.toContain('inputs.mode');
+    expect(policy.canonicalWriter).toMatchObject({
+      durableCommandRequiredState: 'NOOP',
+      ephemeralCommandAllowed: true,
+    });
+    expect(policy.schedulerAuthority?.manualAutopilotAuthorized).toBe(false);
+  });
+
   it('prepares inside the bounded lead window without declaring the item due early', () => {
     const result = runScheduler({ now: '2026-09-17T08:58:00-03:00' });
     expect(result.status, result.stderr).toBe(0);
@@ -81,6 +100,23 @@ describe('Marketing Autopilot scheduler restoration', () => {
         scheduledAt: '2026-09-17T09:00:00-03:00',
         waitSeconds: 120,
         expectedAssetSha256: expectedSha,
+        registrySnapshotSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      },
+    });
+  });
+
+  it('treats an unqualified Sheets clock as America/Bahia wall time, never runner UTC', () => {
+    const result = runScheduler({
+      now: '2026-09-17T08:59:00-03:00',
+      row: canonicalRow({ scheduled_at: '2026-09-17 09:00:00' }),
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(parseOutput(result.stdout)).toMatchObject({
+      status: 'READY',
+      candidate: {
+        contentItemId,
+        scheduledAt: '2026-09-17T09:00:00-03:00',
+        waitSeconds: 60,
       },
     });
   });
@@ -116,6 +152,7 @@ describe('Marketing Autopilot scheduler restoration', () => {
           rolloutPhase: 'CANARY',
           notBefore: '2026-09-17T09:00:00-03:00',
           expiresAt: '2026-09-17T09:30:00-03:00',
+          registrySnapshotSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
         },
       },
     });
@@ -152,6 +189,17 @@ describe('Marketing Autopilot scheduler restoration', () => {
     expect(parseOutput(result.stdout)).toMatchObject({
       status: 'NO_CANDIDATE',
       rejected: [{ contentItemId, reason: 'AUTOPILOT_APPROVAL_NOT_APPROVED:PENDING' }],
+    });
+  });
+
+  it('rejects correlation drift instead of masking it with the protected binding', () => {
+    const result = runScheduler({
+      now: '2026-09-17T09:00:00-03:00',
+      row: canonicalRow({ correlation_id: 'CORR-DRIFTED' }),
+    });
+    expect(parseOutput(result.stdout)).toMatchObject({
+      status: 'NO_CANDIDATE',
+      rejected: [{ contentItemId, reason: 'AUTOPILOT_CORRELATION_BINDING_MISMATCH' }],
     });
   });
 
