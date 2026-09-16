@@ -20,6 +20,7 @@ import {
   GoogleSheetsInstagramEngagementKnowledgeSource,
   type InstagramEngagementKnowledgeSource,
 } from './knowledge.js';
+import { InstagramPostSaleReconciler } from './post-sale-reconciler.js';
 import { PostgresInstagramEngagementKnowledgeBaseSource } from './postgres-knowledge-base.js';
 import { PostgresInstagramEngagementKnowledgeSource } from './postgres-knowledge.js';
 import { PostgresInstagramSalesFunnelStore } from './postgres-sales-funnel-store.js';
@@ -106,6 +107,15 @@ export function createInstagramEngagementBatchRuntime(
   const salesFunnel = salesFunnelEnabled
     ? new InstagramSalesFunnelCoordinator({ sales })
     : undefined;
+  const postSaleReconciler = salesFunnel
+    ? new InstagramPostSaleReconciler({
+        pool: options.pool,
+        coordinator: salesFunnel,
+        saturdaySambaPagodeVerified: isTrue(
+          env.INSTAGRAM_SALES_FUNNEL_SATURDAY_SAMBA_PAGODE_VERIFIED,
+        ),
+      })
+    : undefined;
 
   const provider: InstagramEngagementProvider = config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED
     ? createLiveProvider(config, env)
@@ -185,6 +195,20 @@ export function createInstagramEngagementBatchRuntime(
           console.error(
             'Instagram engagement event failed',
             JSON.stringify({ eventId: event.eventId, eventType: event.eventType, errorCode: code }),
+          );
+        }
+      }
+
+      if (postSaleReconciler) {
+        try {
+          const reconciled = await postSaleReconciler.reconcile(now, salesFunnelBatchSize);
+          if (reconciled > 0) {
+            console.log('Instagram post-sale reconciliation', JSON.stringify({ reconciled }));
+          }
+        } catch (error) {
+          console.error(
+            'Instagram post-sale reconciliation failed',
+            JSON.stringify({ errorCode: safeErrorCode(error) }),
           );
         }
       }
