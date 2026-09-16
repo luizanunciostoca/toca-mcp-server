@@ -22,8 +22,8 @@ describe('Instagram sales funnel governance boundaries', () => {
   it('uses a conservative 23-hour execution window and terminal ambiguous outcomes', () => {
     expect(dispatcher).toContain('23 * 60 * 60 * 1000');
     expect(dispatcher).toContain('INSTAGRAM_USER_WINDOW_CLOSED');
-    expect(dispatcher).toContain("status = 'CANCELED'").toBe(false);
     expect(dispatcher).not.toContain('requeue');
+    expect(dispatcher).not.toContain("status = 'PENDING'");
   });
 
   it('reconciles post-sale only from CRM opportunities that are already WON', () => {
