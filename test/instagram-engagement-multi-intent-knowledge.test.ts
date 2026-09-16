@@ -17,6 +17,27 @@ describe('Instagram grounded multi-intent knowledge', () => {
     expect(classification.confidence).toBe('HIGH');
   });
 
+  it.each(['O que tem hoje?', 'O que acontece hoje?', 'Tem algo hoje?', 'Agenda hoje?'])(
+    'routes the grounded today alias "%s" to EVENT_INFO',
+    (text) => {
+      expect(classifySocialEngagement(text).intent).toBe('EVENT_INFO');
+    },
+  );
+
+  it('resolves a generic today alias through the grounded programming source', async () => {
+    const delegateResolve = vi.fn().mockResolvedValue(null);
+    const source = new MultiIntentInstagramEngagementKnowledgeSource(
+      { resolve: delegateResolve },
+      { now: () => new Date('2026-09-16T14:30:00Z') },
+    );
+    const classification = classifySocialEngagement('Agenda hoje?');
+
+    const match = await source.resolve('Agenda hoje?', classification.intent);
+
+    expect(match?.factsVerified).toBe(true);
+    expect(match?.answer).toContain('Sunset na Toca do Morcego a partir das 16:30');
+  });
+
   it('preserves a human-required press route when programming is mixed into the same message', async () => {
     const classification = classifySocialEngagement('Sou jornalista, qual a programação de hoje?');
     expect(classification.intent).toBe('PRESS');
@@ -216,6 +237,36 @@ describe('Instagram grounded multi-intent knowledge', () => {
     expect(match).toBeNull();
   });
 
+  it('fails closed when a grouped message contains a commercial lead', async () => {
+    const delegateResolve = vi.fn(async (_text: string, intent: string) => {
+      if (intent === 'TICKET_INFO') {
+        return {
+          faqId: 'FAQ-003',
+          intent: 'TICKET_INFO' as const,
+          answer: TOCA_TICKET_INFORMATION_REPLY,
+          source: 'TOCA_OS — FAQ-003',
+          confidence: 1,
+          factsVerified: true,
+          tier: 'FAQ' as const,
+        };
+      }
+      return null;
+    });
+    const source = new MultiIntentInstagramEngagementKnowledgeSource({ resolve: delegateResolve });
+
+    const match = await source.resolve(
+      'Quero reservar um camarote?\nQual o valor do ingresso?',
+      'TICKET_INFO',
+    );
+
+    expect(match).toBeNull();
+    expect(delegateResolve).not.toHaveBeenCalledWith(
+      'Quero reservar um camarote?',
+      'COMMERCIAL_LEAD',
+    );
+    expect(delegateResolve).toHaveBeenCalledWith('Qual o valor do ingresso?', 'TICKET_INFO');
+  });
+
   it('fails closed before delegated lookups when segment count exceeds the bound', async () => {
     const delegateResolve = vi.fn().mockResolvedValue({
       faqId: 'FAQ-003',
@@ -235,5 +286,27 @@ describe('Instagram grounded multi-intent knowledge', () => {
 
     expect(match).toBeNull();
     expect(delegateResolve).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a composed verified reply would exceed the provider envelope', async () => {
+    const delegateResolve = vi.fn(async (text: string, intent: string) => ({
+      faqId: `FAQ-${text}`,
+      intent: intent as 'TICKET_INFO',
+      answer: `${text} ${'A'.repeat(300)}`,
+      source: `TOCA_OS — ${text}`,
+      confidence: 1,
+      factsVerified: true,
+      tier: 'FAQ' as const,
+    }));
+    const source = new MultiIntentInstagramEngagementKnowledgeSource({ resolve: delegateResolve });
+    const groupedInput = Array.from(
+      { length: 8 },
+      (_, index) => `Qual o valor do ingresso ${index + 1}?`,
+    ).join('\n');
+
+    const match = await source.resolve(groupedInput, 'TICKET_INFO');
+
+    expect(match).toBeNull();
+    expect(delegateResolve).toHaveBeenCalledTimes(8);
   });
 });
