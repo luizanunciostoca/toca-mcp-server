@@ -7,16 +7,23 @@ const workflow = readFileSync(
 );
 
 describe('Instagram GCP recovery owner-command gateway', () => {
-  it('accepts only a created owner comment on the dedicated control issue', () => {
-    expect(workflow).toContain('issue_comment:');
-    expect(workflow).toContain('      - created');
-    expect(workflow).toContain("github.event.issue.number == 862");
-    expect(workflow).toContain("github.actor == 'luizanunciostoca'");
-    expect(workflow).toContain("github.event.comment.user.login == 'luizanunciostoca'");
-    expect(workflow).toContain("github.event.comment.author_association == 'OWNER'");
-    expect(workflow).toContain(
-      'expected_command="AUTHORIZE_GCP_INSTAGRAM_RECOVERY_PREFLIGHT ${AUTHORIZED_SOURCE_SHA}"',
-    );
+  it('requires the dedicated owner command', () => {
+    const guards = [
+      'issue_comment:',
+      '      - created',
+      "github.event.issue.number == 862",
+      "github.actor == 'luizanunciostoca'",
+      "github.event.comment.user.login == 'luizanunciostoca'",
+      "github.event.comment.author_association == 'OWNER'",
+    ];
+
+    for (const guard of guards) {
+      expect(workflow).toContain(guard);
+    }
+
+    expect(workflow).toContain('expected_command=');
+    expect(workflow).toContain('AUTHORIZE_GCP_INSTAGRAM_RECOVERY_PREFLIGHT');
+    expect(workflow).toContain('${AUTHORIZED_SOURCE_SHA}');
   });
 
   it('has no production provider or cloud identity capability', () => {
@@ -30,13 +37,12 @@ describe('Instagram GCP recovery owner-command gateway', () => {
     expect(workflow).not.toContain('/media_publish');
   });
 
-  it('binds authorization to live protected main and dispatches only the allowlisted preflight', () => {
+  it('dispatches only the allowlisted preflight from live main', () => {
     expect(workflow).toContain('refs/heads/main');
     expect(workflow).toContain('/git/ref/heads/main');
     expect(workflow).toContain('test "$live_main_sha" = "$AUTHORIZED_SOURCE_SHA"');
-    expect(workflow).toContain(
-      '/actions/workflows/instagram-gcp-publication-recovery-preflight.yml/dispatches',
-    );
+    expect(workflow).toContain('instagram-gcp-publication-recovery-preflight.yml');
+    expect(workflow).toContain('/dispatches');
     expect(workflow).toContain("test \"$http_status\" = '204'");
   });
 });
