@@ -14,6 +14,26 @@ const policy = JSON.parse(readFileSync('infra/control-plane/policy.json', 'utf8'
   publicationControlPlane?: {
     canonicalTransport?: string;
     canonicalWorkflow?: string;
+    assetTransport?: string;
+    stateTransport?: string;
+    gcpInstagramPublishNowTransport?: {
+      lifecycleStatus?: string;
+      publicationExecutionAuthorized?: boolean;
+      publicationSchedulerAuthorized?: boolean;
+      providerPublicationWriteAuthorized?: boolean;
+      approvalTransport?: string;
+      commandFile?: string;
+      writeAuthority?: string;
+      databaseSecretVersion?: string;
+      requiredControls?: Record<string, boolean>;
+    };
+    githubNativeInstagramPublicationTransport?: {
+      lifecycleStatus?: string;
+      providerPublicationWriteAuthorized?: boolean;
+      repositoryDispatchWriteAuthorized?: boolean;
+      scheduleShadowAuthorized?: boolean;
+      canonicalForPublication?: boolean;
+    };
     legacyGcpInstagramPublicationTransport?: {
       lifecycleStatus?: string;
       publicationExecutionAuthorized?: boolean;
@@ -21,6 +41,7 @@ const policy = JSON.parse(readFileSync('infra/control-plane/policy.json', 'utf8'
       providerPublicationWriteAuthorized?: boolean;
       physicalEngagementRuntimeMayRemain?: boolean;
       replacedBy?: string;
+      currentCanonicalReplacement?: string;
     };
   };
   activeRuntime?: {
@@ -61,10 +82,9 @@ const engagementWorkflowsMutatingManagedDaemon = engagementWorkflowsUsingManaged
     content.includes('gcloud run services update "$DAEMON_SERVICE_NAME"'),
 );
 
-describe('legacy GCP Instagram publication runtime retirement', () => {
+describe('legacy GCP Instagram runtime retirement and governed fast-path activation', () => {
   it('keeps the former publication worker deployer as an inert historical stub', () => {
     expect(worker).toContain('LEGACY_GCP_INSTAGRAM_PUBLICATION_WORKER_RETIRED=1');
-    expect(worker).toContain('github-native-instagram-publisher.yml');
     expect(worker).not.toMatch(/^\s*id-token:\s*write\s*$/m);
     for (const marker of executableGcpMarkers) {
       expect(worker).not.toContain(marker);
@@ -74,19 +94,49 @@ describe('legacy GCP Instagram publication runtime retirement', () => {
   it('keeps the former publication/scheduler deployer inert', () => {
     expect(daemon).toContain('LEGACY_GCP_INSTAGRAM_DAEMON_RETIRED=1');
     expect(daemon).toContain('Cloud Scheduler/PostgreSQL publication execution is no longer');
-    expect(daemon).toContain('github-native-instagram-publisher.yml');
     expect(daemon).not.toMatch(/^\s*id-token:\s*write\s*$/m);
     for (const marker of executableGcpMarkers) {
       expect(daemon).not.toContain(marker);
     }
   });
 
-  it('marks GitHub-native publication as canonical while allowing engagement-only infrastructure', () => {
+  it('makes the protected GCP publish-now lane canonical without reviving retired worker topology', () => {
     const controlPlane = policy.publicationControlPlane;
-    expect(controlPlane?.canonicalTransport).toBe('github-native-instagram-publication');
-    expect(controlPlane?.canonicalWorkflow).toBe(
-      '.github/workflows/github-native-instagram-publisher.yml',
-    );
+    expect(controlPlane?.canonicalTransport).toBe('gcp-instagram-publish-now');
+    expect(controlPlane?.canonicalWorkflow).toBe('.github/workflows/marketing-publish-now.yml');
+    expect(controlPlane?.assetTransport).toBe('google-drive-exact-sha256-to-private-gcs');
+    expect(controlPlane?.stateTransport).toBe('cloud-sql-idempotency-audit');
+
+    expect(controlPlane?.gcpInstagramPublishNowTransport).toMatchObject({
+      lifecycleStatus: 'LIMITED',
+      publicationExecutionAuthorized: true,
+      publicationSchedulerAuthorized: false,
+      providerPublicationWriteAuthorized: true,
+      approvalTransport: 'protected-main-command',
+      commandFile: 'control/marketing-publish-now-command.json',
+      writeAuthority: 'EXPLICIT_APPROVAL_EXACT_ASSET_ONLY',
+      databaseSecretVersion: '1',
+    });
+    expect(controlPlane?.gcpInstagramPublishNowTransport?.requiredControls).toMatchObject({
+      protectedMain: true,
+      freshCommand: true,
+      explicitApproval: true,
+      exactAssetSha256: true,
+      creativeTruth: true,
+      rightsClearance: true,
+      idempotency: true,
+      writeDisableAfterAttempt: true,
+      providerReadback: true,
+      immutableEvidence: true,
+    });
+
+    expect(controlPlane?.githubNativeInstagramPublicationTransport).toMatchObject({
+      lifecycleStatus: 'SHADOW_READ_ONLY',
+      providerPublicationWriteAuthorized: false,
+      repositoryDispatchWriteAuthorized: false,
+      scheduleShadowAuthorized: true,
+      canonicalForPublication: false,
+    });
 
     expect(controlPlane?.legacyGcpInstagramPublicationTransport).toMatchObject({
       lifecycleStatus: 'RETIRED',
@@ -94,7 +144,7 @@ describe('legacy GCP Instagram publication runtime retirement', () => {
       publicationSchedulerAuthorized: false,
       providerPublicationWriteAuthorized: false,
       physicalEngagementRuntimeMayRemain: true,
-      replacedBy: 'github-native-instagram-publication',
+      currentCanonicalReplacement: 'gcp-instagram-publish-now',
     });
 
     expect(policy.activeRuntime?.tocaManagedInstagramScheduler).toMatchObject({
