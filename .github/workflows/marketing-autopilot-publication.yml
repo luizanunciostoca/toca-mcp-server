@@ -80,7 +80,8 @@ jobs:
             .rollout.blindRetryAuthorized == false and
             .rollout.automaticFallbackAuthorized == false
           ' "$POLICY_PATH" >/dev/null
-          ! grep -Fq 'META_ACCESS_TOKEN' .github/workflows/marketing-autopilot-publication.yml
+          forbidden_meta_token_name='META_''ACCESS_TOKEN'
+          ! grep -Fq "$forbidden_meta_token_name" .github/workflows/marketing-autopilot-publication.yml
           ! grep -Fq 'INSTAGRAM_PUBLICATION_WRITES_ENABLED=true' .github/workflows/marketing-autopilot-publication.yml
           ! grep -Fq 'gcloud run jobs' .github/workflows/marketing-autopilot-publication.yml
           echo 'MARKETING_AUTOPILOT_SINGLE_WRITER_BOUNDARY=PASS'
