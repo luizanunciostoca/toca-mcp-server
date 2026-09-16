@@ -72,12 +72,16 @@ export async function resolveGroupedKnowledge(input: {
     .filter((match): match is InstagramEngagementKnowledgeMatch => match?.factsVerified === true);
   const unique = uniqueMatches(verified);
   const safeCount = resolved.filter((item) => !item.unsafe).length;
-  const resolvedSegmentCount = resolved.filter((item) => item.knowledge?.factsVerified === true).length;
+  const resolvedSegmentCount = resolved.filter(
+    (item) => item.knowledge?.factsVerified === true,
+  ).length;
   const hasUnresolvedSafeSegment = resolvedSegmentCount < safeCount;
 
   return {
     classification,
-    knowledge: hasUnsafe ? null : composeKnowledge(unique, hasUnresolvedSafeSegment, classification.intent),
+    knowledge: hasUnsafe
+      ? null
+      : composeKnowledge(unique, hasUnresolvedSafeSegment, classification.intent),
     segmentCount: segments.length,
     resolvedSegmentCount,
     autoReplySafe: !hasUnsafe && unique.length > 0,
@@ -85,7 +89,10 @@ export async function resolveGroupedKnowledge(input: {
   };
 }
 
-export function splitMessageSegments(groupedText: string, messageCount: number): readonly string[] {
+export function splitMessageSegments(
+  groupedText: string,
+  messageCount: number,
+): readonly string[] {
   const normalized = groupedText.trim();
   if (!normalized) return [];
 
