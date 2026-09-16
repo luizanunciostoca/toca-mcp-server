@@ -149,6 +149,11 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
   // retain the core classifier's stricter route.
   if (NON_AUTONOMOUS_CORE_INTENTS.has(base.intent)) return base;
 
+  // Natural "open today" wording is only a rescue for otherwise generic hours
+  // questions. If the core classifier already found gastronomy, preserve it so
+  // phrases such as "Tem comida aberta hoje?" cannot be widened to venue hours.
+  if (base.topic === 'GASTRONOMY' && isTodayOperatingHoursQuestion(normalized)) return base;
+
   const route = canonicalRoute(normalized);
   if (!route) return base;
 
