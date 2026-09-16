@@ -127,9 +127,9 @@ describe('Instagram FAQ expansion knowledge recovery', () => {
     authorizedMutationMappings.forEach((mapping, index) => {
       const id = index + 1;
       expect(countMutationConflicts([mutationRun(id, mapping.path, mapping.title)])).toBe(1);
-      expect(countMutationConflicts([mutationRun(id, mapping.path, mapping.title, 'outsider')])).toBe(
-        0,
-      );
+      expect(
+        countMutationConflicts([mutationRun(id, mapping.path, mapping.title, 'outsider')]),
+      ).toBe(0);
     });
 
     const recoveryTitle = authorizedMutationMappings[5].title;
