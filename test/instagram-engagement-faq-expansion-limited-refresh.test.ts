@@ -5,10 +5,7 @@ const workflow = readFileSync(
   '.github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml',
   'utf8',
 );
-const verifier = readFileSync(
-  'src/ops/verify-instagram-faq-expansion-production.ts',
-  'utf8',
-);
+const verifier = readFileSync('src/ops/verify-instagram-faq-expansion-production.ts', 'utf8');
 
 describe('Instagram FAQ expansion LIMITED refresh', () => {
   it('keeps the production authorization narrow', () => {
