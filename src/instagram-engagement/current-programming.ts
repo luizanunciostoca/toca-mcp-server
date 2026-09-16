@@ -38,8 +38,8 @@ export function resolveCurrentProgrammingKnowledge(
   const matchesProgramming = TODAY_PROGRAMMING_PATTERNS.some((pattern) =>
     normalized.includes(pattern),
   );
-  const matchesExactAlias = EXACT_TODAY_PROGRAMMING_PATTERNS.includes(
-    normalized as (typeof EXACT_TODAY_PROGRAMMING_PATTERNS)[number],
+  const matchesExactAlias = EXACT_TODAY_PROGRAMMING_PATTERNS.some(
+    (pattern) => normalized === pattern,
   );
   if (!matchesProgramming && !matchesExactAlias) return null;
 
