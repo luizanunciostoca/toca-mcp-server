@@ -15,7 +15,7 @@ const runtime = readFileSync(
 
 describe('GitHub-native Instagram publication boundary', () => {
   it('schedules outside the top-of-hour hotspot in America/Bahia', () => {
-    expect(publisher).toContain("cron: '2/5 * * * *'");
+    expect(publisher).toContain("cron: '4/5 * * * *'");
     expect(publisher).toContain("timezone: 'America/Bahia'");
   });
 
