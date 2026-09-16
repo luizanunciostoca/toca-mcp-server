@@ -44,6 +44,17 @@ describe('Instagram grounded multi-intent knowledge', () => {
     },
   );
 
+  it.each([
+    ['O que tem hoje para comer?', 'FAQ_OPERATIONAL', 'GASTRONOMY'],
+    ['O que tem hoje para beber?', 'FAQ_OPERATIONAL', 'GASTRONOMY'],
+    ['Hoje tem o que para comer?', 'FAQ_OPERATIONAL', 'GASTRONOMY'],
+  ])('does not widen gastronomy question "%s" into EVENT_INFO', (text, expectedIntent, expectedTopic) => {
+    const classification = classifySocialEngagement(text);
+
+    expect(classification.intent).toBe(expectedIntent);
+    expect(classification.topic).toBe(expectedTopic);
+  });
+
   it('resolves a generic today alias through the grounded programming source', async () => {
     const delegateResolve = vi.fn().mockResolvedValue(null);
     const source = new MultiIntentInstagramEngagementKnowledgeSource(
