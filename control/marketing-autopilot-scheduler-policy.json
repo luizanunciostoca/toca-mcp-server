@@ -47,9 +47,7 @@
   },
   "rollout": {
     "phase": "CANARY",
-    "allowedContentItemIds": [
-      "MKT-20260917-SUNSET-FEED-0900"
-    ],
+    "allowedContentItemIds": ["MKT-20260917-SUNSET-FEED-0900"],
     "promoteOnlyAfterVerifiedOperations": 3,
     "blindRetryAuthorized": false,
     "automaticFallbackAuthorized": false

@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 
 const MODE = process.argv[2] ?? 'scan';
 const POLICY_PATH =
-  process.env.MARKETING_AUTOPILOT_POLICY_PATH ?? 'control/marketing-autopilot-scheduler-policy.json';
+  process.env.MARKETING_AUTOPILOT_POLICY_PATH ??
+  'control/marketing-autopilot-scheduler-policy.json';
 const policy = JSON.parse(readFileSync(POLICY_PATH, 'utf8'));
 const now = parseNow(process.env.MARKETING_AUTOPILOT_NOW);
 
@@ -128,7 +129,10 @@ function validateBoundItem(item, contentItemId) {
   );
 
   const required = policy.requiredEligibility;
-  assert(text(item.status) === required.status, `AUTOPILOT_STATUS_NOT_ELIGIBLE:${text(item.status)}`);
+  assert(
+    text(item.status) === required.status,
+    `AUTOPILOT_STATUS_NOT_ELIGIBLE:${text(item.status)}`,
+  );
   assert(
     text(item.approval_status) === required.approvalStatus,
     `AUTOPILOT_APPROVAL_NOT_APPROVED:${text(item.approval_status)}`,
@@ -218,13 +222,14 @@ function buildCommand(validated, targetCodeSha) {
   const { item, binding, scheduledAt, scheduledAtMs } = validated;
   const contentItemId = text(item.content_item_id);
   const issuedAt = formatBahia(now);
-  const expiresAt = formatBahia(
-    new Date(scheduledAtMs + policy.schedule.lateWindowSeconds * 1000),
-  );
+  const expiresAt = formatBahia(new Date(scheduledAtMs + policy.schedule.lateWindowSeconds * 1000));
   const timestampKey = issuedAt.replace(/[-:T]/g, '').replace('-0300', '').replace('-03:00', '');
   const idempotencyKey = `GCP-AUTOPILOT-${contentItemId}-${binding.outputSha256.slice(0, 12)}-${binding.idempotencyVersion}`;
 
-  assert(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(idempotencyKey), 'AUTOPILOT_IDEMPOTENCY_KEY_INVALID');
+  assert(
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(idempotencyKey),
+    'AUTOPILOT_IDEMPOTENCY_KEY_INVALID',
+  );
 
   return {
     schemaVersion: 1,
@@ -282,16 +287,34 @@ function verifyCommand(command, validated) {
   assert(command.caption === binding.approvedCaption, 'AUTOPILOT_COMMAND_CAPTION_MISMATCH');
   assert(command.correlationId === binding.correlationId, 'AUTOPILOT_COMMAND_CORRELATION_MISMATCH');
   assert(command.idempotencyKey === expectedIdempotency, 'AUTOPILOT_COMMAND_IDEMPOTENCY_MISMATCH');
-  assert(command.instagramAccountId === policy.instagramAccountId, 'AUTOPILOT_COMMAND_ACCOUNT_MISMATCH');
+  assert(
+    command.instagramAccountId === policy.instagramAccountId,
+    'AUTOPILOT_COMMAND_ACCOUNT_MISMATCH',
+  );
   assert(command.targetCodeSha === targetCodeSha, 'AUTOPILOT_COMMAND_TARGET_CODE_SHA_MISMATCH');
-  assert(deepEqual(command.creativeTruthBinding, binding.creativeTruthBinding), 'AUTOPILOT_COMMAND_CREATIVE_TRUTH_MISMATCH');
-  assert(deepEqual(command.brandDeterminism, binding.brandDeterminism), 'AUTOPILOT_COMMAND_BRAND_MISMATCH');
-  assert(deepEqual(command.rightsClearance, binding.rightsClearance), 'AUTOPILOT_COMMAND_RIGHTS_MISMATCH');
+  assert(
+    deepEqual(command.creativeTruthBinding, binding.creativeTruthBinding),
+    'AUTOPILOT_COMMAND_CREATIVE_TRUTH_MISMATCH',
+  );
+  assert(
+    deepEqual(command.brandDeterminism, binding.brandDeterminism),
+    'AUTOPILOT_COMMAND_BRAND_MISMATCH',
+  );
+  assert(
+    deepEqual(command.rightsClearance, binding.rightsClearance),
+    'AUTOPILOT_COMMAND_RIGHTS_MISMATCH',
+  );
   assert(command.approvalMode === 'EXPLICIT_APPROVAL', 'AUTOPILOT_COMMAND_APPROVAL_MODE_INVALID');
   assert(command.approvalStatus === 'APPROVED', 'AUTOPILOT_COMMAND_APPROVAL_STATUS_INVALID');
   assert(command.publicationIntent === 'SHARE_NOW', 'AUTOPILOT_COMMAND_PUBLICATION_INTENT_INVALID');
-  assert(command.schedulerBinding?.source === 'MARKETING_AUTOPILOT_GCP', 'AUTOPILOT_SCHEDULER_BINDING_SOURCE_INVALID');
-  assert(command.schedulerBinding?.policyId === policy.policyId, 'AUTOPILOT_SCHEDULER_POLICY_BINDING_MISMATCH');
+  assert(
+    command.schedulerBinding?.source === 'MARKETING_AUTOPILOT_GCP',
+    'AUTOPILOT_SCHEDULER_BINDING_SOURCE_INVALID',
+  );
+  assert(
+    command.schedulerBinding?.policyId === policy.policyId,
+    'AUTOPILOT_SCHEDULER_POLICY_BINDING_MISMATCH',
+  );
   assert(command.schedulerBinding?.notBefore === scheduledAt, 'AUTOPILOT_NOT_BEFORE_MISMATCH');
   assert(
     Date.parse(command.schedulerBinding?.expiresAt ?? '') ===
@@ -325,7 +348,9 @@ async function loadRegistryRows() {
   const values = Array.isArray(payload.values) ? payload.values : [];
   assert(values.length >= 1, 'AUTOPILOT_REGISTRY_EMPTY');
   const headers = values[0].map((value) => text(value));
-  return values.slice(1).map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ''])));
+  return values
+    .slice(1)
+    .map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ''])));
 }
 
 function canonicalScheduledAt(value) {

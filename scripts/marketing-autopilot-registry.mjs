@@ -3,7 +3,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 const MODE = process.argv[2] ?? '';
 const POLICY_PATH =
-  process.env.MARKETING_AUTOPILOT_POLICY_PATH ?? 'control/marketing-autopilot-scheduler-policy.json';
+  process.env.MARKETING_AUTOPILOT_POLICY_PATH ??
+  'control/marketing-autopilot-scheduler-policy.json';
 const policy = JSON.parse(readFileSync(POLICY_PATH, 'utf8'));
 const token = process.env.GOOGLE_ACCESS_TOKEN?.trim() ?? '';
 const contentItemId = process.env.MARKETING_AUTOPILOT_CONTENT_ITEM_ID?.trim() ?? '';
@@ -53,7 +54,9 @@ async function recordPrecheck() {
 
 async function reconcilePublication() {
   const command = JSON.parse(readFileSync('control/marketing-publish-now-command.json', 'utf8'));
-  const publication = JSON.parse(readFileSync(requiredPath('MARKETING_AUTOPILOT_PUBLICATION_EVIDENCE'), 'utf8'));
+  const publication = JSON.parse(
+    readFileSync(requiredPath('MARKETING_AUTOPILOT_PUBLICATION_EVIDENCE'), 'utf8'),
+  );
   const reconciliation = JSON.parse(
     readFileSync(requiredPath('MARKETING_AUTOPILOT_RECONCILIATION_EVIDENCE'), 'utf8'),
   );
@@ -69,11 +72,26 @@ async function reconcilePublication() {
   );
   assert(reconciliation.providerReadbackAttempted === true, 'AUTOPILOT_PROVIDER_READBACK_REQUIRED');
   assert(reconciliation.readbackExitCode === 0, 'AUTOPILOT_PROVIDER_READBACK_FAILED');
-  assert(reconciliation.writeCapabilityDisabledAfterAttempt === true, 'AUTOPILOT_WRITE_DISABLE_REQUIRED');
-  assert(reconciliation.finalWriteCapabilityDisabled === true, 'AUTOPILOT_FINAL_WRITE_DISABLE_REQUIRED');
-  assert(reconciliation.finalDisableVerificationExitCode === 0, 'AUTOPILOT_FINAL_WRITE_DISABLE_FAILED');
-  assert(publication.correlationId === command.correlationId, 'AUTOPILOT_PROVIDER_CORRELATION_MISMATCH');
-  assert(publication.idempotencyKey === command.idempotencyKey, 'AUTOPILOT_PROVIDER_IDEMPOTENCY_MISMATCH');
+  assert(
+    reconciliation.writeCapabilityDisabledAfterAttempt === true,
+    'AUTOPILOT_WRITE_DISABLE_REQUIRED',
+  );
+  assert(
+    reconciliation.finalWriteCapabilityDisabled === true,
+    'AUTOPILOT_FINAL_WRITE_DISABLE_REQUIRED',
+  );
+  assert(
+    reconciliation.finalDisableVerificationExitCode === 0,
+    'AUTOPILOT_FINAL_WRITE_DISABLE_FAILED',
+  );
+  assert(
+    publication.correlationId === command.correlationId,
+    'AUTOPILOT_PROVIDER_CORRELATION_MISMATCH',
+  );
+  assert(
+    publication.idempotencyKey === command.idempotencyKey,
+    'AUTOPILOT_PROVIDER_IDEMPOTENCY_MISMATCH',
+  );
 
   const sheet = await readContentSheet();
   const row = findRow(sheet, contentItemId);
@@ -143,12 +161,18 @@ async function reconcilePublication() {
   const readbackSheet = await readContentSheet();
   const readback = findRow(readbackSheet, contentItemId).object;
   assert(text(readback.status) === 'PUBLISHED', 'AUTOPILOT_REGISTRY_STATUS_READBACK_FAILED');
-  assert(text(readback.publication_id) === providerId, 'AUTOPILOT_REGISTRY_PUBLICATION_ID_READBACK_FAILED');
+  assert(
+    text(readback.publication_id) === providerId,
+    'AUTOPILOT_REGISTRY_PUBLICATION_ID_READBACK_FAILED',
+  );
   assert(
     text(readback.provider_external_id) === providerId,
     'AUTOPILOT_REGISTRY_PROVIDER_ID_READBACK_FAILED',
   );
-  assert(text(readback.provider_status) === 'PUBLISHED', 'AUTOPILOT_REGISTRY_PROVIDER_STATUS_READBACK_FAILED');
+  assert(
+    text(readback.provider_status) === 'PUBLISHED',
+    'AUTOPILOT_REGISTRY_PROVIDER_STATUS_READBACK_FAILED',
+  );
 
   writeEvidence({
     status: 'PUBLISHED_RECONCILED',
@@ -174,7 +198,9 @@ async function readContentSheet() {
     headers,
     rows: values.slice(1).map((valuesRow, index) => ({
       rowNumber: index + 2,
-      object: Object.fromEntries(headers.map((header, column) => [header, valuesRow[column] ?? ''])),
+      object: Object.fromEntries(
+        headers.map((header, column) => [header, valuesRow[column] ?? '']),
+      ),
     })),
   };
 }
