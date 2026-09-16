@@ -132,6 +132,7 @@ strong_preflight = r'''provider_duplicate_preflight() {
 }
 
 '''
+strong_preflight = strong_preflight.replace('\\"', '"')
 instrumented = '''echo "P1_PHASE=VALIDATE_COMMAND" >&2
 validate_command
 echo "P1_PHASE=AUTHENTICATE_DOCKER" >&2
@@ -168,6 +169,7 @@ grep -Fq 'P1_PHASE=VALIDATE_COMMAND' "$PATCHED"
 grep -Fq 'P1_PHASE=PROVIDER_DUPLICATE_PREFLIGHT' "$PATCHED"
 grep -Fq 'P1_SCHEDULER_APPROVED_COPY_EXACT=PASS' "$PATCHED"
 grep -Fq 'PREVIEW_QA_PASSED' "$PATCHED"
+grep -Fq 'dist/src/instagram-provider-duplicate-preflight.js' "$PATCHED"
 echo "P1_HARDENED_SOURCE=PASS" >&2
 
 if [ "${PUBLISH_NOW_PATCH_ONLY:-false}" = "true" ]; then
