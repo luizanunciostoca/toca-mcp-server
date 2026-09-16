@@ -4,7 +4,8 @@ run-name: Marketing Autopilot — ${{ github.event_name }} — ${{ github.run_id
 
 on:
   schedule:
-    - cron: '3/5 * * * *'
+    - cron: '*/5 * * * *'
+      timezone: 'America/Bahia'
   workflow_dispatch:
   push:
     branches:
@@ -143,7 +144,6 @@ jobs:
           test "$WAIT_SECONDS" -ge 0
           test "$WAIT_SECONDS" -le 300
           if [ "$WAIT_SECONDS" -gt 0 ]; then
-            echo "MARKETING_AUTOPILOT_WAITING_UNTIL_DUE_SECONDS=$WAIT_SECONDS"
             sleep "$WAIT_SECONDS"
           fi
 
@@ -179,18 +179,15 @@ jobs:
           baseline_content_item="$(jq -r '.rollout.providerReconciliationBaseline.contentItemId' "$POLICY_PATH")"
           if [ "$baseline_content_item" = "$CONTENT_ITEM_ID" ]; then
             gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${baseline_run_id}" > /tmp/baseline-run.json
-            jq -e \
-              --arg completed "$baseline_completed_at" '
-                .name == "Instagram GCP Publication Recovery Preflight" and
-                .status == "completed" and
-                .conclusion == "success" and
-                .updated_at == $completed
-              ' /tmp/baseline-run.json >/dev/null
-            echo "MARKETING_AUTOPILOT_PROVIDER_BASELINE=VERIFIED run_id=$baseline_run_id"
+            jq -e --arg completed "$baseline_completed_at" '
+              .name == "Instagram GCP Publication Recovery Preflight" and
+              .status == "completed" and
+              .conclusion == "success" and
+              .updated_at == $completed
+            ' /tmp/baseline-run.json >/dev/null
           else
             baseline_completed_at='1970-01-01T00:00:00Z'
             baseline_run_id='NONE'
-            echo 'MARKETING_AUTOPILOT_PROVIDER_BASELINE=NOT_APPLICABLE_STRICT_HISTORY_SCAN'
           fi
 
           gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${CANONICAL_WRITER_WORKFLOW}/runs?per_page=100" > /tmp/writer-runs.json
@@ -207,8 +204,7 @@ jobs:
             elif [ "$event" = push ]; then
               head_sha="$(jq -r .head_sha <<<"$run")"
               set +e
-              command_json="$(gh api "repos/${GITHUB_REPOSITORY}/contents/control/marketing-publish-now-command.json?ref=${head_sha}" \
-                --jq .content 2>/dev/null | tr -d '\n' | base64 --decode 2>/dev/null)"
+              command_json="$(gh api "repos/${GITHUB_REPOSITORY}/contents/control/marketing-publish-now-command.json?ref=${head_sha}" --jq .content 2>/dev/null | tr -d '\n' | base64 --decode 2>/dev/null)"
               command_rc=$?
               set -e
               if [ "$command_rc" -ne 0 ] || [ -z "$command_json" ]; then
@@ -232,25 +228,21 @@ jobs:
             exit 0
           fi
 
-          post_baseline="$(jq -s --arg baseline "$baseline_completed_at" '[.[] | select(.created_at > $baseline)] | sort_by(.created_at) | last // empty' /tmp/matching-attempts.jsonl)"
-          if [ -z "$post_baseline" ] || [ "$post_baseline" = null ]; then
+          latest="$(jq -s --arg baseline "$baseline_completed_at" '[.[] | select(.created_at > $baseline)] | sort_by(.created_at) | last // empty' /tmp/matching-attempts.jsonl)"
+          if [ -z "$latest" ] || [ "$latest" = null ]; then
             echo 'state=NONE' >> "$GITHUB_OUTPUT"
-            echo "MARKETING_AUTOPILOT_HISTORICAL_ATTEMPTS_RECONCILED_BY_BASELINE=$baseline_run_id"
             exit 0
           fi
 
-          status="$(jq -r .status <<<"$post_baseline")"
-          conclusion="$(jq -r '.conclusion // ""' <<<"$post_baseline")"
-          run_id="$(jq -r .id <<<"$post_baseline")"
-          echo "existing_run_id=$run_id" >> "$GITHUB_OUTPUT"
+          status="$(jq -r .status <<<"$latest")"
+          conclusion="$(jq -r '.conclusion // ""' <<<"$latest")"
+          run_id="$(jq -r .id <<<"$latest")"
           if [ "$status" != completed ]; then
             echo 'state=IN_FLIGHT' >> "$GITHUB_OUTPUT"
-            echo "MARKETING_AUTOPILOT_EXISTING_ATTEMPT_IN_FLIGHT=$run_id"
             exit 0
           fi
           if [ "$conclusion" = success ]; then
             echo 'state=COMPLETED' >> "$GITHUB_OUTPUT"
-            echo "MARKETING_AUTOPILOT_EXISTING_ATTEMPT_COMPLETED=$run_id"
             exit 0
           fi
           echo 'state=RECONCILIATION_REQUIRED' >> "$GITHUB_OUTPUT"
@@ -314,8 +306,7 @@ jobs:
           expected_title="Marketing Publish Now — ${CONTENT_ITEM_ID}"
           found=''
           for _ in $(seq 1 12); do
-            found="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${CANONICAL_WRITER_WORKFLOW}/runs?event=workflow_dispatch&per_page=20" \
-              | jq -r --arg title "$expected_title" '[.workflow_runs[] | select(.display_title == $title)] | sort_by(.created_at) | last | .id // empty')"
+            found="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${CANONICAL_WRITER_WORKFLOW}/runs?event=workflow_dispatch&per_page=20" | jq -r --arg title "$expected_title" '[.workflow_runs[] | select(.display_title == $title)] | sort_by(.created_at) | last | .id // empty')"
             [ -n "$found" ] && break
             sleep 5
           done
@@ -330,7 +321,6 @@ jobs:
           path: |
             marketing-autopilot-scheduler-decision.json
             marketing-autopilot-due-revalidation.json
-            marketing-autopilot-registry-reconciliation.json
             marketing-autopilot-writer-authorization.json
           if-no-files-found: warn
           retention-days: 90
