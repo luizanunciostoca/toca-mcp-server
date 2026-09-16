@@ -5,6 +5,7 @@ import { EnvSecretResolver } from '../core/secrets.js';
 import { SocialEngagementLeadEngine } from '../crm/social-engagement-lead-engine.js';
 import { PostgresTransactionalOutbox } from '../events/postgres-transactional-outbox.js';
 import { PostgresCrmCoreStore } from '../persistence/postgres-crm-core-store.js';
+import { PostgresCrmSalesStore } from '../persistence/postgres-crm-sales-store.js';
 import { PostgresEventRecordStore } from '../persistence/postgres-event-record-store.js';
 import { GoogleSheetsRestClient } from '../providers/google-sheets/client.js';
 import type { InstagramEngagementProvider } from '../providers/instagram/instagram-engagement-contracts.js';
@@ -22,6 +23,7 @@ import {
 import { PostgresInstagramEngagementKnowledgeBaseSource } from './postgres-knowledge-base.js';
 import { PostgresInstagramEngagementKnowledgeSource } from './postgres-knowledge.js';
 import { InstagramEngagementProcessor } from './processor.js';
+import { InstagramSalesFunnelCoordinator } from './sales-funnel-coordinator.js';
 import { TieredInstagramEngagementKnowledgeSource } from './tiered-knowledge.js';
 import {
   claimInstagramEngagementEvents,
@@ -88,6 +90,7 @@ export function createInstagramEngagementBatchRuntime(
   );
 
   const crm = new PostgresCrmCoreStore(options.pool, { outbox });
+  const sales = new PostgresCrmSalesStore(options.pool, { outbox });
   const events = new PostgresEventRecordStore(options.pool, { outbox });
   const leadEngine = new SocialEngagementLeadEngine({
     crm,
@@ -97,6 +100,9 @@ export function createInstagramEngagementBatchRuntime(
       theParty: env.INSTAGRAM_ENGAGEMENT_THE_PARTY_SERIES_KEY?.trim() || 'the-party',
     },
   });
+  const salesFunnel = isTrue(env.INSTAGRAM_SALES_FUNNEL_ENABLED)
+    ? new InstagramSalesFunnelCoordinator({ sales })
+    : undefined;
 
   const provider: InstagramEngagementProvider = config.INSTAGRAM_ENGAGEMENT_WRITES_ENABLED
     ? createLiveProvider(config, env)
@@ -105,6 +111,7 @@ export function createInstagramEngagementBatchRuntime(
     pool: options.pool,
     knowledge: knowledgeRuntime.source,
     leadEngine,
+    ...(salesFunnel ? { salesFunnel } : {}),
     provider,
     pageId,
     instagramUserId,
