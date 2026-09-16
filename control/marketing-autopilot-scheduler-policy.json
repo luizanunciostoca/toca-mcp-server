@@ -13,7 +13,8 @@
     "metaCredentialAccessAuthorized": false,
     "directCloudRunPublicationAuthorized": false,
     "canonicalWriterDispatchAuthorized": true,
-    "requireScheduledRunProvenance": true
+    "requireScheduledRunProvenance": true,
+    "manualAutopilotAuthorized": false
   },
   "canonicalWriter": {
     "transport": "gcp-instagram-publish-now",
@@ -50,7 +51,20 @@
     "allowedContentItemIds": ["MKT-20260917-SUNSET-FEED-0900"],
     "promoteOnlyAfterVerifiedOperations": 3,
     "blindRetryAuthorized": false,
-    "automaticFallbackAuthorized": false
+    "automaticFallbackAuthorized": false,
+    "providerReconciliationBaseline": {
+      "contentItemId": "MKT-20260917-SUNSET-FEED-0900",
+      "runId": "35069055672",
+      "workflow": "Instagram GCP Publication Recovery Preflight",
+      "headSha": "13abc0edc3e2ced48c49f23c95c018923ae039f4",
+      "completedAt": "2026-09-16T07:34:36Z",
+      "conclusion": "success",
+      "marker": "GCP_PUBLICATION_PROVIDER_READ_PREFLIGHT=VERIFIED",
+      "artifactName": "instagram-gcp-provider-read-35069055672",
+      "artifactId": "10435497245",
+      "artifactDigest": "sha256:024897453af53a81b396c6196db49372e0f3678128da57e64975a62e66d3fdee",
+      "meaning": "Provider-read evidence reconciles publication attempts created before completion of this baseline for this exact canary. Attempts created after the baseline remain strict no-retry boundaries."
+    }
   },
   "bindings": {
     "MKT-20260917-SUNSET-FEED-0900": {
