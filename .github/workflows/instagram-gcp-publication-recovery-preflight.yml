@@ -142,20 +142,12 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Reconcile only fixed allowlisted APIs and IAM bindings
+      - name: Reconcile only fixed allowlisted IAM bindings
         shell: bash
         run: |
           set -euo pipefail
-          approved_apis=(
-            artifactregistry.googleapis.com
-            run.googleapis.com
-            secretmanager.googleapis.com
-            iamcredentials.googleapis.com
-            sqladmin.googleapis.com
-            logging.googleapis.com
-          )
-          gcloud services enable "${approved_apis[@]}" --project "$GCP_PROJECT_ID" --quiet
-
+          # API enablement is an external production bootstrap precondition.
+          # This recovery workflow never grants itself Service Usage authority.
           runtime_member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}"
           deploy_member="serviceAccount:${GCP_DEPLOY_SERVICE_ACCOUNT}"
 
@@ -212,11 +204,6 @@ jobs:
           runtime_member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}"
           deploy_member="serviceAccount:${GCP_DEPLOY_SERVICE_ACCOUNT}"
 
-          for api in artifactregistry.googleapis.com run.googleapis.com secretmanager.googleapis.com iamcredentials.googleapis.com sqladmin.googleapis.com logging.googleapis.com; do
-            state="$(gcloud services list --enabled --project "$GCP_PROJECT_ID" --filter="config.name=${api}" --format='value(config.name)')"
-            test "$state" = "$api"
-          done
-
           for secret in "$TOKEN_SECRET_ID" "$APP_SECRET_ID" "$DATABASE_SECRET_ID"; do
             secret_policy="$(gcloud secrets get-iam-policy "$secret" --project "$GCP_PROJECT_ID" --format=json)"
             jq -e --arg member "$runtime_member" 'any(.bindings[]?; .role == "roles/secretmanager.secretAccessor" and any(.members[]?; . == $member))' <<<"$secret_policy" >/dev/null
@@ -259,7 +246,7 @@ jobs:
             --arg region "$GCP_REGION" \
             --arg runtime "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --arg deploy "$GCP_DEPLOY_SERVICE_ACCOUNT" \
-            '{schemaVersion:1,sourceSha:$sourceSha,projectId:$project,region:$region,runtimeServiceAccount:$runtime,deployServiceAccount:$deploy,requiredApisEnabled:true,secretBindingsVerified:true,runtimeImpersonationBindingVerified:true,cloudRunDeployBindingVerified:true,artifactRegistryBindingVerified:true,cloudSqlBindingVerified:true,assetBucketBindingsVerified:true,broadRuntimeProjectAccess:false,ownerEditorProjectAccess:false,publicBucketAccess:false,result:"PASS"}' \
+            '{schemaVersion:1,sourceSha:$sourceSha,projectId:$project,region:$region,runtimeServiceAccount:$runtime,deployServiceAccount:$deploy,requiredApisExternalBootstrap:true,secretBindingsVerified:true,runtimeImpersonationBindingVerified:true,cloudRunDeployBindingVerified:true,artifactRegistryBindingVerified:true,cloudSqlBindingVerified:true,assetBucketBindingsVerified:true,broadRuntimeProjectAccess:false,ownerEditorProjectAccess:false,publicBucketAccess:false,result:"PASS"}' \
             > gcp-recovery-evidence/iam-repair.json
           echo 'GCP_PUBLICATION_IAM_REPAIR=VERIFIED'
 

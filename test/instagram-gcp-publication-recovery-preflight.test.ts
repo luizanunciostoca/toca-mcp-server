@@ -103,7 +103,9 @@ describe('Instagram GCP publication recovery preflight', () => {
     expect(policy.forbidden.projectSecretAccessor).toBe(true);
     expect(policy.forbidden.serviceAccountKeys).toBe(true);
     expect(policy.forbidden.billingMutation).toBe(true);
-    expect(workflow).toContain('approved_apis=(');
+    expect(workflow).not.toContain('gcloud services enable');
+    expect(workflow).not.toContain('gcloud services list --enabled');
+    expect(workflow).toContain('requiredApisExternalBootstrap:true');
     expect(workflow).toContain('GCP_PUBLICATION_RECOVERY_FORBIDDEN_PROJECT_ROLE');
     expect(workflow).toContain(
       'GCP_PUBLICATION_RECOVERY_FORBIDDEN_RUNTIME_PROJECT_SECRET_ACCESSOR',
