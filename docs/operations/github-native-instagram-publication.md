@@ -21,7 +21,7 @@ The purpose of these restrictions is to maintain exactly one production writer a
 
 ## Preserved implementation
 
-The GitHub-native implementation can still validate queue/state contracts and compare what it *would* publish. Its historical design includes:
+The GitHub-native implementation can still validate queue/state contracts and compare what it _would_ publish. Its historical design includes:
 
 - content-addressed staged assets;
 - Creative Truth SHA binding;

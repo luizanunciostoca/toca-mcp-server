@@ -30,8 +30,8 @@ describe('Marketing Publish Now hardening contract', () => {
     expect(script).toContain('gcloud artifacts docker images describe "$prep_image_tag"');
     expect(script).toContain('APP_IMAGE="${app_image_tag%:*}@${APP_IMAGE_DIGEST}"');
     expect(script).toContain('PREP_IMAGE="${prep_image_tag%:*}@${PREP_IMAGE_DIGEST}"');
-    expect(script).toContain("[[ \"$APP_IMAGE_DIGEST\" =~ ^sha256:[0-9a-f]{64}$ ]]");
-    expect(script).toContain("[[ \"$PREP_IMAGE_DIGEST\" =~ ^sha256:[0-9a-f]{64}$ ]]");
+    expect(script).toContain('[[ "$APP_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]');
+    expect(script).toContain('[[ "$PREP_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]');
     expect(script).toContain('--image "$APP_IMAGE"');
     expect(script).toContain('--image "$PREP_IMAGE"');
   });
@@ -53,7 +53,9 @@ describe('Marketing Publish Now hardening contract', () => {
 
   it('pins both Cloud SQL database secret mounts to the approved version', () => {
     expect(workflow).toContain("DATABASE_SECRET_VERSION: '1'");
-    expect(script.match(/DATABASE_URL=\$DATABASE_SECRET_ID:\$DATABASE_SECRET_VERSION/g)).toHaveLength(2);
+    expect(
+      script.match(/DATABASE_URL=\$DATABASE_SECRET_ID:\$DATABASE_SECRET_VERSION/g),
+    ).toHaveLength(2);
     expect(script).not.toContain('DATABASE_URL=$DATABASE_SECRET_ID:latest');
     expect(wrapper).toContain('expected exactly two pinned database secret references');
     expect(wrapper).toContain('FAIL_CLOSED: unpinned database secret reference present');
@@ -109,7 +111,9 @@ describe('Marketing Publish Now hardening contract', () => {
     expect(script).not.toContain('disable_writes || true');
     expect(script).toContain('disableExitCode:$disableExitCode');
     expect(script).toContain('finalDisableVerificationExitCode:$finalDisableVerificationExitCode');
-    expect(script).toContain('writeCapabilityDisabledAfterAttempt:$writeCapabilityDisabledAfterAttempt');
+    expect(script).toContain(
+      'writeCapabilityDisabledAfterAttempt:$writeCapabilityDisabledAfterAttempt',
+    );
     expect(script).toContain('finalWriteCapabilityDisabled:$finalWriteCapabilityDisabled');
     expect(script).toContain('PUBLISHED_VERIFIED_AFTER_EXECUTE_ERROR');
     expect(script).toContain('RECONCILIATION_REQUIRED');
