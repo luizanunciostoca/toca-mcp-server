@@ -3,14 +3,29 @@ import { classifySocialEngagement } from '../src/crm/social-engagement-classifie
 import { evaluateEngagementPolicy } from '../src/policy/engagement-policy.js';
 
 describe('Instagram conversation operations classification', () => {
-  it('keeps multiple commercial event intentions instead of collapsing the conversation', () => {
-    const result = classifySocialEngagement('Quanto custa o ingresso da The Party e onde compro?');
+  it('keeps multiple explicit commercial event intentions instead of collapsing the conversation', () => {
+    const result = classifySocialEngagement(
+      'Quero comprar ingresso da The Party e saber se tem disponibilidade',
+    );
     expect(result.intent).toBe('COMMERCIAL_LEAD');
     expect(result.conversationIntents).toEqual(
-      expect.arrayContaining(['COMMERCIAL', 'PURCHASE', 'EVENT', 'THE_PARTY', 'INFORMATION']),
+      expect.arrayContaining(['COMMERCIAL', 'PURCHASE', 'EVENT', 'THE_PARTY']),
     );
     expect(result.commercialIntent).toBe('HIGH');
     expect(result.priority).toBe('P1');
+    expect(result.confidence).toBe('HIGH');
+  });
+
+  it('keeps factual ticket information outside commercial handoff', () => {
+    const result = classifySocialEngagement('Quanto custa o ingresso da The Party e onde compro?');
+    expect(result.intent).toBe('TICKET_INFO');
+    expect(result.commercialIntent).toBe('NONE');
+    expect(result.conversationIntents).toEqual(
+      expect.arrayContaining(['EVENT', 'THE_PARTY', 'INFORMATION']),
+    );
+    expect(result.conversationIntents).not.toContain('COMMERCIAL');
+    expect(result.conversationIntents).not.toContain('PURCHASE');
+    expect(result.priority).toBe('P3');
     expect(result.confidence).toBe('HIGH');
   });
 
