@@ -3,6 +3,7 @@ import type {
   InstagramEngagementKnowledgeMatch,
   InstagramEngagementKnowledgeSource,
 } from './knowledge.js';
+import { enforceOfficialTicketInformation } from './ticket-information.js';
 
 export interface TieredInstagramEngagementKnowledgeOptions {
   readonly faq: InstagramEngagementKnowledgeSource;
@@ -17,8 +18,9 @@ export class TieredInstagramEngagementKnowledgeSource implements InstagramEngage
     expectedIntent: EngagementIntent,
   ): Promise<InstagramEngagementKnowledgeMatch | null> {
     const faq = await this.options.faq.resolve(text, expectedIntent);
-    if (faq) return faq;
+    if (faq) return enforceOfficialTicketInformation(faq);
     if (!this.options.knowledgeBase) return null;
-    return this.options.knowledgeBase.resolve(text, expectedIntent);
+    const knowledgeBase = await this.options.knowledgeBase.resolve(text, expectedIntent);
+    return knowledgeBase ? enforceOfficialTicketInformation(knowledgeBase) : null;
   }
 }
