@@ -14,12 +14,21 @@ source = Path(sys.argv[1])
 target = Path(sys.argv[2])
 text = source.read_text(encoding="utf-8")
 
-legacy = '  local extra_json="${2:-{}}"'
-fixed = '  local extra_json="${2:-}"\n  [ -n "$extra_json" ] || extra_json=\'{}\''
-legacy_count = text.count(legacy)
-if legacy_count != 1:
-    raise SystemExit(f"FAIL_CLOSED: expected exactly one legacy evidence JSON expansion, found {legacy_count}")
-text = text.replace(legacy, fixed, 1)
+required = [
+    'local extra_json="${2:-}"',
+    'Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}',
+    'DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION',
+    'APP_IMAGE="${app_image_tag%:*}@${APP_IMAGE_DIGEST}"',
+    'PREP_IMAGE="${prep_image_tag%:*}@${PREP_IMAGE_DIGEST}"',
+    'verify_writes_disabled',
+]
+for marker in required:
+    if marker not in text:
+        raise SystemExit(f"FAIL_CLOSED: hardened source marker missing: {marker}")
+if text.count('DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION') != 2:
+    raise SystemExit("FAIL_CLOSED: expected exactly two pinned database secret references")
+if 'DATABASE_URL=$DATABASE_SECRET_ID:latest' in text:
+    raise SystemExit("FAIL_CLOSED: unpinned database secret reference present")
 
 sequence = '''validate_command
 authenticate_docker
@@ -49,21 +58,23 @@ sequence_count = text.count(sequence)
 if sequence_count != 1:
     raise SystemExit(f"FAIL_CLOSED: expected exactly one canonical execution sequence, found {sequence_count}")
 text = text.replace(sequence, instrumented, 1)
-
 target.write_text(text, encoding="utf-8")
 PY
 
-echo "P1_WRAPPER_PHASE=PATCH_GENERATED" >&2
+echo "P1_WRAPPER_PHASE=SOURCE_VERIFIED" >&2
 chmod 0700 "$PATCHED"
 bash -n "$PATCHED"
-grep -Fq 'local extra_json="${2:-}"' "$PATCHED"
+test "$(grep -Fc 'DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION' "$PATCHED")" -eq 2
+! grep -Fq 'DATABASE_URL=$DATABASE_SECRET_ID:latest' "$PATCHED"
+grep -Fq 'APP_IMAGE="${app_image_tag%:*}@${APP_IMAGE_DIGEST}"' "$PATCHED"
+grep -Fq 'verify_writes_disabled' "$PATCHED"
 grep -Fq 'P1_PHASE=VALIDATE_COMMAND' "$PATCHED"
-echo "P1_COMPAT_PATCH=PASS" >&2
+echo "P1_HARDENED_SOURCE=PASS" >&2
 
 if [ "${PUBLISH_NOW_PATCH_ONLY:-false}" = "true" ]; then
   echo "P1_WRAPPER_PHASE=PATCH_ONLY_COMPLETE" >&2
   exit 0
 fi
 
-echo "P1_WRAPPER_PHASE=EXECUTE_PATCHED_SCRIPT" >&2
+echo "P1_WRAPPER_PHASE=EXECUTE_HARDENED_SCRIPT" >&2
 exec bash "$PATCHED"
