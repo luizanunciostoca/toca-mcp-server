@@ -1,11 +1,27 @@
 name: Marketing Publish Now
 
+run-name: Marketing Publish Now — ${{ inputs.scheduler_content_item_id || github.sha }}
+
 on:
   push:
     branches:
       - main
     paths:
       - control/marketing-publish-now-command.json
+  workflow_dispatch:
+    inputs:
+      scheduler_content_item_id:
+        description: Exact approved Content Registry item selected by Marketing Autopilot.
+        required: true
+        type: string
+      scheduler_scheduled_at:
+        description: Exact America/Bahia scheduled_at value observed by the scheduler.
+        required: true
+        type: string
+      scheduler_source_run_id:
+        description: GitHub Actions scheduler run that authorized this dispatch.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -32,56 +48,112 @@ env:
   INSTAGRAM_ACCOUNT_ID: '17841402033495654'
   REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   REQUIRED_CTA: 'Ingressos limitados! garanta o seu pelo link na bio.'
+  MARKETING_AUTOPILOT_POLICY_PATH: control/marketing-autopilot-scheduler-policy.json
 
 jobs:
   publish-now:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Read and classify publish-now command
-        id: command
+      - name: Classify publish-now invocation
+        id: invocation
         shell: bash
+        env:
+          SCHEDULER_CONTENT_ITEM_ID: ${{ inputs.scheduler_content_item_id }}
+          SCHEDULER_SCHEDULED_AT: ${{ inputs.scheduler_scheduled_at }}
+          SCHEDULER_SOURCE_RUN_ID: ${{ inputs.scheduler_source_run_id }}
         run: |
           set -euo pipefail
           COMMAND=control/marketing-publish-now-command.json
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            test -n "$SCHEDULER_CONTENT_ITEM_ID"
+            test -n "$SCHEDULER_SCHEDULED_AT"
+            test -n "$SCHEDULER_SOURCE_RUN_ID"
+            jq -e '.schemaVersion == 1 and .action == "NOOP"' "$COMMAND" >/dev/null
+            test "$GITHUB_REF" = "refs/heads/main"
+            echo 'action=PUBLISH_NOW' >> "$GITHUB_OUTPUT"
+            echo 'source=MARKETING_AUTOPILOT' >> "$GITHUB_OUTPUT"
+            echo "content_item_id=$SCHEDULER_CONTENT_ITEM_ID" >> "$GITHUB_OUTPUT"
+            echo "target_code_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            echo 'PUBLISH_NOW_DURABLE_COMMAND=NOOP'
+            exit 0
+          fi
+
           jq -e '.schemaVersion == 1 and (.action | IN("NOOP", "PUBLISH_NOW"))' "$COMMAND" >/dev/null
-          echo "action=$(jq -r .action "$COMMAND")" >> "$GITHUB_OUTPUT"
-          if [ "$(jq -r .action "$COMMAND")" = "PUBLISH_NOW" ]; then
+          action="$(jq -r .action "$COMMAND")"
+          echo "action=$action" >> "$GITHUB_OUTPUT"
+          echo 'source=PROTECTED_COMMAND_FILE' >> "$GITHUB_OUTPUT"
+          if [ "$action" = PUBLISH_NOW ]; then
             jq -e '.targetCodeSha | test("^[a-f0-9]{40}$")' "$COMMAND" >/dev/null
+            echo "content_item_id=$(jq -r .contentItemId "$COMMAND")" >> "$GITHUB_OUTPUT"
             echo "target_code_sha=$(jq -r .targetCodeSha "$COMMAND")" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Verify deterministic brand binding
-        if: steps.command.outputs.action == 'PUBLISH_NOW'
+      - name: Verify deterministic brand binding before cloud auth
+        if: steps.invocation.outputs.action == 'PUBLISH_NOW' && steps.invocation.outputs.source == 'PROTECTED_COMMAND_FILE'
         run: node scripts/check-publish-now-brand-determinism.mjs
 
-      - name: Verify rights clearance gate
-        if: steps.command.outputs.action == 'PUBLISH_NOW'
+      - name: Verify rights clearance before cloud auth
+        if: steps.invocation.outputs.action == 'PUBLISH_NOW' && steps.invocation.outputs.source == 'PROTECTED_COMMAND_FILE'
         run: node scripts/check-publish-now-rights-clearance.mjs
 
-      - name: Authenticate to Google Cloud and Drive
-        if: steps.command.outputs.action == 'PUBLISH_NOW'
+      - name: Authenticate to Google Cloud, Drive and Content Registry
+        if: steps.invocation.outputs.action == 'PUBLISH_NOW'
         id: auth
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
           token_format: access_token
-          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly,https://www.googleapis.com/auth/spreadsheets
 
-      - if: steps.command.outputs.action == 'PUBLISH_NOW'
+      - name: Build fresh ephemeral scheduler envelope from canonical registry
+        if: steps.invocation.outputs.action == 'PUBLISH_NOW' && steps.invocation.outputs.source == 'MARKETING_AUTOPILOT'
+        id: ephemeral
+        shell: bash
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          MARKETING_AUTOPILOT_CONTENT_ITEM_ID: ${{ inputs.scheduler_content_item_id }}
+          MARKETING_AUTOPILOT_TARGET_CODE_SHA: ${{ github.sha }}
+          SCHEDULER_SCHEDULED_AT: ${{ inputs.scheduler_scheduled_at }}
+          SCHEDULER_SOURCE_RUN_ID: ${{ inputs.scheduler_source_run_id }}
+        run: |
+          set -euo pipefail
+          node scripts/marketing-autopilot-scheduler.mjs build-command > /tmp/autopilot-command.json
+          jq -e \
+            --arg id "$MARKETING_AUTOPILOT_CONTENT_ITEM_ID" \
+            --arg scheduled "$SCHEDULER_SCHEDULED_AT" \
+            '.status == "COMMAND_READY" and .command.contentItemId == $id and .command.scheduledAt == $scheduled' \
+            /tmp/autopilot-command.json >/dev/null
+          jq \
+            --arg sourceRunId "$SCHEDULER_SOURCE_RUN_ID" \
+            '.command | .schedulerBinding.sourceRunId = $sourceRunId' \
+            /tmp/autopilot-command.json > control/marketing-publish-now-command.json
+          jq -e '.action == "PUBLISH_NOW" and .publicationIntent == "SHARE_NOW"' control/marketing-publish-now-command.json >/dev/null
+          echo "command_id=$(jq -r .commandId control/marketing-publish-now-command.json)" >> "$GITHUB_OUTPUT"
+          echo 'PUBLISH_NOW_EPHEMERAL_COMMAND=READY'
+
+      - name: Verify deterministic brand binding
+        if: steps.invocation.outputs.action == 'PUBLISH_NOW' && steps.invocation.outputs.source == 'MARKETING_AUTOPILOT'
+        run: node scripts/check-publish-now-brand-determinism.mjs
+
+      - name: Verify rights clearance gate
+        if: steps.invocation.outputs.action == 'PUBLISH_NOW' && steps.invocation.outputs.source == 'MARKETING_AUTOPILOT'
+        run: node scripts/check-publish-now-rights-clearance.mjs
+
+      - if: steps.invocation.outputs.action == 'PUBLISH_NOW'
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Bind execution tree to audited code snapshot
-        if: steps.command.outputs.action == 'PUBLISH_NOW'
+        if: steps.invocation.outputs.action == 'PUBLISH_NOW'
         shell: bash
         env:
-          TARGET_CODE_SHA: ${{ steps.command.outputs.target_code_sha }}
+          TARGET_CODE_SHA: ${{ steps.invocation.outputs.target_code_sha }}
         run: |
           set -euo pipefail
           cp control/marketing-publish-now-command.json /tmp/marketing-publish-now-command.json
@@ -91,8 +163,25 @@ jobs:
           cp /tmp/marketing-publish-now-command.json control/marketing-publish-now-command.json
           echo "AUDITED_CODE_SHA=$TARGET_CODE_SHA" >> "$GITHUB_ENV"
 
+      - name: Revalidate live Content Registry after audited-tree binding
+        if: steps.invocation.outputs.action == 'PUBLISH_NOW' && steps.invocation.outputs.source == 'MARKETING_AUTOPILOT'
+        shell: bash
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          MARKETING_AUTOPILOT_CONTENT_ITEM_ID: ${{ inputs.scheduler_content_item_id }}
+          MARKETING_AUTOPILOT_TARGET_CODE_SHA: ${{ steps.invocation.outputs.target_code_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/marketing-autopilot-scheduler.mjs verify-command
+          echo 'MARKETING_AUTOPILOT_REGISTRY_REVALIDATION=PASS'
+
+      - name: Snapshot immutable execution envelope
+        if: steps.invocation.outputs.action == 'PUBLISH_NOW'
+        shell: bash
+        run: cp control/marketing-publish-now-command.json marketing-publish-now-command-envelope.json
+
       - name: Execute hardened publish-now lane
-        if: steps.command.outputs.action == 'PUBLISH_NOW'
+        if: steps.invocation.outputs.action == 'PUBLISH_NOW'
         shell: bash
         env:
           GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
@@ -101,11 +190,26 @@ jobs:
           test "$(git rev-parse HEAD)" = "$AUDITED_CODE_SHA"
           GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh
 
+      - name: Reconcile verified provider result into canonical Content Registry
+        if: success() && steps.invocation.outputs.source == 'MARKETING_AUTOPILOT'
+        shell: bash
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          MARKETING_AUTOPILOT_CONTENT_ITEM_ID: ${{ inputs.scheduler_content_item_id }}
+          MARKETING_AUTOPILOT_PUBLICATION_EVIDENCE: marketing-publish-now-publication.json
+          MARKETING_AUTOPILOT_RECONCILIATION_EVIDENCE: marketing-publish-now-reconciliation.json
+        run: |
+          set -euo pipefail
+          node scripts/marketing-autopilot-registry.mjs reconcile-publication
+          echo 'MARKETING_AUTOPILOT_REGISTRY_RECONCILIATION=PASS'
+
       - name: Upload immutable publication and reconciliation evidence
-        if: always() && steps.command.outputs.action == 'PUBLISH_NOW'
+        if: always() && steps.invocation.outputs.action == 'PUBLISH_NOW'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: marketing-publish-now-${{ github.run_id }}-${{ github.run_attempt }}
-          path: marketing-publish-now-*.json
+          path: |
+            marketing-publish-now-*.json
+            marketing-autopilot-registry-reconciliation.json
           if-no-files-found: warn
           retention-days: 90
