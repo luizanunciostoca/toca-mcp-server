@@ -8,7 +8,7 @@ const workflow = readFileSync(
 const verifier = readFileSync('src/ops/verify-instagram-faq-expansion-production.ts', 'utf8');
 
 describe('Instagram FAQ expansion LIMITED production refresh', () => {
-  it('requires exact owner authorization and current protected main state', () => {
+  it('requires exact authorization and protected main', () => {
     expect(workflow).toContain('github.event.issue.user.login == github.repository_owner');
     expect(workflow).toContain(
       "startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram FAQ expansion LIMITED refresh AUTO')",
@@ -20,7 +20,7 @@ describe('Instagram FAQ expansion LIMITED production refresh', () => {
     expect(workflow).toContain('MERGE_RESERVATION=NONE');
   });
 
-  it('preserves the existing Direct and Comment LIMITED envelope', () => {
+  it('preserves Direct and Comment LIMITED', () => {
     for (const marker of [
       'AUTONOMY_STAGE=LIMITED',
       'AUTO_REPLY_CHANNELS=DIRECT,COMMENT',
@@ -37,41 +37,35 @@ describe('Instagram FAQ expansion LIMITED production refresh', () => {
     }
   });
 
-  it(
-    'applies migrations and synchronizes the 36-FAQ snapshot plus all five canonical sources',
-    () => {
-      expect(workflow).toContain("FAQ_EXPECTED_COUNT: '36'");
-      expect(workflow).toContain(
-        'KB_SOURCE_IDS: SRC-OPS-001,SRC-MENU-002,SRC-LOC-001,SRC-BRAND-001,SRC-PROD-001',
-      );
-      expect(workflow).toContain('dist/scripts/migrate-and-verify.js');
-      expect(workflow).toContain('dist/src/ops/sync-instagram-engagement-knowledge.js');
-      expect(workflow).toContain('dist/src/ops/sync-instagram-engagement-knowledge-base.js');
-      expect(workflow).toContain('dist/src/ops/verify-instagram-faq-expansion-production.js');
-      expect(verifier).toContain("const EXPECTED_FAQ_COUNT = 36;");
-      expect(verifier).toContain("'043_instagram_engagement_knowledge_source_kinds.sql'");
-      expect(verifier).toContain("'SRC-BRAND-001'");
-      expect(verifier).toContain("'SRC-PROD-001'");
-      expect(verifier).toContain('providerWriteAttempted: false');
-    },
-  );
+  it('syncs 36 FAQs and all five canonical sources', () => {
+    expect(workflow).toContain("FAQ_EXPECTED_COUNT: '36'");
+    expect(workflow).toContain(
+      'KB_SOURCE_IDS: SRC-OPS-001,SRC-MENU-002,SRC-LOC-001,SRC-BRAND-001,SRC-PROD-001',
+    );
+    expect(workflow).toContain('dist/scripts/migrate-and-verify.js');
+    expect(workflow).toContain('dist/src/ops/sync-instagram-engagement-knowledge.js');
+    expect(workflow).toContain('dist/src/ops/sync-instagram-engagement-knowledge-base.js');
+    expect(workflow).toContain('dist/src/ops/verify-instagram-faq-expansion-production.js');
+    expect(verifier).toContain('const EXPECTED_FAQ_COUNT = 36;');
+    expect(verifier).toContain("'043_instagram_engagement_knowledge_source_kinds.sql'");
+    expect(verifier).toContain("'SRC-BRAND-001'");
+    expect(verifier).toContain("'SRC-PROD-001'");
+    expect(verifier).toContain('providerWriteAttempted: false');
+  });
 
-  it(
-    'uses zero-traffic staging, immutable digest readback, unchanged scheduler and rollback',
-    () => {
-      expect(workflow).toContain('--no-traffic --quiet');
-      expect(workflow).toContain('--to-revisions="${CANDIDATE_REVISION}=100"');
-      expect(workflow).toContain('SCHEDULER_FINGERPRINT');
-      expect(workflow).toContain('POST_SCHEDULER_FINGERPRINT');
-      expect(workflow).toContain(
-        'test "$POST_SCHEDULER_FINGERPRINT" = "$PRE_SCHEDULER_FINGERPRINT"',
-      );
-      expect(workflow).toContain('--to-revisions="${PRE_REVISION}=100"');
-      expect(workflow).toContain('ROLLBACK_ATTEMPTED=true');
-    },
-  );
+  it('stages safely and preserves the scheduler', () => {
+    expect(workflow).toContain('--no-traffic --quiet');
+    expect(workflow).toContain('--to-revisions="${CANDIDATE_REVISION}=100"');
+    expect(workflow).toContain('SCHEDULER_FINGERPRINT');
+    expect(workflow).toContain('POST_SCHEDULER_FINGERPRINT');
+    expect(workflow).toContain(
+      'test "$POST_SCHEDULER_FINGERPRINT" = "$PRE_SCHEDULER_FINGERPRINT"',
+    );
+    expect(workflow).toContain('--to-revisions="${PRE_REVISION}=100"');
+    expect(workflow).toContain('ROLLBACK_ATTEMPTED=true');
+  });
 
-  it('records sanitized production evidence in the authorization issue and Evidence Ledger', () => {
+  it('records sanitized production evidence', () => {
     for (const marker of [
       'FAQ_EXPANSION_LIMITED_REFRESH_STATUS=PASS',
       'MIGRATION_043_APPLIED=true',
