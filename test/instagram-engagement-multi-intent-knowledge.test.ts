@@ -37,12 +37,15 @@ describe('Instagram grounded multi-intent knowledge', () => {
     expect(classification.confidence).toBe('HIGH');
   });
 
-  it.each(['O que tem hoje?', 'O que acontece hoje?', 'Tem algo hoje?', 'Agenda hoje?'])(
-    'routes the grounded today alias "%s" to EVENT_INFO',
-    (text) => {
-      expect(classifySocialEngagement(text).intent).toBe('EVENT_INFO');
-    },
-  );
+  it.each([
+    'O que tem hoje?',
+    'O que acontece hoje?',
+    'Tem algo hoje?',
+    'Agenda hoje?',
+    'O que tem hoje na Toca?',
+  ])('routes the grounded today alias "%s" to EVENT_INFO', (text) => {
+    expect(classifySocialEngagement(text).intent).toBe('EVENT_INFO');
+  });
 
   it.each([
     ['O que tem hoje para comer?', 'FAQ_OPERATIONAL', 'GASTRONOMY'],
