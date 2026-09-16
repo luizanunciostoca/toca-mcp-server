@@ -51,8 +51,8 @@
   },
   "dailyRollout": {
     "phase": "CANARY",
-    "canaryContentItemId": "MKT-20260916-SUNSET-FEED-0900",
-    "canaryScheduledAt": "2026-09-16T09:00:00-03:00",
+    "canaryContentItemId": "MKT-20260916-SUNSET-FEED-1500",
+    "canaryScheduledAt": "2026-09-16T15:00:00-03:00",
     "promoteToLimitedAfterVerifiedCanary": true,
     "verifiedCanarySchedulingStatus": "PUBLISHED_VERIFIED",
     "limited": {
@@ -64,7 +64,11 @@
     },
     "generalAutonomy": false,
     "blindRetryAuthorized": false,
-    "automaticFallbackAuthorized": false
+    "automaticFallbackAuthorized": false,
+    "rollForwardFromContentItemId": "MKT-20260916-SUNSET-FEED-0900",
+    "rollForwardReason": "STALE_WINDOW_NO_SCHEDULE_RUN",
+    "rollForwardAuthorizedAt": "2026-09-16T09:30:03-03:00",
+    "rollForwardAuthority": "USER_EXPLICIT_DAILY_PUBLICATION_AUTHORIZATION_2026-09-16"
   },
   "standingAuthorization": {
     "enabled": true,
@@ -80,7 +84,7 @@
   },
   "rollout": {
     "phase": "CANARY",
-    "allowedContentItemIds": ["MKT-20260917-SUNSET-FEED-0900"],
+    "allowedContentItemIds": ["MKT-20260916-SUNSET-FEED-1500"],
     "promoteOnlyAfterVerifiedOperations": 3,
     "blindRetryAuthorized": false,
     "automaticFallbackAuthorized": false,
