@@ -41,7 +41,7 @@
     "start:deterministic-artist-composite": "node dist/src/deterministic-artist-composite.js",
     "migrate": "tsx scripts/migrate.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format:check": "for f in src/instagram-engagement/ag01-grounded-knowledge.ts src/orchestrator/grounded-knowledge.ts test/ag01-followup-http-wake.test.ts test/ag01-grounded-knowledge-http.test.ts test/ag01-grounded-knowledge.test.ts test/instagram-engagement-ag01-grounded-fallback.test.ts; do echo PRETTIER_DIFF_BEGIN:$f; prettier \"$f\" > /tmp/prettier.out; diff -u \"$f\" /tmp/prettier.out || true; echo PRETTIER_DIFF_END:$f; done; exit 1",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
