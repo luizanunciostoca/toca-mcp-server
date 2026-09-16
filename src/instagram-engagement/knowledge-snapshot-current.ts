@@ -1,668 +1,112 @@
-import type { EngagementIntent } from '../policy/engagement-policy.js';
+import type { InstagramEngagementKnowledgeSnapshotRow } from './knowledge-snapshot-expanded-core.js';
+import {
+  INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID as CORE_SPREADSHEET_ID,
+  INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE as EXPANDED_CORE_KNOWLEDGE,
+} from './knowledge-snapshot-expanded-core.js';
 
-export const INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID =
-  '1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU';
+export type { InstagramEngagementKnowledgeSnapshotRow } from './knowledge-snapshot-expanded-core.js';
 
-export interface InstagramEngagementKnowledgeSnapshotRow {
-  readonly faqId: string;
-  readonly canonicalQuestion: string;
-  readonly variants: readonly string[];
-  readonly intent: EngagementIntent;
-  readonly risk: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  readonly autonomy: 'READ_ONLY' | 'SUGGEST_ONLY' | 'AUTO_REPLY_ALLOWED' | 'HUMAN_REVIEW_REQUIRED';
-  readonly answer: string;
-  readonly source: string;
-  readonly factsToValidate: string;
-  readonly sourceUpdatedOn: string;
-  readonly status: string;
-  readonly operationalValidity: string;
-}
+export const INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID = CORE_SPREADSHEET_ID;
 
-type Risk = InstagramEngagementKnowledgeSnapshotRow['risk'];
-type Autonomy = InstagramEngagementKnowledgeSnapshotRow['autonomy'];
+const OFFICIAL_TICKET_LINKTREE =
+  'https://linktr.ee/tocadomorcegooficial?utm_source=ig&utm_medium=social&utm_content=link_in_bio&fbclid=PAdGRleAUXIVtwZG9mAmZkaWQWUOjnvXodfGyf-tm4_9E7SiXgNZTUeGV4dG4DYWVtAjExAHNydGMGYXBwX2lkDzEyNDAyNDU3NDI4NzQxNAABp086VQy0Dat5n1xOChyOLdqrAGTe_PQjh0WEXTPGeHtbPP2jPX0YsVAp7cyd_aem_dKq3n3m9OlgJ6Y_Y1BKxxQ';
 
-function approved(
-  faqId: string,
-  canonicalQuestion: string,
-  variants: readonly string[],
-  intent: EngagementIntent,
-  risk: Risk,
-  autonomy: Autonomy,
-  answer: string,
-  source: string,
-  factsToValidate: string,
-): InstagramEngagementKnowledgeSnapshotRow {
-  return {
-    faqId,
-    canonicalQuestion,
-    variants,
-    intent,
-    risk,
-    autonomy,
-    answer,
-    source,
-    factsToValidate,
-    sourceUpdatedOn: '2026-09-16',
-    status: 'APROVADO',
-    operationalValidity: 'ATIVO_ATE_SUBSTITUICAO_CANONICA',
-  };
-}
+const OFFICIAL_TICKET_ANSWER =
+  `Os valores dos ingressos variam de acordo com a data. Para consultar a programação, próximos eventos, valores, comprar ingressos, cardápio, atendimento via WhatsApp e mais informações, acesse: ${OFFICIAL_TICKET_LINKTREE}`;
 
-const OPS =
-  'TOCA_OS — 08_OPERACOES — HOMOLOGACAO_E_PARAMETROS_OPERACIONAIS_v1.1 — Drive ID 1Sr4jKNvWZQSlAr3g7klkw_Eou3yLESrcOv2Ednjk7g4';
-const LOCATION =
-  'Localização Estável — Toca do Morcego — Drive ID 1Die7TmOHK8sP6uyZQM4S_hVfe81aoNAhpmBWulCAld4';
-const BRAND =
-  'TOCA_OS — 02_PROPOSITO_DA_MARCA — Drive ID 1PKLkxUGVOUOT4yLWiMr6O0eNfmtQiymQWITs_-_h6fo';
-const PRODUCTS =
-  'TOCA_OS — 00_INDICE_DE_PRODUTOS_E_EXPERIENCIAS — Drive ID 1Fgf5vfVD-aHlq1B_8oGTEASEFHv4oQvrtwL2bnMptlY';
-const POLICY =
-  'MARKETING — POLITICA_OFICIAL_DE_ATENDIMENTO_POR_IA_NO_INSTAGRAM — Drive ID 1eZQpT1RDtfKnLAH3WksI0tFLigFL9HWZnsGz_Jki6l0';
-const MENU =
-  'CARDAPIO_OFICIAL_VIGENTE + estruturado canônico — Drive IDs 1KfnV3QJ-skOSs4elA1QQGVr98PSTr8R4 / 1dRBuf8z9hgxwoaBSMAHrbhjxqu3bTJZ1iV_OB6DNYMo';
+const SOURCE_DATES: readonly { readonly marker: string; readonly updatedOn: string }[] = [
+  { marker: '1Sr4jKNvWZQSlAr3g7klkw_Eou3yLESrcOv2Ednjk7g4', updatedOn: '2026-08-28' },
+  { marker: '1Die7TmOHK8sP6uyZQM4S_hVfe81aoNAhpmBWulCAld4', updatedOn: '2026-09-02' },
+  { marker: '1PKLkxUGVOUOT4yLWiMr6O0eNfmtQiymQWITs_-_h6fo', updatedOn: '2026-08-08' },
+  { marker: '1Fgf5vfVD-aHlq1B_8oGTEASEFHv4oQvrtwL2bnMptlY', updatedOn: '2026-08-08' },
+  { marker: '1eZQpT1RDtfKnLAH3WksI0tFLigFL9HWZnsGz_Jki6l0', updatedOn: '2026-08-29' },
+  { marker: '1KfnV3QJ-skOSs4elA1QQGVr98PSTr8R4', updatedOn: '2026-08-28' },
+  { marker: '1dRBuf8z9hgxwoaBSMAHrbhjxqu3bTJZ1iV_OB6DNYMo', updatedOn: '2026-08-28' },
+];
+
+const TICKET_VARIANTS = new Map<string, readonly string[]>([
+  [
+    'FAQ-003',
+    [
+      'Qual o valor do Sunset?',
+      'Quanto é a entrada?',
+      'Quanto custa The Party?',
+      'Preço do ingresso?',
+      'Qual o valor da festa?',
+      'Quanto pago para entrar?',
+      'Valor da entrada hoje?',
+      'Quanto custa o ingresso hoje?',
+      'Qual o valor do ingresso?',
+    ],
+  ],
+  [
+    'FAQ-004',
+    [
+      'Como comprar ingresso?',
+      'Onde compro entrada?',
+      'Tem link de ingresso?',
+      'Onde vejo os ingressos?',
+      'Como garantir meu ingresso?',
+      'Onde compra ingresso da Toca?',
+      'Qual o link dos ingressos?',
+      'Quero comprar ingresso?',
+      'Quero comprar ingressos?',
+      'Quero ingresso?',
+      'Quero garantir meu ingresso?',
+      'Onde comprar ingresso?',
+    ],
+  ],
+]);
+
+const RECONCILED_CORE = EXPANDED_CORE_KNOWLEDGE.map((row) => reconcileCoreRow(row));
+
+const FAQ_036: InstagramEngagementKnowledgeSnapshotRow = {
+  faqId: 'FAQ-036',
+  canonicalQuestion: 'O que tem no Sunset de sábado?',
+  variants: [
+    'Sábado tem o quê na Toca?',
+    'Tem samba sábado?',
+    'Tem pagode sábado?',
+    'O Sunset de sábado tem samba?',
+    'O Sunset de sábado tem pagode?',
+    'Qual a programação de sábado?',
+  ],
+  intent: 'EVENT_INFO',
+  risk: 'LOW',
+  autonomy: 'AUTO_REPLY_ALLOWED',
+  answer:
+    'Aos sábados, o Sunset da Toca tem samba e pagode. Para conferir a programação vigente, próximos eventos, valores e ingressos, consulte o link oficial da Toca.',
+  source: 'Direção Toca — atualização operacional 2026-09-16',
+  factsToValidate:
+    'Se houver edição especial ou alteração oficialmente comunicada para a data, a programação vigente prevalece.',
+  sourceUpdatedOn: '2026-09-16',
+  status: 'APROVADO',
+  operationalValidity: 'ATIVO_ATE_SUBSTITUICAO_CANONICA',
+};
 
 export const INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE: readonly InstagramEngagementKnowledgeSnapshotRow[] =
-  [
-    approved(
-      'FAQ-001',
-      'Que horas começa o Sunset?',
-      [
-        'Qual o horário do Sunset?',
-        'Que horas abre o Sunset?',
-        'O Sunset abre que horas?',
-        'Sunset começa quando?',
-        'O Sunset funciona todos os dias?',
-        'Que horas começa o pôr do sol na Toca?',
-        'Qual horário do pôr do sol?',
-      ],
-      'LOCATION_HOURS',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'O Sunset acontece todos os dias, a partir das 16:30, no horário da Bahia. O horário de encerramento pode variar conforme a operação do dia e não deve ser presumido.',
-      OPS,
-      'Se a pergunta for sobre horário de encerramento ou evento especial, validar a operação/evento vigente.',
-    ),
-    approved(
-      'FAQ-002',
-      'Que dia e que horas acontece a The Party?',
-      [
-        'Qual o horário da The Party?',
-        'The Party é que dia?',
-        'Que dia tem festa na Toca?',
-        'Qual dia tem festa na Toca?',
-        'Quando tem festa na Toca?',
-        'Quais dias tem festa?',
-        'Que horas começa a festa de sexta?',
-        'A festa termina que horas?',
-        'Tem The Party sexta?',
-        'Tem festa sexta?',
-        'A festa é na sexta?',
-      ],
-      'LOCATION_HOURS',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'A The Party acontece às sextas-feiras, das 23:59 às 06:00, atravessando a madrugada de sábado, no horário da Bahia.',
-      OPS,
-      'Se houver evento especial ou alteração excepcional, validar a programação vigente.',
-    ),
-    approved(
-      'FAQ-003',
-      'Quanto custa o ingresso?',
-      [
-        'Qual o valor do Sunset?',
-        'Quanto é a entrada?',
-        'Quanto custa The Party?',
-        'Preço do ingresso?',
-        'Qual o valor da festa?',
-        'Quanto pago para entrar?',
-        'Valor da entrada hoje?',
-      ],
-      'TICKET_INFO',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'Os valores dos ingressos podem variar. Para ver o preço vigente, consulte o site oficial da Toca do Morcego ou o link disponível na bio do Instagram @tocadomorcego.',
-      OPS,
-      'Nunca inventar nem reutilizar preço antigo; direcionar para canal oficial vigente.',
-    ),
-    approved(
-      'FAQ-004',
-      'Onde compro ingressos?',
-      [
-        'Como comprar ingresso?',
-        'Onde compro entrada?',
-        'Tem link de ingresso?',
-        'Onde vejo os ingressos?',
-        'Como garantir meu ingresso?',
-        'Onde compra ingresso da Toca?',
-        'Qual o link dos ingressos?',
-      ],
-      'TICKET_INFO',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'Os ingressos e valores vigentes devem ser consultados no site oficial www.tocadomorcego.com.br ou pelo link disponível na bio do Instagram @tocadomorcego.',
-      OPS,
-      'Confirmar apenas canais oficiais; não fornecer links de terceiros.',
-    ),
-    approved(
-      'FAQ-005',
-      'Qual é o site oficial da Toca?',
-      [
-        'Tem site?',
-        'Qual o site da Toca?',
-        'Onde vejo informações oficiais?',
-        'Site oficial?',
-        'Qual o website da Toca?',
-      ],
-      'FAQ_OPERATIONAL',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'O site oficial é www.tocadomorcego.com.br.',
-      OPS,
-      'Nenhum adicional.',
-    ),
-    approved(
-      'FAQ-006',
-      'Qual é o Instagram oficial?',
-      [
-        'Qual o insta da Toca?',
-        'Instagram da Toca?',
-        'Qual perfil oficial?',
-        'Qual o @ da Toca?',
-        'Qual o arroba da Toca?',
-      ],
-      'FAQ_OPERATIONAL',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'O Instagram oficial é @tocadomorcego.',
-      OPS,
-      'Nenhum adicional.',
-    ),
-    approved(
-      'FAQ-007',
-      'Qual é o WhatsApp de atendimento?',
-      [
-        'Tem WhatsApp?',
-        'Qual o número da Toca?',
-        'Como falo com atendimento?',
-        'Contato da Toca?',
-        'Qual telefone da Toca?',
-        'Quero falar com a Toca',
-      ],
-      'FAQ_OPERATIONAL',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'O WhatsApp oficial de atendimento informado pela direção é +55 75 99179-5418.',
-      OPS,
-      'Se houver atualização posterior do contato oficial, a fonte mais recente prevalece.',
-    ),
-    approved(
-      'FAQ-008',
-      'Onde fica a Toca do Morcego?',
-      [
-        'Onde é a Toca?',
-        'Qual a localização da Toca?',
-        'A Toca fica onde?',
-        'Em que lugar fica a Toca do Morcego?',
-        'A Toca fica em qual cidade?',
-        'A Toca fica em Morro?',
-        'Como chegar na Toca?',
-        'Onde fica em Morro de São Paulo?',
-      ],
-      'LOCATION_HOURS',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'A Toca do Morcego fica em Morro de São Paulo, na Ilha de Tinharé, Bahia. Para a rota exata até a entrada, use o endereço disponível nos canais oficiais da Toca.',
-      LOCATION,
-      'Não inventar distância, tempo de caminhada ou rota fina sem fonte atual.',
-    ),
-    approved(
-      'FAQ-009',
-      'Onde vejo o cardápio e os preços atuais?',
-      [
-        'Tem cardápio?',
-        'Quanto custam os drinks?',
-        'Quais os preços do bar?',
-        'Onde vejo o menu?',
-        'Cardápio atualizado?',
-        'Tem comida?',
-        'Tem petisco?',
-        'Tem drinks?',
-        'O que tem para comer?',
-      ],
-      'FAQ_OPERATIONAL',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'A Toca mantém cardápio vigente de gastronomia e bebidas. Para valores e itens específicos, use o cardápio oficial atual; a IA não deve reutilizar preços de versões antigas.',
-      MENU,
-      'Para citar item ou valor exato, usar somente o cardápio canônico vigente.',
-    ),
-    approved(
-      'FAQ-010',
-      'Quero fazer uma reserva ou evento privado, como faço?',
-      [
-        'Tem camarote?',
-        'Quero comemorar aniversário',
-        'Quero fechar evento',
-        'Quero reservar mesa',
-        'Quero fazer casamento',
-        'Vocês fazem evento privado?',
-        'Quero reservar para um grupo',
-      ],
-      'COMMERCIAL_LEAD',
-      'MEDIUM',
-      'SUGGEST_ONLY',
-      'Tratar como oportunidade comercial e encaminhar para atendimento humano/CRM; não confirmar disponibilidade, condição comercial, benefício ou preço sem validação.',
-      POLICY,
-      'Coletar apenas os dados mínimos necessários e encaminhar ao responsável.',
-    ),
-    approved(
-      'FAQ-011',
-      'Quais dias e horários a Toca funciona?',
-      [
-        'Que dias a Toca abre?',
-        'Qual o horário de funcionamento?',
-        'A Toca abre todo dia?',
-        'Quando a Toca abre?',
-        'Qual a programação regular da Toca?',
-      ],
-      'LOCATION_HOURS',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'Na operação regular, o Sunset acontece todos os dias a partir das 16:30. A The Party acontece às sextas-feiras, das 23:59 às 06:00. Eventos especiais possuem programação própria, e o encerramento do Sunset não deve ser presumido.',
-      OPS,
-      'Eventos especiais e exceções operacionais prevalecem quando oficialmente confirmados.',
-    ),
-    approved(
-      'FAQ-012',
-      'O que é a Toca do Morcego?',
-      [
-        'O que é a Toca?',
-        'Toca do Morcego é o quê?',
-        'Que lugar é a Toca?',
-        'Como você define a Toca?',
-        'A Toca é o que?',
-      ],
-      'GENERAL_SOCIAL',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'A Toca do Morcego é uma marca de experiências em Morro de São Paulo. Sua proposta reúne natureza, música, gastronomia, drinks, hospitalidade e encontros para criar momentos memoráveis.',
-      BRAND,
-      'Usar apenas fatos institucionais estáveis; não inventar história, datas ou fundadores.',
-    ),
-    approved(
-      'FAQ-013',
-      'O que é o Sunset da Toca?',
-      [
-        'Como é o Sunset?',
-        'O que acontece no Sunset?',
-        'Como funciona o Sunset?',
-        'O que tem no Sunset?',
-        'Vale a pena ir no Sunset?',
-      ],
-      'EVENT_INFO',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'O Sunset é uma das experiências centrais da Toca, voltada à contemplação, música, gastronomia, drinks, encontros e memória, com a natureza e o pôr do sol como parte da experiência.',
-      PRODUCTS,
-      'Não prometer atração, condição ou programação variável sem fonte vigente.',
-    ),
-    approved(
-      'FAQ-014',
-      'O que é a The Party?',
-      [
-        'Como é a The Party?',
-        'O que acontece na The Party?',
-        'Como funciona a festa da Toca?',
-        'O que é a festa da Toca?',
-        'Como é a balada da Toca?',
-      ],
-      'EVENT_INFO',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'A The Party é a experiência noturna de maior energia da Toca, com música, celebração e atmosfera de festa. Na operação regular, acontece às sextas-feiras, das 23:59 às 06:00.',
-      `${PRODUCTS}; ${OPS}`,
-      'Line-up, edição especial, parceiros e alterações de horário exigem fonte vigente.',
-    ),
-    approved(
-      'FAQ-015',
-      'O que tem para fazer na Toca?',
-      [
-        'O que tem na Toca?',
-        'Quais experiências a Toca tem?',
-        'Quais produtos a Toca oferece?',
-        'Tem Sunset e festa?',
-        'O que a Toca oferece?',
-      ],
-      'GENERAL_SOCIAL',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'A Toca reúne experiências como Sunset, The Party, eventos especiais e gastronomia. Também possui frentes de eventos privados sob contratação. A programação específica deve ser confirmada nos canais oficiais.',
-      PRODUCTS,
-      'Não transformar produtos em disponibilidade específica sem fonte atual.',
-    ),
-    approved(
-      'FAQ-016',
-      'Qual é o propósito da Toca?',
-      [
-        'O que significa Celebrar a Vida?',
-        'Qual a ideia da Toca?',
-        'O que é Celebrar a Vida?',
-        'Qual a missão da experiência Toca?',
-        'Por que a Toca existe?',
-      ],
-      'GENERAL_SOCIAL',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'O propósito da Toca é criar momentos que façam as pessoas se sentirem mais vivas. “Celebrar a Vida” é a ideia-mãe da marca: viver o presente com presença, conexão, beleza e emoção.',
-      BRAND,
-      'Não converter propósito em promessa operacional específica.',
-    ),
-    approved(
-      'FAQ-017',
-      'A Toca tem comida e gastronomia?',
-      [
-        'Tem comida na Toca?',
-        'Tem restaurante?',
-        'Tem petiscos?',
-        'O que tem para comer?',
-        'Tem jantar?',
-        'A Toca serve comida?',
-      ],
-      'FAQ_OPERATIONAL',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'A gastronomia faz parte da experiência da Toca. Os itens e valores disponíveis devem ser consultados no cardápio oficial vigente.',
-      `${PRODUCTS}; ${MENU}`,
-      'Item e disponibilidade exatos devem vir do cardápio vigente.',
-    ),
-    approved(
-      'FAQ-018',
-      'A Toca tem drinks e bebidas?',
-      [
-        'Tem drink na Toca?',
-        'Tem cerveja?',
-        'Tem bar?',
-        'Quais bebidas tem?',
-        'Quais drinks tem?',
-        'Tem cocktail?',
-      ],
-      'FAQ_OPERATIONAL',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'Drinks e bebidas fazem parte da experiência da Toca. Para opções e valores atuais, consulte o cardápio oficial vigente.',
-      MENU,
-      'Item e preço exatos devem vir do cardápio vigente.',
-    ),
-    approved(
-      'FAQ-019',
-      'Hoje tem Sunset?',
-      [
-        'Tem Sunset hoje?',
-        'Hoje tem pôr do sol na Toca?',
-        'Todo dia tem Sunset?',
-        'Tem Sunset todos os dias?',
-        'A Toca abre hoje para o Sunset?',
-      ],
-      'LOCATION_HOURS',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'O Sunset acontece todos os dias, a partir das 16:30, no horário da Bahia. Se houver uma exceção operacional comunicada oficialmente, a informação vigente prevalece.',
-      OPS,
-      'Não presumir exceções; se houver conflito com programação oficial atual, a fonte atual prevalece.',
-    ),
-    approved(
-      'FAQ-020',
-      'Tem festa sábado na Toca?',
-      [
-        'Sábado tem festa?',
-        'Tem The Party sábado?',
-        'A festa vai até sábado?',
-        'Sábado de madrugada tem festa?',
-        'A festa de sexta termina sábado?',
-      ],
-      'LOCATION_HOURS',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'A programação regular da The Party começa na sexta-feira às 23:59 e segue até 06:00 de sábado. Um evento especial no sábado só deve ser confirmado quando estiver na programação oficial vigente.',
-      OPS,
-      'Não inventar evento especial de sábado.',
-    ),
-    approved(
-      'FAQ-021',
-      'Qual é a programação atual da Toca?',
-      [
-        'O que tem hoje na Toca?',
-        'Qual evento tem hoje?',
-        'Tem evento especial hoje?',
-        'O que vai ter essa semana?',
-        'Qual a agenda da Toca?',
-        'Programação do fim de semana?',
-      ],
-      'EVENT_INFO',
-      'MEDIUM',
-      'SUGGEST_ONLY',
-      'A programação específica pode mudar. Validar a agenda vigente nos canais oficiais da Toca antes de confirmar evento, data ou atração.',
-      POLICY,
-      'Exigir programação/evento vigente antes de qualquer confirmação específica.',
-    ),
-    approved(
-      'FAQ-022',
-      'Quem toca hoje na Toca?',
-      [
-        'Qual DJ toca hoje?',
-        'Quem toca na sexta?',
-        'Qual o line-up?',
-        'Quais DJs vão tocar?',
-        'Quem é a atração?',
-        'Qual artista toca?',
-      ],
-      'EVENT_INFO',
-      'MEDIUM',
-      'SUGGEST_ONLY',
-      'Line-up e atrações variam por data e edição. Confirmar sempre na programação oficial vigente antes de responder com nomes de artistas.',
-      POLICY,
-      'Nunca reutilizar line-up antigo.',
-    ),
-    approved(
-      'FAQ-023',
-      'Que horas o Sunset termina?',
-      [
-        'Que horas fecha o Sunset?',
-        'Até que horas vai o Sunset?',
-        'Que horas a Toca fecha depois do Sunset?',
-        'Qual o horário de encerramento do Sunset?',
-      ],
-      'LOCATION_HOURS',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'O início regular do Sunset é às 16:30. O horário de encerramento pode variar conforme a operação do dia e não deve ser presumido sem regra ou evento específico vigente.',
-      OPS,
-      'Não inventar horário de encerramento.',
-    ),
-    approved(
-      'FAQ-024',
-      'Onde vejo a programação e informações oficiais?',
-      [
-        'Onde vejo a agenda?',
-        'Onde acompanho novidades?',
-        'Onde vejo eventos da Toca?',
-        'Onde confirmo a programação?',
-        'Onde encontro informações atualizadas?',
-      ],
-      'FAQ_OPERATIONAL',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'Para informações vigentes, consulte www.tocadomorcego.com.br, o Instagram @tocadomorcego ou o WhatsApp oficial +55 75 99179-5418.',
-      OPS,
-      'Usar somente canais oficiais.',
-    ),
-    approved(
-      'FAQ-025',
-      'A Toca é bar, restaurante ou balada?',
-      [
-        'A Toca é uma balada?',
-        'A Toca é restaurante?',
-        'A Toca é bar?',
-        'Que tipo de lugar é a Toca?',
-        'A Toca é uma casa noturna?',
-      ],
-      'GENERAL_SOCIAL',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'A Toca reúne elementos de bar, gastronomia, música, festas e paisagem, mas sua proposta é mais ampla: ser uma marca de experiências em Morro de São Paulo, conectando natureza, pessoas e celebração.',
-      BRAND,
-      'Não reduzir a marca a uma única categoria operacional.',
-    ),
-    approved(
-      'FAQ-026',
-      'Qual é a idade mínima para entrar?',
-      [
-        'Menor de idade entra?',
-        'Pode entrar criança?',
-        'Precisa ser maior de 18?',
-        'Qual idade para entrar na festa?',
-      ],
-      'FAQ_OPERATIONAL',
-      'MEDIUM',
-      'SUGGEST_ONLY',
-      'A regra de idade pode depender da experiência e do evento. Confirmar a política vigente com o atendimento oficial antes de orientar a entrada.',
-      POLICY,
-      'Não inventar idade mínima sem fonte operacional vigente.',
-    ),
-    approved(
-      'FAQ-027',
-      'Tem dress code?',
-      [
-        'Pode ir de chinelo?',
-        'Qual traje para entrar?',
-        'Tem regra de roupa?',
-        'Pode entrar de bermuda?',
-      ],
-      'FAQ_OPERATIONAL',
-      'MEDIUM',
-      'SUGGEST_ONLY',
-      'Confirmar o dress code ou regra de vestimenta vigente com o atendimento oficial, pois pode variar conforme a experiência ou evento.',
-      POLICY,
-      'Não inventar regra de vestimenta.',
-    ),
-    approved(
-      'FAQ-028',
-      'A Toca tem acessibilidade?',
-      [
-        'É acessível para cadeirante?',
-        'Tem acesso para cadeira de rodas?',
-        'Pessoa com mobilidade reduzida consegue entrar?',
-      ],
-      'FAQ_OPERATIONAL',
-      'MEDIUM',
-      'SUGGEST_ONLY',
-      'Para acessibilidade e condições de acesso, confirmar com o atendimento oficial antes da visita para orientar conforme a necessidade específica.',
-      POLICY,
-      'Não prometer condição física não verificada.',
-    ),
-    approved(
-      'FAQ-029',
-      'Tem estacionamento?',
-      ['Onde estaciona?', 'A Toca tem vaga para carro?', 'Tem estacionamento perto?'],
-      'FAQ_OPERATIONAL',
-      'MEDIUM',
-      'SUGGEST_ONLY',
-      'Confirmar orientação de estacionamento e acesso nos canais oficiais; a IA não deve inventar infraestrutura ou condição local.',
-      POLICY,
-      'Condição local atual necessária.',
-    ),
-    approved(
-      'FAQ-030',
-      'Quais formas de pagamento a Toca aceita?',
-      [
-        'Aceita cartão?',
-        'Aceita Pix?',
-        'Pode pagar em dinheiro?',
-        'Aceita crédito?',
-        'Aceita débito?',
-      ],
-      'FAQ_OPERATIONAL',
-      'MEDIUM',
-      'SUGGEST_ONLY',
-      'Confirmar as formas de pagamento vigentes com o atendimento oficial antes de responder, pois condições operacionais podem mudar.',
-      POLICY,
-      'Não inventar meio de pagamento.',
-    ),
-    approved(
-      'FAQ-031',
-      'Pode levar pet para a Toca?',
-      ['Aceita cachorro?', 'A Toca é pet friendly?', 'Pode entrar com animal?', 'Pet pode entrar?'],
-      'FAQ_OPERATIONAL',
-      'MEDIUM',
-      'SUGGEST_ONLY',
-      'Confirmar a política vigente para pets com o atendimento oficial antes da visita.',
-      POLICY,
-      'Não presumir permissão de animais.',
-    ),
-    approved(
-      'FAQ-032',
-      'Perdi um objeto na Toca, como faço?',
-      [
-        'Tem achados e perdidos?',
-        'Esqueci meu celular na Toca',
-        'Perdi minha carteira',
-        'Achei um objeto na Toca',
-      ],
-      'FAQ_OPERATIONAL',
-      'MEDIUM',
-      'SUGGEST_ONLY',
-      'Para achados e perdidos, entre em contato com o atendimento oficial pelo WhatsApp +55 75 99179-5418 e informe apenas os dados necessários para identificar o item.',
-      OPS,
-      'Evitar expor dados pessoais ou detalhes sensíveis em canal público.',
-    ),
-    approved(
-      'FAQ-033',
-      'Como faço para trabalhar na Toca?',
-      [
-        'Tem vaga na Toca?',
-        'Onde envio currículo?',
-        'A Toca está contratando?',
-        'Quero trabalhar com vocês',
-      ],
-      'FAQ_OPERATIONAL',
-      'MEDIUM',
-      'SUGGEST_ONLY',
-      'Para oportunidades de trabalho, confirme o canal de recrutamento vigente com o atendimento oficial. A IA não deve inventar vaga, salário ou processo seletivo.',
-      POLICY,
-      'Não confirmar vaga sem fonte atual.',
-    ),
-    approved(
-      'FAQ-034',
-      'Quero propor uma parceria com a Toca, como faço?',
-      [
-        'Quero fazer collab',
-        'Sou influencer e quero parceria',
-        'Quero patrocinar um evento',
-        'Sou fornecedor',
-        'Sou artista e quero tocar',
-        'Sou DJ e quero tocar na Toca',
-      ],
-      'COMMERCIAL_LEAD',
-      'MEDIUM',
-      'SUGGEST_ONLY',
-      'Encaminhar a proposta para avaliação humana/CRM, sem prometer parceria, cachê, benefício, permuta, data ou condição comercial.',
-      POLICY,
-      'Coletar apenas dados mínimos de contato/proposta e encaminhar.',
-    ),
-    approved(
-      'FAQ-035',
-      'A Toca faz eventos especiais?',
-      [
-        'Tem eventos especiais?',
-        'A Toca faz eventos temáticos?',
-        'Tem festas especiais além da The Party?',
-        'Vocês fazem eventos sazonais?',
-      ],
-      'EVENT_INFO',
-      'LOW',
-      'AUTO_REPLY_ALLOWED',
-      'Eventos especiais fazem parte do portfólio da Toca como experiências extraordinárias, sazonais ou temáticas. Eles não são necessariamente recorrentes; datas e detalhes devem ser confirmados na programação oficial vigente.',
-      PRODUCTS,
-      'Não confirmar data, atração ou recorrência sem programação vigente.',
-    ),
-  ];
+  [...RECONCILED_CORE, FAQ_036];
+
+function reconcileCoreRow(
+  row: InstagramEngagementKnowledgeSnapshotRow,
+): InstagramEngagementKnowledgeSnapshotRow {
+  const sourceUpdatedOn = sourceUpdatedOnFor(row.source, row.sourceUpdatedOn);
+  const ticketVariants = TICKET_VARIANTS.get(row.faqId);
+  if (row.faqId === 'FAQ-003' || row.faqId === 'FAQ-004') {
+    return {
+      ...row,
+      variants: ticketVariants ?? row.variants,
+      answer: OFFICIAL_TICKET_ANSWER,
+      sourceUpdatedOn,
+    };
+  }
+  return { ...row, sourceUpdatedOn };
+}
+
+function sourceUpdatedOnFor(source: string, fallback: string): string {
+  const matchedDates = SOURCE_DATES.filter(({ marker }) => source.includes(marker)).map(
+    ({ updatedOn }) => updatedOn,
+  );
+  if (matchedDates.length === 0) return fallback;
+  return matchedDates.sort().at(-1) ?? fallback;
+}
