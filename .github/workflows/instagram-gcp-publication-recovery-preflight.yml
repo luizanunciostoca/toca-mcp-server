@@ -1,12 +1,16 @@
 name: Instagram GCP Publication Recovery Preflight
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/instagram-gcp-publication-recovery-preflight.yml'
-      - 'infra/control-plane/instagram-gcp-publication-recovery-policy.json'
+  workflow_dispatch:
+    inputs:
+      authorization:
+        description: Exact recovery authorization phrase
+        required: true
+        type: string
+      expected_source_sha:
+        description: Exact protected main SHA authorized for this recovery run
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -32,6 +36,7 @@ env:
   META_GRAPH_API_VERSION: v24.0
   META_PAGE_ID: '306103746115875'
   INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  META_USERNAME: tocadomorcego
   DRIVE_FILE_ID: 1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK
   EXPECTED_ASSET_SHA256: a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6
 
@@ -48,14 +53,20 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Guard repository and scoped recovery policy
+      - name: Guard explicit authorization and scoped recovery policy
         shell: bash
+        env:
+          RECOVERY_AUTHORIZATION: ${{ inputs.authorization }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
         run: |
           set -euo pipefail
-          test "$GITHUB_EVENT_NAME" = 'push'
+          test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
           test "$GITHUB_REF" = 'refs/heads/main'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$EXPECTED_SOURCE_SHA" = "$GITHUB_SHA"
+          test "$RECOVERY_AUTHORIZATION" = 'AUTHORIZE_GCP_INSTAGRAM_RECOVERY_PREFLIGHT'
+
           POLICY=infra/control-plane/instagram-gcp-publication-recovery-policy.json
           jq -e \
             --arg project "$GCP_PROJECT_ID" \
@@ -63,25 +74,56 @@ jobs:
             --arg infra "$GCP_INFRA_ADMIN_SERVICE_ACCOUNT" \
             --arg deploy "$GCP_DEPLOY_SERVICE_ACCOUNT" \
             --arg runtime "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --arg apiVersion "$META_GRAPH_API_VERSION" \
+            --arg page "$META_PAGE_ID" \
             --arg ig "$INSTAGRAM_ACCOUNT_ID" \
+            --arg username "$META_USERNAME" \
             --arg drive "$DRIVE_FILE_ID" \
             --arg asset "$EXPECTED_ASSET_SHA256" '
               .schemaVersion == 1 and
               .status == "AUTHORIZED_RECOVERY" and
+              .authorization.mode == "WORKFLOW_DISPATCH_EXACT_SHA" and
+              .authorization.phrase == "AUTHORIZE_GCP_INSTAGRAM_RECOVERY_PREFLIGHT" and
               .projectId == $project and
               .region == $region and
               .infrastructureAdminServiceAccount == $infra and
               .deployServiceAccount == $deploy and
               .runtimeServiceAccount == $runtime and
+              .requiredApis == [
+                "artifactregistry.googleapis.com",
+                "run.googleapis.com",
+                "secretmanager.googleapis.com",
+                "iamcredentials.googleapis.com",
+                "sqladmin.googleapis.com",
+                "logging.googleapis.com"
+              ] and
+              .runtimeSecrets == [
+                "toca-meta-oauth-token",
+                "toca-meta-app-secret",
+                "toca-database-url"
+              ] and
               .preflight.providerReadOnly == true and
+              .preflight.metaGraphApiVersion == $apiVersion and
+              .preflight.pageId == $page and
               .preflight.instagramAccountId == $ig and
+              .preflight.username == $username and
+              .preflight.requiredMetaScopes == [
+                "instagram_basic",
+                "instagram_content_publish",
+                "pages_show_list",
+                "pages_read_engagement"
+              ] and
               .preflight.driveFileId == $drive and
               .preflight.expectedAssetSha256 == $asset and
               .bindings.runtimeSecretRole == "roles/secretmanager.secretAccessor" and
               .bindings.deployerRuntimeRole == "roles/iam.serviceAccountUser" and
+              .bindings.deployerProjectRoles == ["roles/run.developer", "roles/logging.viewer"] and
               .bindings.deployerArtifactRepositoryRole == "roles/artifactregistry.writer" and
+              .bindings.runtimeProjectRoles == ["roles/cloudsql.client"] and
+              .bindings.runtimeBucketRoles == ["roles/storage.objectCreator", "roles/storage.objectViewer"] and
               .forbidden.projectOwner == true and
               .forbidden.projectEditor == true and
+              .forbidden.projectSecretAccessor == true and
               .forbidden.serviceAccountKeys == true and
               .forbidden.providerWriteDuringRecovery == true and
               .forbidden.secretValueLogging == true and
@@ -100,13 +142,19 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Reconcile only allowlisted APIs and IAM bindings
+      - name: Reconcile only fixed allowlisted APIs and IAM bindings
         shell: bash
         run: |
           set -euo pipefail
-          POLICY=infra/control-plane/instagram-gcp-publication-recovery-policy.json
-          mapfile -t apis < <(jq -r '.requiredApis[]' "$POLICY")
-          gcloud services enable "${apis[@]}" --project "$GCP_PROJECT_ID" --quiet
+          approved_apis=(
+            artifactregistry.googleapis.com
+            run.googleapis.com
+            secretmanager.googleapis.com
+            iamcredentials.googleapis.com
+            sqladmin.googleapis.com
+            logging.googleapis.com
+          )
+          gcloud services enable "${approved_apis[@]}" --project "$GCP_PROJECT_ID" --quiet
 
           runtime_member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}"
           deploy_member="serviceAccount:${GCP_DEPLOY_SERVICE_ACCOUNT}"
@@ -156,7 +204,7 @@ jobs:
               --role "$role" >/dev/null
           done
 
-      - name: Verify bindings and API state without reading secret values
+      - name: Verify least authority without reading secret values
         shell: bash
         run: |
           set -euo pipefail
@@ -170,8 +218,8 @@ jobs:
           done
 
           for secret in "$TOKEN_SECRET_ID" "$APP_SECRET_ID" "$DATABASE_SECRET_ID"; do
-            policy="$(gcloud secrets get-iam-policy "$secret" --project "$GCP_PROJECT_ID" --format=json)"
-            jq -e --arg member "$runtime_member" 'any(.bindings[]?; .role == "roles/secretmanager.secretAccessor" and any(.members[]?; . == $member))' <<<"$policy" >/dev/null
+            secret_policy="$(gcloud secrets get-iam-policy "$secret" --project "$GCP_PROJECT_ID" --format=json)"
+            jq -e --arg member "$runtime_member" 'any(.bindings[]?; .role == "roles/secretmanager.secretAccessor" and any(.members[]?; . == $member))' <<<"$secret_policy" >/dev/null
           done
 
           runtime_sa_policy="$(gcloud iam service-accounts get-iam-policy "$GCP_RUNTIME_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" --format=json)"
@@ -182,6 +230,19 @@ jobs:
             jq -e --arg role "$role" --arg member "$deploy_member" 'any(.bindings[]?; .role == $role and any(.members[]?; . == $member))' <<<"$project_policy" >/dev/null
           done
           jq -e --arg member "$runtime_member" 'any(.bindings[]?; .role == "roles/cloudsql.client" and any(.members[]?; . == $member))' <<<"$project_policy" >/dev/null
+
+          for member in "$runtime_member" "$deploy_member"; do
+            for forbidden_role in roles/owner roles/editor; do
+              if jq -e --arg role "$forbidden_role" --arg member "$member" 'any(.bindings[]?; .role == $role and any(.members[]?; . == $member))' <<<"$project_policy" >/dev/null; then
+                echo "GCP_PUBLICATION_RECOVERY_FORBIDDEN_PROJECT_ROLE=${forbidden_role}"
+                exit 1
+              fi
+            done
+          done
+          if jq -e --arg member "$runtime_member" 'any(.bindings[]?; .role == "roles/secretmanager.secretAccessor" and any(.members[]?; . == $member))' <<<"$project_policy" >/dev/null; then
+            echo 'GCP_PUBLICATION_RECOVERY_FORBIDDEN_RUNTIME_PROJECT_SECRET_ACCESSOR'
+            exit 1
+          fi
 
           ar_policy="$(gcloud artifacts repositories get-iam-policy "$GCP_ARTIFACT_REPOSITORY" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
           jq -e --arg member "$deploy_member" 'any(.bindings[]?; .role == "roles/artifactregistry.writer" and any(.members[]?; . == $member))' <<<"$ar_policy" >/dev/null
@@ -198,7 +259,7 @@ jobs:
             --arg region "$GCP_REGION" \
             --arg runtime "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --arg deploy "$GCP_DEPLOY_SERVICE_ACCOUNT" \
-            '{schemaVersion:1,sourceSha:$sourceSha,projectId:$project,region:$region,runtimeServiceAccount:$runtime,deployServiceAccount:$deploy,requiredApisEnabled:true,secretBindingsVerified:true,runtimeImpersonationBindingVerified:true,cloudRunDeployBindingVerified:true,artifactRegistryBindingVerified:true,cloudSqlBindingVerified:true,assetBucketBindingsVerified:true,publicBucketAccess:false,result:"PASS"}' \
+            '{schemaVersion:1,sourceSha:$sourceSha,projectId:$project,region:$region,runtimeServiceAccount:$runtime,deployServiceAccount:$deploy,requiredApisEnabled:true,secretBindingsVerified:true,runtimeImpersonationBindingVerified:true,cloudRunDeployBindingVerified:true,artifactRegistryBindingVerified:true,cloudSqlBindingVerified:true,assetBucketBindingsVerified:true,broadRuntimeProjectAccess:false,ownerEditorProjectAccess:false,publicBucketAccess:false,result:"PASS"}' \
             > gcp-recovery-evidence/iam-repair.json
           echo 'GCP_PUBLICATION_IAM_REPAIR=VERIFIED'
 
@@ -223,15 +284,40 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Guard provider-read-only boundary
+      - name: Guard exact provider read-only boundary
         shell: bash
+        env:
+          RECOVERY_AUTHORIZATION: ${{ inputs.authorization }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
         run: |
           set -euo pipefail
-          test "$GITHUB_EVENT_NAME" = 'push'
+          test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
           test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
           test "$GITHUB_REF" = 'refs/heads/main'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          jq -e '.status == "AUTHORIZED_RECOVERY" and .preflight.providerReadOnly == true and .forbidden.providerWriteDuringRecovery == true' infra/control-plane/instagram-gcp-publication-recovery-policy.json >/dev/null
+          test "$EXPECTED_SOURCE_SHA" = "$GITHUB_SHA"
+          test "$RECOVERY_AUTHORIZATION" = 'AUTHORIZE_GCP_INSTAGRAM_RECOVERY_PREFLIGHT'
+          jq -e \
+            --arg apiVersion "$META_GRAPH_API_VERSION" \
+            --arg page "$META_PAGE_ID" \
+            --arg ig "$INSTAGRAM_ACCOUNT_ID" \
+            --arg username "$META_USERNAME" '
+              .status == "AUTHORIZED_RECOVERY" and
+              .authorization.mode == "WORKFLOW_DISPATCH_EXACT_SHA" and
+              .authorization.phrase == "AUTHORIZE_GCP_INSTAGRAM_RECOVERY_PREFLIGHT" and
+              .preflight.providerReadOnly == true and
+              .preflight.metaGraphApiVersion == $apiVersion and
+              .preflight.pageId == $page and
+              .preflight.instagramAccountId == $ig and
+              .preflight.username == $username and
+              .preflight.requiredMetaScopes == [
+                "instagram_basic",
+                "instagram_content_publish",
+                "pages_show_list",
+                "pages_read_engagement"
+              ] and
+              .forbidden.providerWriteDuringRecovery == true
+            ' infra/control-plane/instagram-gcp-publication-recovery-policy.json >/dev/null
 
       - name: Authenticate production deployer and Drive read-only
         id: auth
@@ -275,8 +361,9 @@ jobs:
           const apiVersion = process.env.META_GRAPH_API_VERSION;
           const pageId = process.env.META_PAGE_ID;
           const instagramAccountId = process.env.INSTAGRAM_ACCOUNT_ID;
+          const expectedUsername = process.env.META_USERNAME;
           const sourceSha = process.env.SOURCE_SHA;
-          if (!token || !appSecret || !databaseUrl || !apiVersion || !pageId || !instagramAccountId || !sourceSha) {
+          if (!token || !appSecret || !databaseUrl || !apiVersion || !pageId || !instagramAccountId || !expectedUsername || !sourceSha) {
             throw new Error('GCP_PUBLICATION_PREFLIGHT_RUNTIME_CONFIG_MISSING');
           }
           if (typeof fetch !== 'function') throw new Error('GCP_PUBLICATION_PREFLIGHT_FETCH_UNAVAILABLE');
@@ -313,9 +400,20 @@ jobs:
 
           const profile = await graph(`${instagramAccountId}?fields=id,username,media_count`);
           if (profile.id !== instagramAccountId) throw new Error('GCP_PUBLICATION_PREFLIGHT_INSTAGRAM_ID_MISMATCH');
-          if (profile.username !== 'tocadomorcego') throw new Error('GCP_PUBLICATION_PREFLIGHT_USERNAME_MISMATCH');
+          if (profile.username !== expectedUsername) throw new Error('GCP_PUBLICATION_PREFLIGHT_USERNAME_MISMATCH');
+
           const media = await graph(`${instagramAccountId}/media?fields=id,media_type,timestamp&limit=3`);
-          if (!Array.isArray(media.data)) throw new Error('GCP_PUBLICATION_PREFLIGHT_MEDIA_SHAPE_INVALID');
+          if (!Array.isArray(media.data) || media.data.length === 0) {
+            throw new Error('GCP_PUBLICATION_PREFLIGHT_MEDIA_EMPTY_OR_INVALID');
+          }
+          for (const item of media.data) {
+            if (typeof item?.id !== 'string' || item.id.length === 0) {
+              throw new Error('GCP_PUBLICATION_PREFLIGHT_MEDIA_ID_INVALID');
+            }
+            if (typeof item?.timestamp !== 'string' || Number.isNaN(Date.parse(item.timestamp))) {
+              throw new Error('GCP_PUBLICATION_PREFLIGHT_MEDIA_TIMESTAMP_INVALID');
+            }
+          }
 
           console.log(`GCP_PUBLICATION_PROVIDER_READ_RESULT=${JSON.stringify({
             schemaVersion: 1,
@@ -327,7 +425,7 @@ jobs:
             requiredScopes: required,
             runtimeSecretsPresent: true,
             providerReadOnly: true,
-            recentMediaIds: media.data.map((item) => item?.id).filter((id) => typeof id === 'string'),
+            recentMedia: media.data.map((item) => ({ id: item.id, timestamp: item.timestamp })),
             verifiedAt: new Date().toISOString(),
             result: 'PASS',
           })}`);
@@ -339,10 +437,19 @@ jobs:
           USER node
           CMD ["node", "read.mjs"]
           DOCKER
-          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/instagram-gcp-publication-preflight:${GITHUB_SHA}"
-          docker build -t "$IMAGE" /tmp/instagram-gcp-provider-read
-          docker push "$IMAGE"
-          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+          IMAGE_REPOSITORY="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/instagram-gcp-publication-preflight"
+          IMAGE_TAG="${IMAGE_REPOSITORY}:${GITHUB_SHA}"
+          docker build -t "$IMAGE_TAG" /tmp/instagram-gcp-provider-read
+          docker push "$IMAGE_TAG"
+          IMAGE_DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" --format='value(image_summary.digest)')"
+          case "$IMAGE_DIGEST" in
+            sha256:*) ;;
+            *) echo 'GCP_PUBLICATION_PREFLIGHT_IMAGE_DIGEST_INVALID'; exit 1 ;;
+          esac
+          IMMUTABLE_IMAGE="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
+          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
+          echo "IMMUTABLE_IMAGE=$IMMUTABLE_IMAGE" >> "$GITHUB_ENV"
           echo "JOB_NAME=toca-instagram-pub-preflight-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
 
       - name: Execute Cloud Run under production runtime identity with provider writes impossible
@@ -355,11 +462,11 @@ jobs:
           trap cleanup EXIT
 
           gcloud run jobs deploy "$JOB_NAME" \
-            --image "$IMAGE" \
+            --image "$IMMUTABLE_IMAGE" \
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
-            --set-env-vars "META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION,META_PAGE_ID=$META_PAGE_ID,INSTAGRAM_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,SOURCE_SHA=$GITHUB_SHA" \
+            --set-env-vars "META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION,META_PAGE_ID=$META_PAGE_ID,INSTAGRAM_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,META_USERNAME=$META_USERNAME,SOURCE_SHA=$GITHUB_SHA" \
             --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest,META_APP_SECRET=$APP_SECRET_ID:1,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
             --tasks 1 \
             --max-retries 0 \
@@ -384,18 +491,22 @@ jobs:
           printf '%s\n' "$result_json" | jq -e \
             --arg sha "$GITHUB_SHA" \
             --arg page "$META_PAGE_ID" \
-            --arg ig "$INSTAGRAM_ACCOUNT_ID" '
+            --arg ig "$INSTAGRAM_ACCOUNT_ID" \
+            --arg username "$META_USERNAME" '
               .schemaVersion == 1 and
               .sourceSha == $sha and
               .pageId == $page and
               .instagramAccountId == $ig and
-              .username == "tocadomorcego" and
+              .username == $username and
               .runtimeSecretsPresent == true and
               .providerReadOnly == true and
               .result == "PASS" and
-              (.requiredScopes | index("instagram_content_publish") != null)
+              .requiredScopes == ["instagram_basic", "instagram_content_publish", "pages_show_list", "pages_read_engagement"] and
+              (.recentMedia | type == "array" and length > 0) and
+              all(.recentMedia[]; (.id | type == "string" and length > 0) and (.timestamp | type == "string" and length > 0))
             ' >/dev/null
-          printf '%s\n' "$result_json" | jq . > gcp-recovery-evidence/provider-read.json
+          printf '%s\n' "$result_json" | jq --arg imageDigest "$IMAGE_DIGEST" '. + {imageDigest:$imageDigest}' > gcp-recovery-evidence/provider-read.json
+          jq -e '.imageDigest | startswith("sha256:")' gcp-recovery-evidence/provider-read.json >/dev/null
           jq -n \
             --arg sourceSha "$GITHUB_SHA" \
             --arg assetSha "$APPROVED_ASSET_SHA256" \
