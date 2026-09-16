@@ -3,7 +3,7 @@ import {
   INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID,
   INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE,
 } from '../src/instagram-engagement/knowledge-snapshot-current.js';
-import { OFFICIAL_TICKET_INFORMATION_ANSWER } from '../src/instagram-engagement/ticket-information.js';
+import { TOCA_TICKET_INFORMATION_REPLY } from '../src/instagram-engagement/ticket-information.js';
 
 const ACTIVE_CANONICAL_SPREADSHEET_ID = '1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU';
 
@@ -51,7 +51,7 @@ describe('Instagram engagement canonical knowledge snapshot', () => {
     for (const id of ['FAQ-003', 'FAQ-004']) {
       const row = INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.find((item) => item.faqId === id);
       expect(row?.intent).toBe('TICKET_INFO');
-      expect(row?.answer).toBe(OFFICIAL_TICKET_INFORMATION_ANSWER);
+      expect(row?.answer).toBe(TOCA_TICKET_INFORMATION_REPLY);
     }
   });
 
