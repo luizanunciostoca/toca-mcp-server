@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "incidentRunId": "35100914297",
+  "incidentResult": "FAILED_BEFORE_PROVIDER_WRITE",
+  "lastVerifiedState": "IMAGES_BOUND",
+  "providerWriteAttempted": false,
+  "deployExecuteJobReached": false,
+  "rootCause": "CLOUD_RUN_DUPLICATE_PREFLIGHT_COMMAND_ARGS_OVERRIDE_REJECTED",
+  "recovery": {
+    "strategy": "DEDICATED_IMMUTABLE_PREFLIGHT_IMAGE_CMD",
+    "expiredPublicationCommandResetToNoop": true,
+    "retryRequiresNewTimeBoundEnvelope": true
+  }
+}
