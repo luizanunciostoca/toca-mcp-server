@@ -1,5 +1,7 @@
 # Google Cloud production foundation
 
+Authority review: 2026-09-16.
+
 Target runtime: Cloud Run + Artifact Registry + Secret Manager + Cloud SQL for TOCA OS workloads that require Google Cloud infrastructure.
 
 ## Security model
