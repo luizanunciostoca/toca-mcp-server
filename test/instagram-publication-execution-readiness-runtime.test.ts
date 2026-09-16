@@ -57,8 +57,9 @@ type Capability = typeof passingCapability;
 
 function createMockDatabase(capability: Capability = passingCapability) {
   const release = vi.fn();
-  const end = vi.fn(async () => undefined);
+  const end = vi.fn(() => Promise.resolve());
   const query = vi.fn(async (sql: string) => {
+    await Promise.resolve();
     if (sql === 'begin read only' || sql === 'rollback') return { rows: [] };
     if (sql === 'select 1 as ok') return { rows: [{ ok: 1 }] };
     if (sql.includes("current_setting('transaction_read_only')")) {
@@ -79,7 +80,7 @@ function createMockDatabase(capability: Capability = passingCapability) {
   });
   const client: InstagramPublicationExecutionReadinessClient = { query, release };
   const pool: InstagramPublicationExecutionReadinessPool = {
-    connect: vi.fn(async () => client),
+    connect: vi.fn(() => Promise.resolve(client)),
     end,
   };
   return { pool, query, release, end };
