@@ -141,11 +141,21 @@ jobs:
           if count != 1:
               raise SystemExit(f'baseline guard block mismatch count={count}')
           workflow.write_text(text)
+
+          test_path = Path('test/marketing-autopilot-scheduler-restoration.test.ts')
+          text = test_path.read_text()
+          old = """      rejected: [{ contentItemId: storyId, reason: 'AUTOPILOT_STORY_STATUS_INVALID' }],"""
+          new = """      rejected: expect.arrayContaining([
+                { contentItemId: storyId, reason: 'AUTOPILOT_STORY_STATUS_INVALID' },
+              ]),"""
+          if text.count(old) != 1:
+              raise SystemExit(f'Story rejection assertion mismatch count={text.count(old)}')
+          test_path.write_text(text.replace(old, new, 1))
           PY
       - name: Format and validate touched files
         run: |
-          pnpm exec prettier --write scripts/marketing-autopilot-registry.mjs .github/workflows/marketing-autopilot-publication.yml
-          pnpm exec eslint scripts/marketing-autopilot-registry.mjs
+          pnpm exec prettier --write scripts/marketing-autopilot-registry.mjs .github/workflows/marketing-autopilot-publication.yml test/marketing-autopilot-scheduler-restoration.test.ts
+          pnpm exec eslint scripts/marketing-autopilot-registry.mjs test/marketing-autopilot-scheduler-restoration.test.ts
           pnpm exec vitest run test/marketing-autopilot-registry-reconciliation.test.ts test/marketing-autopilot-scheduler-restoration.test.ts test/github-native-instagram-publication-boundary.test.ts
       - name: Commit corrective patch
         shell: bash
@@ -153,7 +163,7 @@ jobs:
           set -euo pipefail
           git config user.name 'TOCA OS Automation'
           git config user.email 'actions@users.noreply.github.com'
-          git add scripts/marketing-autopilot-registry.mjs .github/workflows/marketing-autopilot-publication.yml
+          git add scripts/marketing-autopilot-registry.mjs .github/workflows/marketing-autopilot-publication.yml test/marketing-autopilot-scheduler-restoration.test.ts
           git diff --cached --check
           git commit -m 'fix(marketing): reconcile daily feed and story rollout'
           git push origin HEAD:ops/restore-marketing-autopilot-gcp-scheduler-20260916
