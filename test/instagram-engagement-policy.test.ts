@@ -84,7 +84,9 @@ describe('Instagram engagement risk policy', () => {
   });
 
   it('keeps reservations and negotiated commercial requests in suggest-only handoff', () => {
-    const classification = classifySocialEngagement('Quero reservar um camarote para meu aniversário');
+    const classification = classifySocialEngagement(
+      'Quero reservar um camarote para meu aniversário',
+    );
     expect(classification.intent).toBe('COMMERCIAL_LEAD');
     const decision = evaluateEngagementPolicy({
       channel: 'DIRECT',

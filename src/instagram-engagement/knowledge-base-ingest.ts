@@ -3,13 +3,7 @@ import type { EngagementIntent } from '../policy/engagement-policy.js';
 import { normalizeKnowledgePrompt } from './knowledge.js';
 
 export type InstagramKnowledgeSourceKind =
-  | 'OPERATIONS'
-  | 'MENU_STRUCTURED'
-  | 'LOCATION'
-  | 'BRAND'
-  | 'PRODUCTS'
-  | 'POLICY'
-  | 'OTHER';
+  'OPERATIONS' | 'MENU_STRUCTURED' | 'LOCATION' | 'BRAND' | 'PRODUCTS' | 'POLICY' | 'OTHER';
 
 export interface CanonicalKnowledgeSourceRegistryRow {
   readonly sourceId: string;
