@@ -75,7 +75,9 @@ function hashSnapshot(row: Row): string {
   const entries = Object.entries(row)
     .map(([key, value]) => [key, value.trim()] as const)
     .sort(([left], [right]) => left.localeCompare(right));
-  return createHash('sha256').update(JSON.stringify(Object.fromEntries(entries))).digest('hex');
+  return createHash('sha256')
+    .update(JSON.stringify(Object.fromEntries(entries)))
+    .digest('hex');
 }
 
 function columnIndex(column: string): number {
@@ -101,7 +103,9 @@ async function executeReconciliation(options: MockOptions = {}) {
     response.setHeader('Content-Type', 'application/json');
 
     if (request.method === 'GET' && url.pathname.includes('/values/')) {
-      response.end(JSON.stringify({ values: [headers, headers.map((header) => liveRow[header] ?? '')] }));
+      response.end(
+        JSON.stringify({ values: [headers, headers.map((header) => liveRow[header] ?? '')] }),
+      );
       return;
     }
 
@@ -115,7 +119,9 @@ async function executeReconciliation(options: MockOptions = {}) {
         for (const update of payload.data ?? []) {
           const match = update.range?.match(/!([A-Z]+)\d+$/);
           if (!match) continue;
-          const header = headers[columnIndex(match[1])];
+          const column = match[1];
+          if (!column) continue;
+          const header = headers[columnIndex(column)];
           if (!header) continue;
           const value = update.values?.[0]?.[0];
           next[header] = value === undefined || value === null ? '' : String(value);
