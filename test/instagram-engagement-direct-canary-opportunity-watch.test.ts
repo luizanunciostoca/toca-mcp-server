@@ -32,21 +32,18 @@ describe('Instagram Direct canary opportunity watch', () => {
     expect(workflow).toContain('gcloud artifacts docker images describe');
   });
 
-  it(
-    'uses the existing Direct eligibility controller without provider credentials or writes',
-    () => {
-      expect(workflow).toContain(
-        '--command node --args dist/src/ops/instagram-engagement-canary-eligibility-readonly.js',
-      );
-      expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_CANARY_MAX_AGE_MINUTES=30');
-      expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_MINUTES=120');
-      expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false');
-      expect(workflow).toContain('--max-retries 0');
-      expect(workflow).toContain('for attempt in 1 2; do');
-      expect(workflow).not.toContain('META_ACCESS_TOKEN');
-      expect(workflow).not.toContain('INSTAGRAM_ACCESS_TOKEN');
-    },
-  );
+  it('uses the existing Direct eligibility controller without provider credentials or writes', () => {
+    expect(workflow).toContain(
+      '--command node --args dist/src/ops/instagram-engagement-canary-eligibility-readonly.js',
+    );
+    expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_CANARY_MAX_AGE_MINUTES=30');
+    expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_TRACE_MAX_AGE_MINUTES=120');
+    expect(workflow).toContain('INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false');
+    expect(workflow).toContain('--max-retries 0');
+    expect(workflow).toContain('for attempt in 1 2; do');
+    expect(workflow).not.toContain('META_ACCESS_TOKEN');
+    expect(workflow).not.toContain('INSTAGRAM_ACCESS_TOKEN');
+  });
 
   it('polls sanitized evidence boundedly and fails closed on malformed or ambiguous state', () => {
     expect(workflow).toContain('for attempt in 1 2 3 4 5 6; do');
@@ -61,23 +58,20 @@ describe('Instagram Direct canary opportunity watch', () => {
     expect(workflow).toContain('MULTIPLE_ELIGIBLE_TARGETS');
   });
 
-  it(
-    'keeps no-target watches active and only creates a sanitized opportunity for one target',
-    () => {
-      expect(workflow).toContain(
-        "if [[ \"$STATUS\" = 'BLOCKED_LOG_PROPAGATION' || \"$STATUS\" = 'NO_ELIGIBLE_TARGET' ]]",
-      );
-      expect(workflow).toContain('WATCH_REMAINS_ACTIVE=true');
-      expect(workflow).toContain('DIRECT_CANARY_OPPORTUNITY_STATUS=READY');
-      expect(workflow).toContain('ELIGIBLE_TARGET_SHA256=$TARGET_SHA');
-      expect(workflow).toContain('REAL_DIRECT_CANARY_AUTHORIZED=false');
-      expect(workflow).toContain('PERSISTENT_DIRECT_PROMOTION_AUTHORIZED=false');
-      expect(workflow).toContain('gh issue create');
-      expect(workflow).not.toContain('EXTERNAL_DIRECT_REPLY_AUTHORIZED=true');
-      expect(workflow).not.toContain('gcloud run services ');
-      expect(workflow).not.toContain('gcloud scheduler ');
-    },
-  );
+  it('keeps no-target watches active and only creates a sanitized opportunity for one target', () => {
+    expect(workflow).toContain(
+      'if [[ "$STATUS" = \'BLOCKED_LOG_PROPAGATION\' || "$STATUS" = \'NO_ELIGIBLE_TARGET\' ]]',
+    );
+    expect(workflow).toContain('WATCH_REMAINS_ACTIVE=true');
+    expect(workflow).toContain('DIRECT_CANARY_OPPORTUNITY_STATUS=READY');
+    expect(workflow).toContain('ELIGIBLE_TARGET_SHA256=$TARGET_SHA');
+    expect(workflow).toContain('REAL_DIRECT_CANARY_AUTHORIZED=false');
+    expect(workflow).toContain('PERSISTENT_DIRECT_PROMOTION_AUTHORIZED=false');
+    expect(workflow).toContain('gh issue create');
+    expect(workflow).not.toContain('EXTERNAL_DIRECT_REPLY_AUTHORIZED=true');
+    expect(workflow).not.toContain('gcloud run services ');
+    expect(workflow).not.toContain('gcloud scheduler ');
+  });
 
   it('consumes stale, expired, ready, duplicate, or failed watches fail-closed', () => {
     expect(workflow).toContain("close_watch 'STALE_MAIN'");
