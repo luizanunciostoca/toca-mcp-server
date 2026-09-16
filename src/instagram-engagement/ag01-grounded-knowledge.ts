@@ -39,9 +39,7 @@ export interface Ag01GroundedInstagramKnowledgeOptions {
   readonly circuitOpenMs?: number;
 }
 
-export class Ag01GroundedInstagramKnowledgeSource
-  implements InstagramEngagementKnowledgeSource
-{
+export class Ag01GroundedInstagramKnowledgeSource implements InstagramEngagementKnowledgeSource {
   readonly #fetch: typeof fetch;
   readonly #serviceUrl: string;
   readonly #audience: string;
@@ -137,7 +135,10 @@ export class Ag01GroundedInstagramKnowledgeSource
         });
         if (!response.ok) {
           const error = new Error(`INSTAGRAM_AG01_HTTP_ERROR:${response.status}`);
-          if ((response.status === 408 || response.status === 429 || response.status >= 500) && attempt === 0) {
+          if (
+            (response.status === 408 || response.status === 429 || response.status >= 500) &&
+            attempt === 0
+          ) {
             lastError = error;
             await this.#sleep(250);
             continue;
@@ -267,7 +268,9 @@ function jwtExpiryMs(token: string): number | null {
     const decoded = JSON.parse(Buffer.from(normalized, 'base64').toString('utf8')) as {
       exp?: unknown;
     };
-    return typeof decoded.exp === 'number' && Number.isFinite(decoded.exp) ? decoded.exp * 1000 : null;
+    return typeof decoded.exp === 'number' && Number.isFinite(decoded.exp)
+      ? decoded.exp * 1000
+      : null;
   } catch {
     return null;
   }
