@@ -53,29 +53,26 @@ describe('Instagram FAQ expansion knowledge recovery', () => {
     expect(workflow).toContain('AUTHORIZATION_STATE=CONSUMED_AND_CLOSED');
   });
 
-  it(
-    'serializes recovery against every actually authorized shared engagement production mutation',
-    () => {
-      expect(guard).toContain('actions/runs?status=${status}&per_page=100');
-      expect(guard).toContain('def authorized_issue_mutation:');
-      expect(guard).toContain('select(authorized_issue_mutation)');
-      expect(guard).toContain('instagram-engagement-faq-expansion-limited-refresh.yml');
-      expect(guard).toContain('instagram-engagement-faq-knowledge-recovery.yml');
-      expect(guard).toContain(
-        'PRODUCTION AUTHORIZATION — Instagram engagement LIMITED runtime refresh AUTO',
-      );
-      expect(guard).toContain(
-        'PRODUCTION AUTHORIZATION — Instagram FAQ expansion LIMITED refresh AUTO',
-      );
-      expect(guard).toContain(
-        'PRODUCTION AUTHORIZATION — Instagram FAQ knowledge RECOVERY AUTO',
-      );
-      expect(guard).toContain('(.display_title // "") | startswith(');
-      expect(guard).toContain('MERGE_RESERVATION=$ENGAGEMENT_RESERVATION');
-      expect(guard).toContain('Competing engagement production mutation runs detected');
-      expect(workflow).toContain('ENGAGEMENT_RESERVATION: FAQ_KNOWLEDGE_RECOVERY_');
-    },
-  );
+  it('serializes recovery against every shared engagement production mutation', () => {
+    expect(guard).toContain('actions/runs?status=${status}&per_page=100');
+    expect(guard).toContain('def authorized_issue_mutation:');
+    expect(guard).toContain('select(authorized_issue_mutation)');
+    expect(guard).toContain('instagram-engagement-faq-expansion-limited-refresh.yml');
+    expect(guard).toContain('instagram-engagement-faq-knowledge-recovery.yml');
+    expect(guard).toContain(
+      'PRODUCTION AUTHORIZATION — Instagram engagement LIMITED runtime refresh AUTO',
+    );
+    expect(guard).toContain(
+      'PRODUCTION AUTHORIZATION — Instagram FAQ expansion LIMITED refresh AUTO',
+    );
+    expect(guard).toContain(
+      'PRODUCTION AUTHORIZATION — Instagram FAQ knowledge RECOVERY AUTO',
+    );
+    expect(guard).toContain('(.display_title // "") | startswith(');
+    expect(guard).toContain('MERGE_RESERVATION=$ENGAGEMENT_RESERVATION');
+    expect(guard).toContain('Competing engagement production mutation runs detected');
+    expect(workflow).toContain('ENGAGEMENT_RESERVATION: FAQ_KNOWLEDGE_RECOVERY_');
+  });
 
   it('preserves the active LIMITED runtime while recovering only database knowledge', () => {
     expect(guard).toContain('ENGAGEMENT_AUTONOMY_STAGE=LIMITED');
