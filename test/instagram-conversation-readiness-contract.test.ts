@@ -3,7 +3,15 @@ import { describe, expect, it } from 'vitest';
 
 describe('Instagram conversation operations readiness contract', () => {
   it('fails closed unless migration 038 and both conversation tables are present', async () => {
-    const readiness = await readFile('src/instagram-engagement-readiness-preflight.ts', 'utf8');
+    const readinessEntrypoint = await readFile(
+      'src/instagram-engagement-readiness-preflight.ts',
+      'utf8',
+    );
+    const readinessCore = await readFile(
+      'src/instagram-engagement-readiness-preflight-core.ts',
+      'utf8',
+    );
+    const readiness = `${readinessEntrypoint}\n${readinessCore}`;
     const migration = await readFile(
       'migrations/038_instagram_conversation_operations.sql',
       'utf8',

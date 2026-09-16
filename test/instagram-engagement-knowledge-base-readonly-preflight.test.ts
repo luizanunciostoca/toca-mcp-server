@@ -10,6 +10,8 @@ const registry = [
   ['SRC-OPS-001', 'Operações', 'drive-ops', 'OPERACIONAL', 'FAQ', 'CANONICO', '', ''],
   ['SRC-MENU-002', 'Menu', 'drive-menu', 'MENU', 'KB', 'ATIVO', '', ''],
   ['SRC-LOC-001', 'Localização', 'drive-loc', 'LOCATION', 'KB', 'ACTIVE', '', ''],
+  ['SRC-BRAND-001', 'Marca', 'drive-brand', 'BRAND', 'ALTA', 'CANONICO', '', ''],
+  ['SRC-PROD-001', 'Produtos', 'drive-products', 'PRODUCTS', 'ALTA', 'CANONICO', '', ''],
 ] as const;
 
 const sourceTextById: Readonly<Record<string, string>> = {
@@ -17,10 +19,27 @@ const sourceTextById: Readonly<Record<string, string>> = {
   'drive-menu':
     'id,item,dominio,categoria,descricao,preco exibido,preco 1,preco 2,status\n1,Água,BEBIDAS,Águas,Água mineral,R$ 10,,,ATIVO',
   'drive-loc': '\u200BLocalização:\u00A0Morro de São Paulo, Bahia.',
+  'drive-brand': `Existimos para criar momentos que façam as pessoas se sentirem mais vivas.
+Celebrar a Vida.
+A Toca do Morcego não existe apenas para oferecer entretenimento, música, gastronomia ou uma vista privilegiada.`,
+  'drive-products': `01_SUNSET — experiência principal.
+02_THE_PARTY — produto noturno.
+03_EVENTOS_ESPECIAIS — experiências sazonais.
+04_GASTRONOMIA — experiência gastronômica.
+05_EVENTOS_PRIVADOS — eventos contratados.
+06_NOVOS_PRODUTOS — incubação.`,
 };
 
+const expandedSourceIds = [
+  'SRC-OPS-001',
+  'SRC-MENU-002',
+  'SRC-LOC-001',
+  'SRC-BRAND-001',
+  'SRC-PROD-001',
+] as const;
+
 describe('Instagram engagement knowledge-base read-only preflight', () => {
-  it('reads and parses exactly the allowlisted sources without database or provider writes', async () => {
+  it('reads and parses exactly the expanded allowlisted sources without database or provider writes', async () => {
     const readRange = vi.fn(() => Promise.resolve(registry));
     const readText = vi.fn((fileId: string) =>
       Promise.resolve({
@@ -35,26 +54,23 @@ describe('Instagram engagement knowledge-base read-only preflight', () => {
       { readRange },
       { readText },
       INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID,
-      ['SRC-OPS-001', 'SRC-MENU-002', 'SRC-LOC-001'],
+      expandedSourceIds,
     );
 
     expect(result.status).toBe('PASS');
-    expect(result.sourceCount).toBe(3);
-    expect(result.totalChunkCount).toBeGreaterThanOrEqual(3);
-    expect(result.autoReplyChunkCount).toBeGreaterThanOrEqual(3);
+    expect(result.sourceCount).toBe(5);
+    expect(result.totalChunkCount).toBeGreaterThanOrEqual(10);
+    expect(result.autoReplyChunkCount).toBeGreaterThanOrEqual(10);
     expect(result.documents.every((item) => item.chunkCount > 0)).toBe(true);
     expect(result.databaseTouched).toBe(false);
     expect(result.providerWritesUsed).toBe(false);
     expect(result.sourceContentPrinted).toBe(false);
-    expect(result.documents.map((item) => item.sourceId)).toEqual([
-      'SRC-OPS-001',
-      'SRC-MENU-002',
-      'SRC-LOC-001',
-    ]);
+    expect(result.documents.map((item) => item.sourceId)).toEqual(expandedSourceIds);
     expect(readRange).toHaveBeenCalledOnce();
-    expect(readText).toHaveBeenCalledTimes(3);
+    expect(readText).toHaveBeenCalledTimes(5);
     expect(JSON.stringify(result)).not.toContain('Água mineral');
     expect(JSON.stringify(result)).not.toContain('drive-ops');
+    expect(JSON.stringify(result)).not.toContain('Celebrar a Vida');
   });
 
   it('fails closed when an allowlisted source cannot produce chunks', async () => {
@@ -75,13 +91,13 @@ describe('Instagram engagement knowledge-base read-only preflight', () => {
         { readRange },
         { readText },
         INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID,
-        ['SRC-OPS-001', 'SRC-MENU-002', 'SRC-LOC-001'],
+        expandedSourceIds,
       ),
     ).rejects.toThrow('INSTAGRAM_ENGAGEMENT_KB_NO_CHUNKS:SRC-LOC-001');
   });
 
   it('fails closed when the canonical source registry is incomplete', async () => {
-    const incomplete = registry.slice(0, 3);
+    const incomplete = registry.slice(0, 5);
     await expect(
       runInstagramKnowledgeReadOnlyPreflight(
         { readRange: () => Promise.resolve(incomplete) },
@@ -89,7 +105,7 @@ describe('Instagram engagement knowledge-base read-only preflight', () => {
           readText: () => Promise.resolve({ id: '', name: '', mimeType: '', text: 'x' }),
         },
         INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID,
-        ['SRC-OPS-001', 'SRC-MENU-002', 'SRC-LOC-001'],
+        expandedSourceIds,
       ),
     ).rejects.toThrow('INSTAGRAM_ENGAGEMENT_KB_SOURCE_SET_MISMATCH');
   });

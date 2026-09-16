@@ -63,25 +63,51 @@ describe('social engagement event schedule classification', () => {
     'Sunset começa quando?',
     'O Sunset funciona todos os dias?',
     'Que dia e que horas acontece a The Party?',
+    'Que dia tem festa na Toca?',
+    'Qual dia tem festa na Toca?',
     'What time does The Party start?',
   ])('classifies event schedule question as LOCATION_HOURS: %s', (text) => {
     expect(classifySocialEngagement(text).intent).toBe('LOCATION_HOURS');
+  });
+
+  it('classifies the real party-day FAQ as a high-confidence factual question', () => {
+    expect(classifySocialEngagement('Que dia tem festa na toca?')).toMatchObject({
+      intent: 'LOCATION_HOURS',
+      eventInterest: 'THE_PARTY',
+      commercialIntent: 'NONE',
+      confidence: 'HIGH',
+      priority: 'P3',
+      urgency: 'LOW',
+    });
   });
 
   it('preserves EVENT_INFO for event interest without schedule or location semantics', () => {
     expect(classifySocialEngagement('Quero saber mais sobre o Sunset')).toMatchObject({
       intent: 'EVENT_INFO',
       eventInterest: 'SUNSET',
+      commercialIntent: 'NONE',
     });
   });
 
-  it('preserves commercial precedence over schedule/event signals', () => {
+  it('keeps a factual ticket-price question informational', () => {
     expect(
       classifySocialEngagement('Quanto custa o ingresso da The Party e que horas começa?'),
     ).toMatchObject({
-      intent: 'COMMERCIAL_LEAD',
+      intent: 'TICKET_INFO',
+      eventInterest: 'THE_PARTY',
+      commercialIntent: 'NONE',
+    });
+  });
+
+  it('keeps explicit purchase as a commercial signal while routing the reply through TICKET_INFO', () => {
+    expect(
+      classifySocialEngagement('Quero comprar o ingresso da The Party, tem disponibilidade?'),
+    ).toMatchObject({
+      intent: 'TICKET_INFO',
+      topic: 'TICKETS',
       eventInterest: 'THE_PARTY',
       commercialIntent: 'HIGH',
+      priority: 'P1',
     });
   });
 });

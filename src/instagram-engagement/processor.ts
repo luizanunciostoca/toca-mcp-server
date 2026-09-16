@@ -125,14 +125,19 @@ export class InstagramEngagementProcessor {
       this.options.autoReplyChannels ?? (['COMMENT', 'DIRECT'] as const),
     );
     const autoReplyMaxAgeMs = this.options.autoReplyMaxAgeMs ?? 30 * 60 * 1000;
+    const ticketPurchaseRedirect =
+      classification.intent === 'TICKET_INFO' &&
+      classification.topic === 'TICKETS' &&
+      classification.commercialIntent === 'HIGH' &&
+      classification.conversationIntents.includes('PURCHASE');
     const autoWriteEligible =
       this.options.writesEnabled &&
       autoReplyChannels.has(payload.channel) &&
       isWithinAutoReplyWindow(payload.occurredAt ?? now, now, autoReplyMaxAgeMs) &&
       classification.confidence === 'HIGH' &&
-      ['P2', 'P3'].includes(classification.priority) &&
+      (['P2', 'P3'].includes(classification.priority) || ticketPurchaseRedirect) &&
       !classification.containsPotentialSensitiveData &&
-      classification.commercialIntent === 'NONE' &&
+      (classification.commercialIntent === 'NONE' || ticketPurchaseRedirect) &&
       classification.urgency === 'LOW' &&
       !context.automationBlocked;
     const leadResult = await this.options.leadEngine.process({
@@ -159,6 +164,7 @@ export class InstagramEngagementProcessor {
         'instagram:engagement:message-grouped',
         `instagram:engagement:group-size:${context.messageCount}`,
         'instagram:engagement:classified',
+        ...(ticketPurchaseRedirect ? ['instagram:engagement:ticket-official-cta'] : []),
       ],
       now,
     });

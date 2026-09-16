@@ -3,7 +3,7 @@ import type { EngagementIntent } from '../policy/engagement-policy.js';
 import { normalizeKnowledgePrompt } from './knowledge.js';
 
 export type InstagramKnowledgeSourceKind =
-  'OPERATIONS' | 'MENU_STRUCTURED' | 'LOCATION' | 'POLICY' | 'OTHER';
+  'OPERATIONS' | 'MENU_STRUCTURED' | 'LOCATION' | 'BRAND' | 'PRODUCTS' | 'POLICY' | 'OTHER';
 
 export interface CanonicalKnowledgeSourceRegistryRow {
   readonly sourceId: string;
@@ -82,6 +82,8 @@ export function buildKnowledgeBaseChunks(
   if (source.kind === 'OPERATIONS') return buildOperationsChunks(source, clean);
   if (source.kind === 'MENU_STRUCTURED') return buildMenuChunks(source, clean);
   if (source.kind === 'LOCATION') return buildLocationChunks(source, clean);
+  if (source.kind === 'BRAND') return buildBrandChunks(source, clean);
+  if (source.kind === 'PRODUCTS') return buildProductsChunks(source, clean);
   return [];
 }
 
@@ -113,7 +115,7 @@ function buildOperationsChunks(
       stableKey: 'sunset-hours',
       heading: 'Horário oficial do Sunset',
       content: sentence(`O Sunset ${sunset}`),
-      searchText: `sunset horario horários abre abertura começa comeca quando funciona todos os dias ${sunset}`,
+      searchText: `sunset horario horários abre abertura começa comeca quando que dia hoje todo dia funciona todos os dias ${sunset}`,
       intentHints: ['LOCATION_HOURS', 'EVENT_INFO'],
       risk: 'LOW',
       autonomy: 'AUTO_REPLY_ALLOWED',
@@ -124,9 +126,9 @@ function buildOperationsChunks(
   if (party) {
     chunks.push({
       stableKey: 'the-party-hours',
-      heading: 'Horário oficial da The Party',
+      heading: 'Dia e horário oficial da The Party',
       content: sentence(`A The Party ${party}`),
-      searchText: `the party festa sexta horario horários começa comeca termina dia ${party}`,
+      searchText: `the party festa sexta sabado sábado horario horários começa comeca termina que dia qual dia quando ${party}`,
       intentHints: ['LOCATION_HOURS', 'EVENT_INFO'],
       risk: 'LOW',
       autonomy: 'AUTO_REPLY_ALLOWED',
@@ -240,7 +242,7 @@ function buildMenuChunks(
       stableKey: `menu-item-${rawId}-${item}`,
       heading: item,
       content,
-      searchText: `${item} ${domain} ${category} ${description} preço preco valor cardapio cardápio menu ${price}`,
+      searchText: `${item} ${domain} ${category} ${description} preço preco valor cardapio cardápio menu drink bebida comida petisco gastronomia ${price}`,
       intentHints: ['FAQ_OPERATIONAL'],
       risk: 'LOW',
       autonomy: 'AUTO_REPLY_ALLOWED',
@@ -262,8 +264,129 @@ function buildLocationChunks(
       stableKey: 'general-location',
       heading: 'Localização geral da Toca do Morcego',
       content: `A Toca do Morcego fica em ${stripTerminalPunctuation(location)}. Para a rota exata até a entrada, use o endereço disponível nos canais oficiais da Toca.`,
-      searchText: `onde fica localização localizacao endereco endereço toca do morcego morro de sao paulo são paulo bahia ${location}`,
+      searchText: `onde fica localização localizacao endereco endereço como chegar toca do morcego morro de sao paulo são paulo bahia ${location}`,
       intentHints: ['LOCATION_HOURS'],
+      risk: 'LOW',
+      autonomy: 'AUTO_REPLY_ALLOWED',
+      sourceReference,
+    },
+  ];
+}
+
+function buildBrandChunks(
+  source: CanonicalKnowledgeSourceRegistryRow,
+  text: string,
+): readonly KnowledgeBaseChunkSeed[] {
+  const sourceReference = `${source.title} — Drive ID ${source.driveId}`;
+  const purposeConfirmed = text.includes(
+    'Existimos para criar momentos que façam as pessoas se sentirem mais vivas.',
+  );
+  const celebrateConfirmed = text.includes('Celebrar a Vida.') || text.includes('CELEBRAR A VIDA.');
+  const notJustVenueConfirmed = text.includes(
+    'A Toca do Morcego não existe apenas para oferecer entretenimento',
+  );
+  if (!purposeConfirmed || !celebrateConfirmed || !notJustVenueConfirmed) return [];
+
+  return [
+    {
+      stableKey: 'brand-purpose',
+      heading: 'Propósito da Toca do Morcego',
+      content:
+        'O propósito da Toca é criar momentos que façam as pessoas se sentirem mais vivas. “Celebrar a Vida” é a ideia-mãe da marca: viver o presente com presença, conexão, beleza e emoção.',
+      searchText:
+        'toca do morcego propósito proposito por que existe celebrar a vida ideia missão missao marca experiência experiencia',
+      intentHints: ['GENERAL_SOCIAL'],
+      risk: 'LOW',
+      autonomy: 'AUTO_REPLY_ALLOWED',
+      sourceReference,
+    },
+    {
+      stableKey: 'brand-definition',
+      heading: 'O que é a Toca do Morcego',
+      content:
+        'A Toca do Morcego é uma marca de experiências em Morro de São Paulo. Sua proposta conecta natureza, música, gastronomia, drinks, hospitalidade e pessoas; bar, restaurante, festa ou ponto turístico são partes da operação, não a definição completa da marca.',
+      searchText:
+        'o que e toca do morcego que lugar marca experiências morro de sao paulo bar restaurante balada casa noturna natureza musica gastronomia drinks hospitalidade',
+      intentHints: ['GENERAL_SOCIAL'],
+      risk: 'LOW',
+      autonomy: 'AUTO_REPLY_ALLOWED',
+      sourceReference,
+    },
+  ];
+}
+
+function buildProductsChunks(
+  source: CanonicalKnowledgeSourceRegistryRow,
+  text: string,
+): readonly KnowledgeBaseChunkSeed[] {
+  const sourceReference = `${source.title} — Drive ID ${source.driveId}`;
+  const requiredMarkers = [
+    '01_SUNSET',
+    '02_THE_PARTY',
+    '03_EVENTOS_ESPECIAIS',
+    '04_GASTRONOMIA',
+    '05_EVENTOS_PRIVADOS',
+    '06_NOVOS_PRODUTOS',
+  ];
+  if (!requiredMarkers.every((marker) => text.includes(marker))) return [];
+
+  return [
+    {
+      stableKey: 'portfolio-overview',
+      heading: 'Experiências da Toca do Morcego',
+      content:
+        'A Toca reúne Sunset, The Party, eventos especiais e gastronomia em seu portfólio de experiências. Eventos privados existem sob contratação e briefing; datas, preços, artistas e disponibilidade precisam de fonte atual.',
+      searchText:
+        'o que tem na toca produtos experiências experiencias portfolio sunset the party festa eventos especiais gastronomia eventos privados',
+      intentHints: ['GENERAL_SOCIAL', 'EVENT_INFO'],
+      risk: 'LOW',
+      autonomy: 'AUTO_REPLY_ALLOWED',
+      sourceReference,
+    },
+    {
+      stableKey: 'sunset-experience',
+      heading: 'Experiência Sunset',
+      content:
+        'O Sunset é uma experiência central da Toca de contemplação, música, gastronomia, drinks, encontros e memória, com a natureza e o pôr do sol como parte da experiência.',
+      searchText:
+        'o que e sunset como e sunset experiência experiencia por do sol contemplação contemplacao musica gastronomia drinks encontros',
+      intentHints: ['EVENT_INFO'],
+      risk: 'LOW',
+      autonomy: 'AUTO_REPLY_ALLOWED',
+      sourceReference,
+    },
+    {
+      stableKey: 'the-party-experience',
+      heading: 'Experiência The Party',
+      content:
+        'A The Party é o produto noturno de maior energia da Toca, ligado a música, desejo e celebração. Line-up, edição, data especial e demais fatos variáveis precisam de programação vigente.',
+      searchText:
+        'o que e the party como e festa balada toca produto noturno musica energia celebração celebracao',
+      intentHints: ['EVENT_INFO'],
+      risk: 'LOW',
+      autonomy: 'AUTO_REPLY_ALLOWED',
+      sourceReference,
+    },
+    {
+      stableKey: 'special-events',
+      heading: 'Eventos especiais da Toca',
+      content:
+        'Eventos especiais fazem parte do portfólio da Toca como experiências extraordinárias, sazonais ou temáticas e não constituem, por si só, um produto permanente. Datas e detalhes devem ser confirmados na programação oficial vigente.',
+      searchText:
+        'eventos especiais festa especial tematica temática sazonal programação programacao agenda',
+      intentHints: ['EVENT_INFO'],
+      risk: 'LOW',
+      autonomy: 'AUTO_REPLY_ALLOWED',
+      sourceReference,
+    },
+    {
+      stableKey: 'gastronomy-experience',
+      heading: 'Gastronomia na experiência Toca',
+      content:
+        'A gastronomia faz parte do portfólio e da experiência da Toca. Itens e valores disponíveis devem ser consultados no cardápio oficial vigente.',
+      searchText:
+        'gastronomia comida restaurante pratos petiscos menu cardapio cardápio experiência toca',
+      intentHints: ['FAQ_OPERATIONAL', 'GENERAL_SOCIAL'],
       risk: 'LOW',
       autonomy: 'AUTO_REPLY_ALLOWED',
       sourceReference,
@@ -275,6 +398,8 @@ function sourceKind(sourceId: string): InstagramKnowledgeSourceKind {
   if (sourceId === 'SRC-OPS-001') return 'OPERATIONS';
   if (sourceId === 'SRC-MENU-002') return 'MENU_STRUCTURED';
   if (sourceId === 'SRC-LOC-001') return 'LOCATION';
+  if (sourceId === 'SRC-BRAND-001') return 'BRAND';
+  if (sourceId === 'SRC-PROD-001') return 'PRODUCTS';
   if (sourceId === 'SRC-POL-001') return 'POLICY';
   return 'OTHER';
 }
