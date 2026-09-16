@@ -75,7 +75,8 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
     'agencia',
     'influencer',
     'criador de conteudo',
-    'artista',
+    'quero tocar',
+    'quero ser dj',
     'partnership',
     'collaboration',
     'sponsorship',
@@ -121,8 +122,19 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
       'not working',
       'support',
     ]);
+
   const ticket = hasAny(normalized, ['ingresso', 'ticket', 'entrada', 'bilhete']);
-  const reservation = hasAny(normalized, ['reserva', 'reservar', 'booking', 'book a table']);
+  const reservation = hasAny(normalized, [
+    'reserva',
+    'reservar',
+    'booking',
+    'book a table',
+    'camarote',
+    'mesa',
+    'evento privado',
+    'casamento',
+    'aniversario',
+  ]);
   const price = hasAny(normalized, ['preco', 'valor', 'quanto custa', 'price', 'how much']);
   const gastronomy = hasAny(normalized, [
     'cardapio',
@@ -174,66 +186,137 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
     'idiotas',
     'desgracados',
   ]);
-  const locationHours = hasAny(normalized, [
-    'horario',
-    'que horas',
-    'onde fica',
-    'localizacao',
-    'como chegar',
-    'quando',
-    'abre',
-    'fecha',
-    'comeca',
-    'termina',
-    'funciona todos os dias',
-    'hours',
-    'what time',
-    'where is',
-    'how to get',
-    'when',
-    'opens',
-    'closes',
-    'starts',
-    'ends',
+
+  const eventDateQuestion =
+    eventInterest !== 'NONE' &&
+    hasAny(normalized, [
+      'que dia',
+      'qual dia',
+      'quais dias',
+      'em que dia',
+      'quando',
+      'hoje',
+      'amanha',
+      'sexta',
+      'sabado',
+      'domingo',
+      'segunda',
+      'terca',
+      'quarta',
+      'quinta',
+    ]);
+  const locationHours =
+    eventDateQuestion ||
+    hasAny(normalized, [
+      'horario',
+      'que horas',
+      'que dia',
+      'qual dia',
+      'quais dias',
+      'em que dia',
+      'onde fica',
+      'localizacao',
+      'como chegar',
+      'quando',
+      'abre',
+      'fecha',
+      'comeca',
+      'termina',
+      'funciona todos os dias',
+      'hours',
+      'what time',
+      'which day',
+      'what day',
+      'where is',
+      'how to get',
+      'when',
+      'opens',
+      'closes',
+      'starts',
+      'ends',
+    ]);
+  const officialChannelFaq = hasAny(normalized, [
+    'site oficial',
+    'site da toca',
+    'instagram',
+    'insta da toca',
+    'perfil oficial',
+    'whatsapp',
+    'telefone',
+    'contato da toca',
+    'falar com atendimento',
+    'numero da toca',
   ]);
-  const operationalFaq = hasAny(normalized, [
-    'idade minima',
-    'menor de idade',
-    'dress code',
-    'traje',
-    'acessibilidade',
-    'cadeirante',
-    'estacionamento',
-    'forma de pagamento',
-    'aceita cartao',
-    'pode entrar com',
-    'documento para entrar',
+  const operationalFaq =
+    officialChannelFaq ||
+    hasAny(normalized, [
+      'idade minima',
+      'menor de idade',
+      'dress code',
+      'traje',
+      'acessibilidade',
+      'cadeirante',
+      'estacionamento',
+      'forma de pagamento',
+      'aceita cartao',
+      'aceita pix',
+      'pode entrar com',
+      'documento para entrar',
+      'pode levar pet',
+      'aceita pet',
+      'achados e perdidos',
+      'perdi meu',
+    ]);
+  const institutionalFaq = hasAny(normalized, [
+    'o que e a toca',
+    'quem e a toca',
+    'toca do morcego e o que',
+    'o que tem na toca',
+    'quais experiencias',
+    'produtos da toca',
+    'experiencias da toca',
+    'celebrar a vida',
+    'proposito da toca',
+    'qual o proposito',
+    'o que significa toca',
+    'o que e sunset',
+    'o que e o sunset',
+    'como e o sunset',
+    'o que e the party',
+    'o que e a the party',
+    'como e a the party',
+    'what is the party',
+  ]);
+  const lineupInfo = hasAny(normalized, [
+    'line up',
+    'line-up',
+    'lineup',
+    'programacao',
+    'quem toca',
+    'qual dj',
+    'quais djs',
+    'dj toca',
+    'artista toca',
+    'atracao',
   ]);
 
-  const commercialSignals = [ticket, reservation, price].filter(Boolean).length;
   const buyingSignal = hasAny(normalized, [
-    'comprar',
-    'compro',
-    'onde compro',
-    'quero ir',
+    'quero comprar',
     'quero ingresso',
-    'garantir',
-    'disponibilidade',
+    'garantir meu ingresso',
+    'garantir ingresso',
+    'disponibilidade de ingresso',
+    'tem ingresso disponivel',
     'buy',
     'purchase',
-    'i want to go',
-    'available',
+    'available tickets',
   ]);
-  const commercialIntent: SocialCommercialIntent =
-    buyingSignal && (commercialSignals > 0 || eventInterest !== 'NONE')
-      ? 'HIGH'
-      : commercialSignals >= 2
-        ? 'HIGH'
-        : commercialSignals === 1
-          ? 'MEDIUM'
-          : eventInterest !== 'NONE'
-            ? 'LOW'
-            : 'NONE';
+  const informationalPrice = price && !buyingSignal;
+  const commercialIntent: SocialCommercialIntent = buyingSignal
+    ? 'HIGH'
+    : reservation || (price && !informationalPrice)
+      ? 'MEDIUM'
+      : 'NONE';
 
   const knownLowOrCommercial =
     ticket ||
@@ -241,6 +324,8 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
     price ||
     locationHours ||
     operationalFaq ||
+    institutionalFaq ||
+    lineupInfo ||
     eventInterest !== 'NONE' ||
     gastronomy ||
     praise ||
@@ -266,19 +351,19 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
                 ? 'PUBLIC_FIGURE'
                 : complaint || support
                   ? 'COMPLAINT'
-                  : commercialIntent === 'HIGH' || reservation || price
+                  : partnership || reservation || commercialIntent === 'HIGH'
                     ? 'COMMERCIAL_LEAD'
-                    : ticket
+                    : ticket || (price && eventInterest !== 'NONE')
                       ? 'TICKET_INFO'
                       : locationHours
                         ? 'LOCATION_HOURS'
-                        : eventInterest !== 'NONE'
+                        : lineupInfo || eventInterest !== 'NONE'
                           ? 'EVENT_INFO'
-                          : operationalFaq || gastronomy
+                          : operationalFaq || gastronomy || careers || price
                             ? 'FAQ_OPERATIONAL'
-                            : partnership
-                              ? 'COMMERCIAL_LEAD'
-                              : materialUnknown || careers || spam
+                            : institutionalFaq
+                              ? 'GENERAL_SOCIAL'
+                              : materialUnknown || spam
                                 ? 'UNKNOWN'
                                 : 'GENERAL_SOCIAL';
 
@@ -298,15 +383,15 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
                 ? 'CAREERS'
                 : reservation
                   ? 'RESERVATION'
-                  : price
+                  : price && !informationalPrice
                     ? 'PRICE'
-                    : ticket
+                    : ticket || (price && eventInterest !== 'NONE')
                       ? 'TICKETS'
                       : gastronomy
                         ? 'GASTRONOMY'
                         : locationHours
                           ? 'LOCATION_HOURS'
-                          : eventInterest !== 'NONE'
+                          : lineupInfo || eventInterest !== 'NONE'
                             ? 'EVENT_INFO'
                             : operationalFaq
                               ? 'LOCATION_HOURS'
@@ -334,7 +419,13 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
     partnership,
     careers,
     information:
-      ticket || reservation || price || locationHours || operationalFaq || materialUnknown,
+      ticket ||
+      price ||
+      locationHours ||
+      operationalFaq ||
+      institutionalFaq ||
+      lineupInfo ||
+      materialUnknown,
   });
   const priority = classifyPriority({
     harassmentOrThreat: harassmentOrThreat || abusiveLanguage,
@@ -364,6 +455,8 @@ export function classifySocialEngagement(text: string): SocialEngagementClassifi
       price ||
       locationHours ||
       operationalFaq ||
+      institutionalFaq ||
+      lineupInfo ||
       gastronomy ||
       partnership ||
       careers ||
@@ -534,7 +627,7 @@ function classifySentiment(value: string): SocialSentiment {
 function classifyUrgency(value: string, safety: boolean, refund: boolean): SocialUrgency {
   if (safety && hasAny(value, ['agora', 'urgente', 'emergency', 'now'])) return 'CRITICAL';
   if (safety || hasAny(value, ['urgente', 'imediato', 'asap', 'urgent'])) return 'HIGH';
-  if (refund || hasAny(value, ['hoje', 'today', 'esta noite', 'tonight'])) return 'MEDIUM';
+  if (refund) return 'MEDIUM';
   return 'LOW';
 }
 
@@ -546,6 +639,8 @@ function classifyLanguage(value: string): SocialLanguage {
     ' hoje',
     ' onde ',
     'horario',
+    ' festa',
+    ' toca',
   ]);
   const spanish = hasAny(value, ['quiero', 'precio', 'entrada', ' donde ', 'horario']);
   const english = hasAny(value, [
