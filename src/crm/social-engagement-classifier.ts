@@ -11,6 +11,8 @@ interface CanonicalRoute {
   readonly addConversationIntents?: readonly SocialConversationIntent[];
 }
 
+const REFUND_FAIL_CLOSED_PATTERNS = ['dinheiro de volta', 'devolver meu dinheiro'];
+
 const TICKET_INFO_PATTERNS = ['quanto pago para entrar'];
 
 const LOCATION_HOURS_PATTERNS = [
@@ -23,6 +25,8 @@ const LOCATION_HOURS_PATTERNS = [
   'tem sunset todos os dias',
   'qual a programacao regular da toca',
 ];
+
+const GASTRONOMY_OPERATIONAL_PATTERNS = ['o que tem para comer', 'o que tem para beber'];
 
 const OFFICIAL_OPERATIONAL_PATTERNS = [
   'tem site',
@@ -90,7 +94,21 @@ const EVENT_INFO_PATTERNS = [
 
 export function classifySocialEngagement(text: string): SocialEngagementClassification {
   const base = classifyCoreSocialEngagement(text);
-  const route = canonicalRoute(normalizeCanonicalText(text));
+  const normalized = normalizeCanonicalText(text);
+
+  if (matchesAny(normalized, REFUND_FAIL_CLOSED_PATTERNS)) {
+    return {
+      ...base,
+      intent: 'REFUND',
+      topic: 'REFUND',
+      priority: 'P1',
+      confidence: 'HIGH',
+      urgency: 'MEDIUM',
+      conversationIntents: mergeConversationIntents(base.conversationIntents, ['SUPPORT']),
+    };
+  }
+
+  const route = canonicalRoute(normalized);
   if (!route) return base;
 
   const conversationIntents = mergeConversationIntents(
@@ -133,6 +151,14 @@ function canonicalRoute(normalized: string): CanonicalRoute | undefined {
       intent: 'LOCATION_HOURS',
       topic: 'LOCATION_HOURS',
       addConversationIntents: ['INFORMATION'],
+    };
+  }
+
+  if (matchesAny(normalized, GASTRONOMY_OPERATIONAL_PATTERNS)) {
+    return {
+      intent: 'FAQ_OPERATIONAL',
+      topic: 'GASTRONOMY',
+      addConversationIntents: ['GASTRONOMY', 'INFORMATION'],
     };
   }
 
