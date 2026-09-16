@@ -42,10 +42,7 @@ const workflow = readFileSync(
   'utf8',
 );
 const policy = JSON.parse(
-  readFileSync(
-    'infra/control-plane/instagram-gcp-publication-recovery-policy.json',
-    'utf8',
-  ),
+  readFileSync('infra/control-plane/instagram-gcp-publication-recovery-policy.json', 'utf8'),
 ) as RecoveryPolicy;
 
 const requiredApis = [
@@ -69,10 +66,10 @@ describe('Instagram GCP publication recovery preflight', () => {
     expect(workflow).toContain('workflow_dispatch:');
     expect(workflow).toContain('authorization:');
     expect(workflow).toContain('expected_source_sha:');
-    expect(workflow).toContain("test \"$GITHUB_EVENT_NAME\" = 'workflow_dispatch'");
+    expect(workflow).toContain('test "$GITHUB_EVENT_NAME" = \'workflow_dispatch\'');
     expect(workflow).toContain('test "$EXPECTED_SOURCE_SHA" = "$GITHUB_SHA"');
     expect(workflow).toContain(
-      "test \"$RECOVERY_AUTHORIZATION\" = 'AUTHORIZE_GCP_INSTAGRAM_RECOVERY_PREFLIGHT'",
+      'test "$RECOVERY_AUTHORIZATION" = \'AUTHORIZE_GCP_INSTAGRAM_RECOVERY_PREFLIGHT\'',
     );
     expect(workflow).not.toMatch(/on:\s*\n\s*push:/);
     expect(policy.authorization).toEqual({
@@ -89,19 +86,13 @@ describe('Instagram GCP publication recovery preflight', () => {
       'toca-meta-app-secret',
       'toca-database-url',
     ]);
-    expect(policy.bindings.runtimeSecretRole).toBe(
-      'roles/secretmanager.secretAccessor',
-    );
-    expect(policy.bindings.deployerRuntimeRole).toBe(
-      'roles/iam.serviceAccountUser',
-    );
+    expect(policy.bindings.runtimeSecretRole).toBe('roles/secretmanager.secretAccessor');
+    expect(policy.bindings.deployerRuntimeRole).toBe('roles/iam.serviceAccountUser');
     expect(policy.bindings.deployerProjectRoles).toEqual([
       'roles/run.developer',
       'roles/logging.viewer',
     ]);
-    expect(policy.bindings.deployerArtifactRepositoryRole).toBe(
-      'roles/artifactregistry.writer',
-    );
+    expect(policy.bindings.deployerArtifactRepositoryRole).toBe('roles/artifactregistry.writer');
     expect(policy.bindings.runtimeProjectRoles).toEqual(['roles/cloudsql.client']);
     expect(policy.bindings.runtimeBucketRoles).toEqual([
       'roles/storage.objectCreator',
@@ -136,9 +127,7 @@ describe('Instagram GCP publication recovery preflight', () => {
     expect(workflow).toContain('META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest');
     expect(workflow).toContain('META_APP_SECRET=$APP_SECRET_ID:1');
     expect(workflow).toContain('DATABASE_URL=$DATABASE_SECRET_ID:latest');
-    expect(workflow).toContain(
-      '--service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"',
-    );
+    expect(workflow).toContain('--service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"');
     expect(workflow).not.toContain('${{ secrets.META_ACCESS_TOKEN }}');
   });
 
@@ -162,9 +151,7 @@ describe('Instagram GCP publication recovery preflight', () => {
   });
 
   it('binds the same approved Drive JPEG by exact SHA', () => {
-    expect(policy.preflight.driveFileId).toBe(
-      '1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK',
-    );
+    expect(policy.preflight.driveFileId).toBe('1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK');
     expect(policy.preflight.expectedAssetSha256).toBe(
       'a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6',
     );
