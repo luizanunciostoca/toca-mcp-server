@@ -114,6 +114,7 @@ export class GcpMetadataDriveReadonlyTokenProvider implements ScopedGoogleAccess
   }
 
   async #mint(): Promise<string> {
+    const nowMs = this.#now().getTime();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
     try {
