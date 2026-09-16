@@ -5,6 +5,7 @@ import { PostgresInstagramEngagementKnowledgeSource } from '../instagram-engagem
 
 const { Pool } = pg;
 const INBOUND_TYPE = 'instagram.engagement.inbound.v1';
+const CANDIDATE_SCAN_LIMIT = 100;
 const AUTO_ELIGIBLE = new Set([
   'FAQ_OPERATIONAL',
   'EVENT_INFO',
@@ -79,9 +80,18 @@ try {
                                          and candidate.occurred_at + interval '8 seconds'
         )
       order by candidate.occurred_at asc, candidate.event_id asc
-      limit 100`,
-    [INBOUND_TYPE, tenantId, workspaceId, organizationId, String(maxAgeMinutes)],
+      limit $6`,
+    [
+      INBOUND_TYPE,
+      tenantId,
+      workspaceId,
+      organizationId,
+      String(maxAgeMinutes),
+      CANDIDATE_SCAN_LIMIT + 1,
+    ],
   );
+  const candidateScanComplete = candidates.rows.length <= CANDIDATE_SCAN_LIMIT;
+  const candidateRows = candidates.rows.slice(0, CANDIDATE_SCAN_LIMIT);
 
   const outboxCounts = await pool.query<{ status: string; count: string }>(
     `select status, count(*)::text as count
@@ -130,7 +140,7 @@ try {
     knowledge: 0,
   };
 
-  for (const row of candidates.rows) {
+  for (const row of candidateRows) {
     const text = safeText(row.payload);
     if (!text) continue;
     const classification = classifySocialEngagement(text);
@@ -166,8 +176,9 @@ try {
     eligible.push(digest(row.event_id));
   }
 
-  const status =
-    eligible.length === 0
+  const status = !candidateScanComplete
+    ? 'SCAN_TRUNCATED'
+    : eligible.length === 0
       ? 'NO_ELIGIBLE_TARGET'
       : eligible.length === 1
         ? 'READY'
@@ -175,8 +186,9 @@ try {
 
   console.log(`INSTAGRAM_ENGAGEMENT_CANARY_ELIGIBILITY=${status}`);
   console.log(`CANDIDATE_COUNT=${candidates.rowCount ?? candidates.rows.length}`);
+  console.log(`CANDIDATE_SCAN_COMPLETE=${candidateScanComplete}`);
   console.log(`ELIGIBLE_COUNT=${eligible.length}`);
-  if (eligible.length === 1) {
+  if (candidateScanComplete && eligible.length === 1) {
     console.log(`ELIGIBLE_TARGET_SHA256=${eligible[0]}`);
   }
   console.log(`REJECTED_CONFIDENCE=${rejected.confidence}`);
