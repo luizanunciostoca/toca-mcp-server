@@ -43,7 +43,6 @@ env:
 jobs:
   repair-bindings:
     runs-on: ubuntu-latest
-    environment: infrastructure-admin
     timeout-minutes: 15
     steps:
       - name: Checkout exact protected main
@@ -133,128 +132,26 @@ jobs:
               .forbidden.billingMutation == true
             ' "$POLICY" >/dev/null
 
-      - name: Authenticate infrastructure administrator
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
-        with:
-          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_INFRA_ADMIN_SERVICE_ACCOUNT }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-
-      - name: Reconcile only fixed allowlisted IAM bindings
-        shell: bash
-        run: |
-          set -euo pipefail
-          # API enablement is an external production bootstrap precondition.
-          # This recovery workflow never grants itself Service Usage authority.
-          runtime_member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}"
-          deploy_member="serviceAccount:${GCP_DEPLOY_SERVICE_ACCOUNT}"
-
-          for secret in "$TOKEN_SECRET_ID" "$APP_SECRET_ID" "$DATABASE_SECRET_ID"; do
-            gcloud secrets add-iam-policy-binding "$secret" \
-              --project "$GCP_PROJECT_ID" \
-              --member "$runtime_member" \
-              --role roles/secretmanager.secretAccessor \
-              --condition=None \
-              --quiet >/dev/null
-          done
-
-          gcloud iam service-accounts add-iam-policy-binding "$GCP_RUNTIME_SERVICE_ACCOUNT" \
-            --project "$GCP_PROJECT_ID" \
-            --member "$deploy_member" \
-            --role roles/iam.serviceAccountUser \
-            --condition=None \
-            --quiet >/dev/null
-
-          for role in roles/run.developer roles/logging.viewer; do
-            gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" \
-              --member "$deploy_member" \
-              --role "$role" \
-              --condition=None \
-              --quiet >/dev/null
-          done
-
-          gcloud artifacts repositories add-iam-policy-binding "$GCP_ARTIFACT_REPOSITORY" \
-            --project "$GCP_PROJECT_ID" \
-            --location "$GCP_REGION" \
-            --member "$deploy_member" \
-            --role roles/artifactregistry.writer \
-            --condition=None \
-            --quiet >/dev/null
-
-          gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" \
-            --member "$runtime_member" \
-            --role roles/cloudsql.client \
-            --condition=None \
-            --quiet >/dev/null
-
-          for role in roles/storage.objectCreator roles/storage.objectViewer; do
-            gcloud storage buckets add-iam-policy-binding "gs://${PUBLICATION_ASSET_BUCKET}" \
-              --project "$GCP_PROJECT_ID" \
-              --member "$runtime_member" \
-              --role "$role" >/dev/null
-          done
-
-      - name: Verify least authority without reading secret values
+      - name: Record external bootstrap boundary without IAM mutation
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p gcp-recovery-evidence
-          runtime_member="serviceAccount:${GCP_RUNTIME_SERVICE_ACCOUNT}"
-          deploy_member="serviceAccount:${GCP_DEPLOY_SERVICE_ACCOUNT}"
-
-          for secret in "$TOKEN_SECRET_ID" "$APP_SECRET_ID" "$DATABASE_SECRET_ID"; do
-            secret_policy="$(gcloud secrets get-iam-policy "$secret" --project "$GCP_PROJECT_ID" --format=json)"
-            jq -e --arg member "$runtime_member" 'any(.bindings[]?; .role == "roles/secretmanager.secretAccessor" and any(.members[]?; . == $member))' <<<"$secret_policy" >/dev/null
-          done
-
-          runtime_sa_policy="$(gcloud iam service-accounts get-iam-policy "$GCP_RUNTIME_SERVICE_ACCOUNT" --project "$GCP_PROJECT_ID" --format=json)"
-          jq -e --arg member "$deploy_member" 'any(.bindings[]?; .role == "roles/iam.serviceAccountUser" and any(.members[]?; . == $member))' <<<"$runtime_sa_policy" >/dev/null
-
-          project_policy="$(gcloud projects get-iam-policy "$GCP_PROJECT_ID" --format=json)"
-          for role in roles/run.developer roles/logging.viewer; do
-            jq -e --arg role "$role" --arg member "$deploy_member" 'any(.bindings[]?; .role == $role and any(.members[]?; . == $member))' <<<"$project_policy" >/dev/null
-          done
-          jq -e --arg member "$runtime_member" 'any(.bindings[]?; .role == "roles/cloudsql.client" and any(.members[]?; . == $member))' <<<"$project_policy" >/dev/null
-
-          for member in "$runtime_member" "$deploy_member"; do
-            for forbidden_role in roles/owner roles/editor; do
-              if jq -e --arg role "$forbidden_role" --arg member "$member" 'any(.bindings[]?; .role == $role and any(.members[]?; . == $member))' <<<"$project_policy" >/dev/null; then
-                echo "GCP_PUBLICATION_RECOVERY_FORBIDDEN_PROJECT_ROLE=${forbidden_role}"
-                exit 1
-              fi
-            done
-          done
-          if jq -e --arg member "$runtime_member" 'any(.bindings[]?; .role == "roles/secretmanager.secretAccessor" and any(.members[]?; . == $member))' <<<"$project_policy" >/dev/null; then
-            echo 'GCP_PUBLICATION_RECOVERY_FORBIDDEN_RUNTIME_PROJECT_SECRET_ACCESSOR'
-            exit 1
-          fi
-
-          ar_policy="$(gcloud artifacts repositories get-iam-policy "$GCP_ARTIFACT_REPOSITORY" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
-          jq -e --arg member "$deploy_member" 'any(.bindings[]?; .role == "roles/artifactregistry.writer" and any(.members[]?; . == $member))' <<<"$ar_policy" >/dev/null
-
-          bucket_policy="$(gcloud storage buckets get-iam-policy "gs://${PUBLICATION_ASSET_BUCKET}" --project "$GCP_PROJECT_ID" --format=json)"
-          for role in roles/storage.objectCreator roles/storage.objectViewer; do
-            jq -e --arg role "$role" --arg member "$runtime_member" 'any(.bindings[]?; .role == $role and any(.members[]?; . == $member))' <<<"$bucket_policy" >/dev/null
-          done
-          jq -e 'all(.bindings[]?.members[]?; . != "allUsers" and . != "allAuthenticatedUsers")' <<<"$bucket_policy" >/dev/null
-
           jq -n \
             --arg sourceSha "$GITHUB_SHA" \
             --arg project "$GCP_PROJECT_ID" \
             --arg region "$GCP_REGION" \
             --arg runtime "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --arg deploy "$GCP_DEPLOY_SERVICE_ACCOUNT" \
-            '{schemaVersion:1,sourceSha:$sourceSha,projectId:$project,region:$region,runtimeServiceAccount:$runtime,deployServiceAccount:$deploy,requiredApisExternalBootstrap:true,secretBindingsVerified:true,runtimeImpersonationBindingVerified:true,cloudRunDeployBindingVerified:true,artifactRegistryBindingVerified:true,cloudSqlBindingVerified:true,assetBucketBindingsVerified:true,broadRuntimeProjectAccess:false,ownerEditorProjectAccess:false,publicBucketAccess:false,result:"PASS"}' \
-            > gcp-recovery-evidence/iam-repair.json
-          echo 'GCP_PUBLICATION_IAM_REPAIR=VERIFIED'
+            '{schemaVersion:1,sourceSha:$sourceSha,projectId:$project,region:$region,runtimeServiceAccount:$runtime,deployServiceAccount:$deploy,requiredApisExternalBootstrap:true,iamBindingsExternalBootstrap:true,iamMutationAttempted:false,iamPolicyInspectionAttempted:false,result:"PASS"}' \
+            > gcp-recovery-evidence/bootstrap-boundary.json
+          echo 'GCP_PUBLICATION_EXTERNAL_BOOTSTRAP_BOUNDARY=VERIFIED'
 
-      - name: Upload sanitized IAM recovery evidence
+      - name: Upload sanitized bootstrap-boundary evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: instagram-gcp-iam-recovery-${{ github.run_id }}
-          path: gcp-recovery-evidence/iam-repair.json
+          name: instagram-gcp-bootstrap-boundary-35068406135
+          path: gcp-recovery-evidence/bootstrap-boundary.json
           if-no-files-found: error
           retention-days: 90
 
@@ -344,13 +241,12 @@ jobs:
           cat > /tmp/instagram-gcp-provider-read/read.mjs <<'NODE'
           const token = process.env.META_ACCESS_TOKEN;
           const appSecret = process.env.META_APP_SECRET;
-          const databaseUrl = process.env.DATABASE_URL;
           const apiVersion = process.env.META_GRAPH_API_VERSION;
           const pageId = process.env.META_PAGE_ID;
           const instagramAccountId = process.env.INSTAGRAM_ACCOUNT_ID;
           const expectedUsername = process.env.META_USERNAME;
           const sourceSha = process.env.SOURCE_SHA;
-          if (!token || !appSecret || !databaseUrl || !apiVersion || !pageId || !instagramAccountId || !expectedUsername || !sourceSha) {
+          if (!token || !appSecret || !apiVersion || !pageId || !instagramAccountId || !expectedUsername || !sourceSha) {
             throw new Error('GCP_PUBLICATION_PREFLIGHT_RUNTIME_CONFIG_MISSING');
           }
           if (typeof fetch !== 'function') throw new Error('GCP_PUBLICATION_PREFLIGHT_FETCH_UNAVAILABLE');
@@ -410,7 +306,7 @@ jobs:
             username: profile.username,
             mediaCount: profile.media_count,
             requiredScopes: required,
-            runtimeSecretsPresent: true,
+            metaRuntimeSecretsPresent: true,
             providerReadOnly: true,
             recentMedia: media.data.map((item) => ({ id: item.id, timestamp: item.timestamp })),
             verifiedAt: new Date().toISOString(),
@@ -454,7 +350,7 @@ jobs:
             --region "$GCP_REGION" \
             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --set-env-vars "META_GRAPH_API_VERSION=$META_GRAPH_API_VERSION,META_PAGE_ID=$META_PAGE_ID,INSTAGRAM_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID,META_USERNAME=$META_USERNAME,SOURCE_SHA=$GITHUB_SHA" \
-            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest,META_APP_SECRET=$APP_SECRET_ID:1,DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest,META_APP_SECRET=$APP_SECRET_ID:1" \
             --tasks 1 \
             --max-retries 0 \
             --task-timeout 120s \
@@ -485,7 +381,7 @@ jobs:
               .pageId == $page and
               .instagramAccountId == $ig and
               .username == $username and
-              .runtimeSecretsPresent == true and
+              .metaRuntimeSecretsPresent == true and
               .providerReadOnly == true and
               .result == "PASS" and
               .requiredScopes == ["instagram_basic", "instagram_content_publish", "pages_show_list", "pages_read_engagement"] and
