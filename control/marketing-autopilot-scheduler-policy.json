@@ -41,10 +41,42 @@
     "brandIntegrityStatus": "PASSED",
     "venueFidelityStatus": "PASSED",
     "qualityGateStatus": "PASSED",
+    "feedQualityGateStatus": "PASSED",
+    "storyQualityGateStatus": "PREVIEW_QA_PASSED",
     "exactAssetBinding": "TRUE",
     "masterStatus": "MASTER_READY",
+    "storyStatus": "APPROVED",
     "providerExternalIdMustBeBlank": true,
     "publicationIdMustBeBlank": true
+  },
+  "dailyRollout": {
+    "phase": "CANARY",
+    "canaryContentItemId": "MKT-20260916-SUNSET-FEED-0900",
+    "canaryScheduledAt": "2026-09-16T09:00:00-03:00",
+    "promoteToLimitedAfterVerifiedCanary": true,
+    "verifiedCanarySchedulingStatus": "PUBLISHED_VERIFIED",
+    "limited": {
+      "allowedOperations": ["SUNSET"],
+      "allowedFormats": ["FEED", "STORY"],
+      "allowedChannel": "INSTAGRAM",
+      "maxCandidatesPerRun": 1,
+      "generalAutonomy": false
+    },
+    "generalAutonomy": false,
+    "blindRetryAuthorized": false,
+    "automaticFallbackAuthorized": false
+  },
+  "standingAuthorization": {
+    "enabled": true,
+    "grantedAt": "2026-09-16T08:07:56-03:00",
+    "authority": "USER_EXPLICIT_DAILY_PUBLICATION_AUTHORIZATION_2026-09-16",
+    "scope": "TOCA_OS_APPROVED_INSTAGRAM_ORGANIC_DAILY_PLAN",
+    "rightsScope": "INSTAGRAM_ORGANIC_PUBLICATION",
+    "requireExistingApprovalStatus": "APPROVED",
+    "requireExactAssetSha256": true,
+    "requireCreativeTruthPass": true,
+    "allowCopyMutation": false,
+    "allowAssetMutation": false
   },
   "rollout": {
     "phase": "CANARY",
