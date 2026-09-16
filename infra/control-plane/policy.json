@@ -1,5 +1,5 @@
 {
-  "version": 11,
+  "version": 10,
   "projectId": "toca-mcp-production",
   "region": "southamerica-east1",
   "adminServiceAccount": "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com",
