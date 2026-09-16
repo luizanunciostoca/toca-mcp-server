@@ -17,6 +17,27 @@ describe('Instagram grounded multi-intent knowledge', () => {
     expect(classification.confidence).toBe('HIGH');
   });
 
+  it('preserves a human-required press route when programming is mixed into the same message', async () => {
+    const classification = classifySocialEngagement('Sou jornalista, qual a programação de hoje?');
+    expect(classification.intent).toBe('PRESS');
+
+    const delegateResolve = vi.fn().mockResolvedValue(null);
+    const source = new MultiIntentInstagramEngagementKnowledgeSource({ resolve: delegateResolve }, {
+      now: () => new Date('2026-09-16T14:30:00Z'),
+    });
+
+    const match = await source.resolve(
+      'Sou jornalista, qual a programação de hoje?',
+      classification.intent,
+    );
+
+    expect(match).toBeNull();
+    expect(delegateResolve).toHaveBeenCalledWith(
+      'Sou jornalista, qual a programação de hoje?',
+      'PRESS',
+    );
+  });
+
   it('answers current Wednesday programming from canonical regular operations', () => {
     const match = resolveCurrentProgrammingKnowledge('Qual a programação de hoje?', 'EVENT_INFO', {
       now: new Date('2026-09-16T14:30:00Z'),
@@ -39,6 +60,28 @@ describe('Instagram grounded multi-intent knowledge', () => {
     expect(match?.answer).toContain('The Party acontece das 23:59 às 06:00');
     expect(match?.answer).not.toMatch(/R\$\s*\d/);
     expect(match?.answer).not.toMatch(/DJ\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç]+/);
+  });
+
+  it('includes the Friday party carryover on early Saturday in Bahia', () => {
+    const match = resolveCurrentProgrammingKnowledge('Qual a programação de hoje?', 'EVENT_INFO', {
+      now: new Date('2026-09-19T05:30:00Z'),
+    });
+
+    expect(match?.factsVerified).toBe(true);
+    expect(match?.faqId).toContain('FRIDAY_CARRYOVER');
+    expect(match?.answer).toContain('The Party de sexta-feira');
+    expect(match?.answer).toContain('segue até 06:00 de sábado');
+    expect(match?.answer).toContain('Aos sábados, o Sunset tem samba e pagode');
+  });
+
+  it('does not include the Friday carryover after the canonical Saturday cutoff', () => {
+    const match = resolveCurrentProgrammingKnowledge('Qual a programação de hoje?', 'EVENT_INFO', {
+      now: new Date('2026-09-19T09:00:00Z'),
+    });
+
+    expect(match?.faqId).not.toContain('FRIDAY_CARRYOVER');
+    expect(match?.answer).not.toContain('The Party de sexta-feira');
+    expect(match?.answer).toContain('Aos sábados, o Sunset tem samba e pagode');
   });
 
   it('adds the approved Saturday samba/pagode fact', () => {
@@ -87,7 +130,7 @@ describe('Instagram grounded multi-intent knowledge', () => {
 
   it('splits two questions written in one Direct message and resolves both intents', async () => {
     const delegate: InstagramEngagementKnowledgeSource = {
-      resolve: vi.fn(async (text, intent) => {
+      resolve: vi.fn(async (_text, intent) => {
         if (intent === 'TICKET_INFO') {
           return {
             faqId: 'FAQ-003',
@@ -115,6 +158,37 @@ describe('Instagram grounded multi-intent knowledge', () => {
     expect(match?.answer).toContain('Sunset na Toca do Morcego a partir das 16:30');
   });
 
+  it('splits conjunction-based questions and resolves ticket plus programming independently', async () => {
+    const delegateResolve = vi.fn(async (_text: string, intent: string) => {
+      if (intent === 'TICKET_INFO') {
+        return {
+          faqId: 'FAQ-003',
+          intent: 'TICKET_INFO' as const,
+          answer: TOCA_TICKET_INFORMATION_REPLY,
+          source: 'TOCA_OS — FAQ-003',
+          confidence: 1,
+          factsVerified: true,
+          tier: 'FAQ' as const,
+        };
+      }
+      return null;
+    });
+    const source = new MultiIntentInstagramEngagementKnowledgeSource(
+      { resolve: delegateResolve },
+      { now: () => new Date('2026-09-16T14:30:00Z') },
+    );
+
+    const match = await source.resolve(
+      'Qual o valor do ingresso e qual a programação de hoje?',
+      'EVENT_INFO',
+    );
+
+    expect(match?.answer).toContain('Os valores dos ingressos variam');
+    expect(match?.answer).toContain('Sunset na Toca do Morcego a partir das 16:30');
+    expect(delegateResolve).toHaveBeenCalledWith('Qual o valor do ingresso', 'TICKET_INFO');
+    expect(delegateResolve).toHaveBeenCalledWith('qual a programação de hoje?', 'EVENT_INFO');
+  });
+
   it('fails closed when a grouped message contains a human-required intent', async () => {
     const delegate: InstagramEngagementKnowledgeSource = {
       resolve: vi.fn().mockResolvedValue({
@@ -137,5 +211,27 @@ describe('Instagram grounded multi-intent knowledge', () => {
     );
 
     expect(match).toBeNull();
+  });
+
+  it('fails closed before delegated lookups when segment count exceeds the bound', async () => {
+    const delegateResolve = vi.fn().mockResolvedValue({
+      faqId: 'FAQ-003',
+      intent: 'TICKET_INFO',
+      answer: TOCA_TICKET_INFORMATION_REPLY,
+      source: 'TOCA_OS — FAQ-003',
+      confidence: 1,
+      factsVerified: true,
+      tier: 'FAQ',
+    });
+    const source = new MultiIntentInstagramEngagementKnowledgeSource({ resolve: delegateResolve });
+    const abusiveGroupedInput = Array.from(
+      { length: 9 },
+      () => 'Qual o valor do ingresso?',
+    ).join('\n');
+
+    const match = await source.resolve(abusiveGroupedInput, 'TICKET_INFO');
+
+    expect(match).toBeNull();
+    expect(delegateResolve).not.toHaveBeenCalled();
   });
 });
