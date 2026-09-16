@@ -25,6 +25,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   id-token: write
 
 concurrency:
@@ -45,6 +46,7 @@ env:
   PUBLICATION_ASSET_BUCKET: toca-mcp-publication-assets
   PREPARE_JOB_NAME: toca-marketing-publish-now-prepare
   EXECUTE_JOB_NAME: toca-marketing-publish-now-execute
+  DUPLICATE_PREFLIGHT_JOB_NAME: toca-marketing-publish-now-duplicate-preflight
   INSTAGRAM_ACCOUNT_ID: '17841402033495654'
   REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   REQUIRED_CTA: 'Ingressos limitados! garanta o seu pelo link na bio.'
@@ -93,6 +95,35 @@ jobs:
             echo "content_item_id=$(jq -r .contentItemId "$COMMAND")" >> "$GITHUB_OUTPUT"
             echo "target_code_sha=$(jq -r .targetCodeSha "$COMMAND")" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Verify scheduled-run provenance before cloud authentication
+        if: steps.invocation.outputs.source == 'MARKETING_AUTOPILOT'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.scheduler_source_run_id }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$SOURCE_RUN_ID" | grep -Eq '^[0-9]+$'
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}" > /tmp/source-run.json
+          jq -e \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg sha "$GITHUB_SHA" '
+              .name == "Marketing Autopilot Publication" and
+              .event == "schedule" and
+              .head_branch == "main" and
+              .head_sha == $sha and
+              .repository.full_name == $repository and
+              ((.status == "queued" or .status == "in_progress") or
+               (.status == "completed" and .conclusion == "success"))
+            ' /tmp/source-run.json >/dev/null
+          created_at="$(jq -r .created_at /tmp/source-run.json)"
+          created_epoch="$(date -d "$created_at" +%s)"
+          now_epoch="$(date +%s)"
+          age=$((now_epoch - created_epoch))
+          test "$age" -ge -120
+          test "$age" -le 1800
+          echo "MARKETING_AUTOPILOT_SOURCE_RUN_PROVENANCE=VERIFIED run_id=$SOURCE_RUN_ID"
 
       - name: Verify deterministic brand binding before cloud auth
         if: steps.invocation.outputs.action == 'PUBLISH_NOW' && steps.invocation.outputs.source == 'PROTECTED_COMMAND_FILE'
@@ -173,7 +204,120 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/marketing-autopilot-scheduler.mjs verify-command
+          node scripts/check-publish-now-brand-determinism.mjs
+          node scripts/check-publish-now-rights-clearance.mjs
           echo 'MARKETING_AUTOPILOT_REGISTRY_REVALIDATION=PASS'
+
+      - name: Provider duplicate read-only preflight
+        if: steps.invocation.outputs.action == 'PUBLISH_NOW' && steps.invocation.outputs.source == 'MARKETING_AUTOPILOT'
+        shell: bash
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          registry="$REGION-docker.pkg.dev"
+          printf '%s' "$GOOGLE_ACCESS_TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://${registry}" >/dev/null
+          mkdir -p /tmp/instagram-duplicate-preflight
+          cat > /tmp/instagram-duplicate-preflight/read.mjs <<'NODE'
+          const token = process.env.META_ACCESS_TOKEN;
+          const accountId = process.env.INSTAGRAM_ACCOUNT_ID;
+          const contentItemId = process.env.CONTENT_ITEM_ID;
+          const caption = Buffer.from(process.env.CAPTION_BASE64 || '', 'base64').toString('utf8');
+          const scheduledAt = process.env.SCHEDULED_AT;
+          if (!token || !accountId || !contentItemId || !caption || !scheduledAt) {
+            throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_CONFIG_MISSING');
+          }
+          const scheduledMs = Date.parse(scheduledAt);
+          if (!Number.isFinite(scheduledMs)) throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_SCHEDULE_INVALID');
+          const url = new URL(`https://graph.facebook.com/v24.0/${accountId}/media`);
+          url.searchParams.set('fields', 'id,caption,timestamp,permalink');
+          url.searchParams.set('limit', '100');
+          const response = await fetch(url, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(`INSTAGRAM_DUPLICATE_PREFLIGHT_HTTP_${response.status}`);
+          if (!Array.isArray(body?.data)) throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_MEDIA_INVALID');
+          const lowerBound = scheduledMs - 72 * 60 * 60 * 1000;
+          const upperBound = Date.now() + 5 * 60 * 1000;
+          const duplicate = body.data.find((item) => {
+            const timestamp = typeof item?.timestamp === 'string' ? Date.parse(item.timestamp) : NaN;
+            return Number.isFinite(timestamp) && timestamp >= lowerBound && timestamp <= upperBound && item?.caption === caption;
+          });
+          const evidence = {
+            schemaVersion: 1,
+            contentItemId,
+            instagramAccountId: accountId,
+            providerReadOnly: true,
+            duplicateFound: Boolean(duplicate),
+            duplicatePublicationId: duplicate?.id ?? null,
+            duplicatePermalink: duplicate?.permalink ?? null,
+            inspectedMediaCount: body.data.length,
+            checkedAt: new Date().toISOString(),
+          };
+          console.log(`INSTAGRAM_DUPLICATE_PREFLIGHT_RESULT=${JSON.stringify(evidence)}`);
+          if (duplicate) process.exit(2);
+          NODE
+          cat > /tmp/instagram-duplicate-preflight/Dockerfile <<'DOCKER'
+          FROM node:24-bookworm-slim
+          WORKDIR /app
+          COPY read.mjs ./read.mjs
+          USER node
+          CMD ["node", "/app/read.mjs"]
+          DOCKER
+          tag="$registry/$PROJECT_ID/$REPOSITORY/duplicate-preflight:${AUDITED_CODE_SHA}-${GITHUB_RUN_ID}"
+          docker build -t "$tag" /tmp/instagram-duplicate-preflight
+          docker push "$tag"
+          digest="$(gcloud artifacts docker images describe "$tag" --project "$PROJECT_ID" --format='value(image_summary.digest)')"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          image="${tag%:*}@${digest}"
+          caption_base64="$(jq -r .caption control/marketing-publish-now-command.json | base64 -w0)"
+          scheduled_at="$(jq -r .scheduledAt control/marketing-publish-now-command.json)"
+          content_item_id="$(jq -r .contentItemId control/marketing-publish-now-command.json)"
+          correlation_id="$(jq -r .correlationId control/marketing-publish-now-command.json)"
+          gcloud run jobs deploy "$DUPLICATE_PREFLIGHT_JOB_NAME" \
+            --image "$image" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars "^~^INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~INSTAGRAM_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID~CONTENT_ITEM_ID=$content_item_id~SCHEDULED_AT=$scheduled_at~CAPTION_BASE64=$caption_base64~CORRELATION_ID=$correlation_id" \
+            --set-secrets "META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 120s \
+            --quiet
+          job_json="$(gcloud run jobs describe "$DUPLICATE_PREFLIGHT_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          printf '%s' "$job_json" | jq -e '
+            .spec.template.spec.template.spec.containers[0] as $container |
+            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"])
+          ' >/dev/null
+          set +e
+          gcloud run jobs execute "$DUPLICATE_PREFLIGHT_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+          execute_rc=$?
+          set -e
+          result_line=''
+          for _ in $(seq 1 12); do
+            result_line="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${DUPLICATE_PREFLIGHT_JOB_NAME} AND textPayload:\"INSTAGRAM_DUPLICATE_PREFLIGHT_RESULT=\" AND textPayload:\"${content_item_id}\"" \
+              --project "$PROJECT_ID" --freshness=30m --limit=50 --order=desc --format='value(textPayload)' \
+              | grep 'INSTAGRAM_DUPLICATE_PREFLIGHT_RESULT=' | head -n1 || true)"
+            [ -n "$result_line" ] && break
+            sleep 5
+          done
+          test -n "$result_line"
+          result_json="${result_line#INSTAGRAM_DUPLICATE_PREFLIGHT_RESULT=}"
+          printf '%s\n' "$result_json" > marketing-publish-now-duplicate-preflight.json
+          printf '%s\n' "$result_json" | jq -e \
+            --arg id "$content_item_id" \
+            --arg account "$INSTAGRAM_ACCOUNT_ID" '
+              .contentItemId == $id and
+              .instagramAccountId == $account and
+              .providerReadOnly == true and
+              .duplicateFound == false
+            ' >/dev/null
+          test "$execute_rc" -eq 0
+          echo 'INSTAGRAM_DUPLICATE_PROVIDER_READBACK=PASS'
 
       - name: Snapshot immutable execution envelope
         if: steps.invocation.outputs.action == 'PUBLISH_NOW'
@@ -188,6 +332,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$AUDITED_CODE_SHA"
+          if [ "${{ steps.invocation.outputs.source }}" = MARKETING_AUTOPILOT ]; then
+            node scripts/check-publish-now-rights-clearance.mjs
+            node scripts/check-publish-now-brand-determinism.mjs
+          fi
           GITHUB_SHA="$AUDITED_CODE_SHA" bash scripts/marketing-publish-now-fixed.sh
 
       - name: Reconcile verified provider result into canonical Content Registry
@@ -213,3 +361,10 @@ jobs:
             marketing-autopilot-registry-reconciliation.json
           if-no-files-found: warn
           retention-days: 90
+
+      - name: Remove duplicate preflight runtime
+        if: always() && steps.invocation.outputs.source == 'MARKETING_AUTOPILOT'
+        shell: bash
+        run: |
+          gcloud run jobs delete "$DUPLICATE_PREFLIGHT_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --quiet || true
+          docker logout "$REGION-docker.pkg.dev" >/dev/null 2>&1 || true
