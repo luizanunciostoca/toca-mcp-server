@@ -41,7 +41,7 @@ env:
   EXPECTED_ASSET_SHA256: a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6
 
 jobs:
-  repair-bindings:
+  bootstrap-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -150,13 +150,13 @@ jobs:
       - name: Upload sanitized bootstrap-boundary evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: instagram-gcp-bootstrap-boundary-35068406135
+          name: instagram-gcp-bootstrap-boundary-${{ github.run_id }}
           path: gcp-recovery-evidence/bootstrap-boundary.json
           if-no-files-found: error
           retention-days: 90
 
   provider-read-preflight:
-    needs: repair-bindings
+    needs: bootstrap-contract
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 20

@@ -112,6 +112,8 @@ describe('Instagram GCP publication recovery preflight', () => {
     expect(workflow).toContain('iamMutationAttempted:false');
     expect(workflow).toContain('iamPolicyInspectionAttempted:false');
     expect(workflow).toContain('GCP_PUBLICATION_EXTERNAL_BOOTSTRAP_BOUNDARY=VERIFIED');
+    expect(workflow).toContain('bootstrap-contract:');
+    expect(workflow).toContain('needs: bootstrap-contract');
   });
 
   it('binds provider reads to one exact Meta target and scope set', () => {
