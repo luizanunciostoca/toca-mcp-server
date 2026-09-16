@@ -1,5 +1,9 @@
+import { createHash } from 'node:crypto';
 import { loadConfig } from '../config.js';
-import { INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID } from '../instagram-engagement/knowledge-snapshot-current.js';
+import {
+  INSTAGRAM_ENGAGEMENT_CANONICAL_SPREADSHEET_ID,
+  INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE,
+} from '../instagram-engagement/knowledge-snapshot-current.js';
 import { createPostgresPool } from '../persistence/postgres.js';
 
 const EXPECTED_FAQ_COUNT = 36;
@@ -11,6 +15,9 @@ const EXPECTED_KB_SOURCE_IDS = [
   'SRC-BRAND-001',
   'SRC-PROD-001',
 ] as const;
+const EXPECTED_FAQ_SNAPSHOT_SHA256 = createHash('sha256')
+  .update(JSON.stringify(INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE), 'utf8')
+  .digest('hex');
 
 const config = loadConfig();
 if (!config.DATABASE_URL) throw new Error('INSTAGRAM_ENGAGEMENT_DATABASE_URL_REQUIRED');
@@ -50,6 +57,9 @@ try {
   if (faqHashCount !== 1 || !/^[0-9a-f]{64}$/.test(faqSnapshotSha256)) {
     throw new Error('INSTAGRAM_FAQ_EXPANSION_SNAPSHOT_HASH_INVALID');
   }
+  if (faqSnapshotSha256 !== EXPECTED_FAQ_SNAPSHOT_SHA256) {
+    throw new Error('INSTAGRAM_FAQ_EXPANSION_CANONICAL_SNAPSHOT_HASH_MISMATCH');
+  }
 
   const knowledgeBase = await client.query<{ sources: string; chunks: string }>(
     `select
@@ -79,6 +89,7 @@ try {
       migration043Applied: true,
       faqCount,
       faqSnapshotSha256,
+      canonicalSnapshotHashMatched: true,
       kbSourceCount,
       kbChunkCount,
       rawAnswerContentPrinted: false,
