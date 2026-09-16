@@ -1,3 +1,4 @@
+# Freshness probe 2026-09-16 — read-only, no production mutation.
 name: AG-01 Production Readback
 
 on:
