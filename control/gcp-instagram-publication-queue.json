@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "mode": "CANARY",
+  "enabled": false,
+  "timezone": "America/Bahia",
+  "maxDelayMinutes": 30,
+  "items": []
+}
