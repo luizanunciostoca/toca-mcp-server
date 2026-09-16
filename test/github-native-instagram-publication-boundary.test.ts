@@ -20,11 +20,15 @@ const autopilotPolicy = JSON.parse(
     durableCommandRequiredState?: string;
     ephemeralCommandAllowed?: boolean;
   };
+  dailyRollout?: {
+    phase?: string;
+    canaryContentItemId?: string;
+    generalAutonomy?: boolean;
+  };
   rollout?: {
     phase?: string;
     blindRetryAuthorized?: boolean;
     automaticFallbackAuthorized?: boolean;
-    allowedContentItemIds?: string[];
   };
 };
 const runtime = readFileSync(
@@ -138,11 +142,15 @@ describe('Instagram publication single-writer boundary', () => {
         durableCommandRequiredState: 'NOOP',
         ephemeralCommandAllowed: true,
       },
+      dailyRollout: {
+        phase: 'CANARY',
+        canaryContentItemId: 'MKT-20260916-SUNSET-STORY-1600',
+        generalAutonomy: false,
+      },
       rollout: {
         phase: 'CANARY',
         blindRetryAuthorized: false,
         automaticFallbackAuthorized: false,
-        allowedContentItemIds: ['MKT-20260916-SUNSET-FEED-1500'],
       },
     });
   });
