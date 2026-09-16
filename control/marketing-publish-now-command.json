@@ -1,5 +1,62 @@
 {
   "schemaVersion": 1,
-  "commandId": "gcp-publication-idle-20260916-v2",
-  "action": "NOOP"
+  "commandId": "autopilot-MKT-20260916-SUNSET-FEED-0900-202609161049490300",
+  "action": "PUBLISH_NOW",
+  "issuedAt": "2026-09-16T10:49:49-03:00",
+  "timezone": "America/Bahia",
+  "scheduledAt": "2026-09-16T10:50:00-03:00",
+  "orchestrationIntent": "SCHEDULED_PUBLICATION",
+  "operation": "SUNSET",
+  "channel": "INSTAGRAM",
+  "format": "FEED_IMAGE",
+  "contentItemId": "MKT-20260916-SUNSET-FEED-0900",
+  "assetId": "MM-SUN-0299-FEED4X5-V1",
+  "driveFileId": "1i6plOCU7RnuMeFm5jdCQAY7rcb5LJM2q",
+  "contentType": "image/jpeg",
+  "expectedAssetSha256": "1c6c961dff3ed10ce0edfa13e2096c2849ade51ff99ade6a6fe14688cd2d1226",
+  "instagramAccountId": "17841402033495654",
+  "caption": "Quando o sol baixa, a música assume o ritmo e conduz o Sunset até a noite.\n\nCelebre a vida com a gente.",
+  "correlationId": "CORR-MKT-20260916-SUNSET-FEED-0900-GCP-AUTOPILOT-V1",
+  "idempotencyKey": "GCP-AUTOPILOT-MKT-20260916-SUNSET-FEED-0900-1c6c961dff3e-V1",
+  "targetCodeSha": "f3d0dfb6d17946550fd73403eb4e89adfd840209",
+  "creativeTruthBinding": {
+    "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+    "standardId": "SUNSET_FEED_PHOTO_V1",
+    "creativeId": "CR-MKT-20260905-SUNSET-FEED-1500-V1",
+    "outputSha256": "1c6c961dff3ed10ce0edfa13e2096c2849ade51ff99ade6a6fe14688cd2d1226",
+    "brandIntegrityStatus": "PASSED",
+    "venueFidelityStatus": "PASSED",
+    "qualityGateStatus": "PASSED",
+    "exactAssetBinding": true
+  },
+  "brandDeterminism": {
+    "status": "VERIFIED",
+    "standardRef": "TOCA_CREATIVE_TRUTH:SUNSET_FEED_PHOTO_V1:1.0",
+    "typographyRef": "EDITORIAL_TEXT_V1",
+    "assetSha256": "1c6c961dff3ed10ce0edfa13e2096c2849ade51ff99ade6a6fe14688cd2d1226"
+  },
+  "rightsClearance": {
+    "status": "CLEARED",
+    "scope": "INSTAGRAM_ORGANIC_PUBLICATION",
+    "evidenceRef": "GOOGLE_DRIVE:1i6plOCU7RnuMeFm5jdCQAY7rcb5LJM2q",
+    "authority": "USER_EXPLICIT_DAILY_PUBLICATION_AUTHORIZATION_2026-09-16",
+    "clearedAt": "2026-09-16T08:07:56-03:00",
+    "assetSha256": "1c6c961dff3ed10ce0edfa13e2096c2849ade51ff99ade6a6fe14688cd2d1226"
+  },
+  "approvalMode": "EXPLICIT_APPROVAL",
+  "approvalStatus": "APPROVED",
+  "publicationIntent": "SHARE_NOW",
+  "schedulerBinding": {
+    "source": "MARKETING_AUTOPILOT_GCP",
+    "policyId": "TOCA_MARKETING_AUTOPILOT_GCP_SCHEDULER_V1",
+    "rolloutPhase": "CANARY",
+    "spreadsheetId": "1r02HLhmnTijFNkmZv4o1yeZPxCEUMXZC_QreDFB6yTw",
+    "sheetName": "CONTENT_ITEMS",
+    "scheduledAt": "2026-09-16T10:50:00-03:00",
+    "notBefore": "2026-09-16T10:50:00-03:00",
+    "expiresAt": "2026-09-16T11:20:00-03:00",
+    "registrySnapshotSha256": "f1732888a9cbc528f24df4282bae1cea3ca2194ef6fe52a57f83f01a497da85f",
+    "registryRevision": "MKTREG-GCP-AUTOPILOT-20260916-1050-LATE-V5",
+    "approvalAuthority": "USER_EXPLICIT_DAILY_PUBLICATION_AUTHORIZATION_2026-09-16"
+  }
 }
