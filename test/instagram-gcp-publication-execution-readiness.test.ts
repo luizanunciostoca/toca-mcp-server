@@ -40,7 +40,7 @@ describe('Instagram GCP execution-runtime readiness', () => {
     );
     expect(workflow).toContain('DATABASE_SECRET_ID: toca-database-url');
     expect(workflow).toContain("DATABASE_SECRET_VERSION: '1'");
-    expect(workflow).toContain("test \"$DATABASE_SECRET_VERSION\" = '1'");
+    expect(workflow).toContain('test "$DATABASE_SECRET_VERSION" = \'1\'');
     expect(workflow).toContain('--service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"');
     expect(workflow).toContain('--set-cloudsql-instances "$CLOUD_SQL_INSTANCE"');
     expect(workflow).toContain(
@@ -151,7 +151,9 @@ describe('Instagram GCP execution-runtime readiness', () => {
   });
 
   it('proves deletion of the temporary Cloud Run job and prevents rerun name reuse', () => {
-    expect(workflow).toContain('JOB_NAME=toca-instagram-exec-ready-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}');
+    expect(workflow).toContain(
+      'JOB_NAME=toca-instagram-exec-ready-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}',
+    );
     expect(workflow).toContain('gcloud run jobs delete "$JOB_NAME"');
     expect(workflow).toContain('gcloud run jobs list');
     expect(workflow).toContain('--filter="metadata.name=$JOB_NAME"');

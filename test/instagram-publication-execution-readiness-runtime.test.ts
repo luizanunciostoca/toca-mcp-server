@@ -126,7 +126,11 @@ describe('runInstagramPublicationExecutionReadiness', () => {
   it.each([
     ['idempotency index', { idempotency_unique: false }, 'IDEMPOTENCY_UNIQUE_MISSING'],
     ['audit sequence', { audit_id_sequence_usage: false }, 'AUDIT_SEQUENCE_PRIVILEGE_MISSING'],
-    ['provider tenant default', { provider_tenant_default_toca: false }, 'PROVIDER_TENANT_DEFAULT_MISSING'],
+    [
+      'provider tenant default',
+      { provider_tenant_default_toca: false },
+      'PROVIDER_TENANT_DEFAULT_MISSING',
+    ],
   ] as const)(
     'fails closed when %s readiness is missing and still rolls back and closes resources',
     async (_label, override, errorSuffix) => {
