@@ -24,8 +24,10 @@ const MAX_SPLIT_RESULTS = MAX_KNOWLEDGE_SEGMENTS + 1;
 const MAX_REPLY_MESSAGE_LENGTH = 2_000;
 
 const UNRESOLVED_NOTICE =
-  `Não encontrei informação canônica suficiente para confirmar todos os outros pontos agora. ` +
+  `Não encontrei informação suficiente para confirmar todos os outros pontos agora. ` +
   `Para a informação oficial mais atualizada, acesse: ${TOCA_OFFICIAL_INFORMATION_URL}`;
+
+const GROUPED_OFFICIAL_CTA = `Para conferir a programação atualizada, valores e ingressos, acesse: ${TOCA_OFFICIAL_INFORMATION_URL}`;
 
 export interface GroupedKnowledgeResolution {
   readonly classification: SocialEngagementClassification;
@@ -169,8 +171,9 @@ function composeKnowledge(
   fallbackIntent: EngagementIntent,
 ): InstagramEngagementKnowledgeMatch | null {
   if (matches.length === 0) return null;
-  const answers = [...new Set(matches.map((match) => match.answer.trim()).filter(Boolean))];
-  if (hasUnresolvedSafeSegment) answers.push(UNRESOLVED_NOTICE);
+  const rawAnswers = [...new Set(matches.map((match) => match.answer.trim()).filter(Boolean))];
+  if (hasUnresolvedSafeSegment) rawAnswers.push(UNRESOLVED_NOTICE);
+  const answers = deduplicateOfficialInformationCta(rawAnswers);
   const answer = answers.join('\n\n');
   if (answer.length > MAX_REPLY_MESSAGE_LENGTH) return null;
 
@@ -186,4 +189,29 @@ function composeKnowledge(
     factsVerified: true,
     tier: matches.every((match) => match.tier === 'FAQ') ? 'FAQ' : 'KNOWLEDGE_BASE',
   };
+}
+
+function deduplicateOfficialInformationCta(answers: readonly string[]): string[] {
+  const officialUrlOccurrences = answers.reduce(
+    (count, answer) => count + countOccurrences(answer, TOCA_OFFICIAL_INFORMATION_URL),
+    0,
+  );
+  if (answers.length < 2 || officialUrlOccurrences < 2) return [...answers];
+
+  const withoutDuplicateCtas = answers
+    .map((answer) =>
+      answer
+        .split(/(?<=[.!?])\s+/g)
+        .filter((sentence) => !sentence.includes(TOCA_OFFICIAL_INFORMATION_URL))
+        .join(' ')
+        .trim(),
+    )
+    .filter(Boolean);
+
+  return [...withoutDuplicateCtas, GROUPED_OFFICIAL_CTA];
+}
+
+function countOccurrences(value: string, needle: string): number {
+  if (!needle) return 0;
+  return value.split(needle).length - 1;
 }
