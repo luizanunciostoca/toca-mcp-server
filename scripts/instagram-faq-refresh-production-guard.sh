@@ -12,6 +12,7 @@ GUARD_PROFILE="${INSTAGRAM_FAQ_GUARD_PROFILE:-FAQ_EXPANSION_REFRESH}"
 : "${ENGAGEMENT_RESERVATION:?ENGAGEMENT_RESERVATION is required}"
 
 CONTROL_ISSUE=640
+CONFLICT_FILTER='scripts/instagram-engagement-production-mutation-conflicts.jq'
 
 release_reservation() {
   local control_json control_body updated_body
@@ -164,29 +165,12 @@ conflicts=0
 for status in in_progress queued; do
   RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?status=${status}&per_page=100")"
   # An issue.opened event creates run records for every listening workflow before each
-  # workflow's job-level title predicate is evaluated. Count only runs whose issue title
-  # can actually authorize the mutation workflow represented by that path.
-  count="$(jq --argjson self "$GITHUB_RUN_ID" '
-    def authorized_issue_mutation:
-      ((.path == ".github/workflows/instagram-engagement-limited-activation.yml" and
-        ((.display_title // "") | startswith("PRODUCTION AUTHORIZATION — Instagram engagement LIMITED activation AUTO"))) or
-       (.path == ".github/workflows/instagram-engagement-limited-runtime-refresh.yml" and
-        ((.display_title // "") | startswith("PRODUCTION AUTHORIZATION — Instagram engagement LIMITED runtime refresh AUTO"))) or
-       (.path == ".github/workflows/instagram-engagement-comment-limited-promotion.yml" and
-        ((.display_title // "") | startswith("PRODUCTION AUTHORIZATION — Instagram engagement COMMENT LIMITED promotion AUTO"))) or
-       (.path == ".github/workflows/instagram-engagement-tiered-knowledge-shadow.yml" and
-        ((.display_title // "") | startswith("PRODUCTION AUTHORIZATION — Instagram tiered knowledge shadow AUTO"))) or
-       (.path == ".github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml" and
-        ((.display_title // "") | startswith("PRODUCTION AUTHORIZATION — Instagram FAQ expansion LIMITED refresh AUTO"))) or
-       (.path == ".github/workflows/instagram-engagement-faq-knowledge-recovery.yml" and
-        ((.display_title // "") | startswith("PRODUCTION AUTHORIZATION — Instagram FAQ knowledge RECOVERY AUTO"))));
-    [
-      .workflow_runs[]
-      | select(.id != $self)
-      | select(.event == "issues")
-      | select(.head_branch == "main")
-      | select(authorized_issue_mutation)
-    ] | length' <<< "$RUNS")"
+  # workflow's job-level predicates are evaluated. Count only runs whose actor, path,
+  # and authorization title can actually authorize the represented mutation workflow.
+  count="$(jq \
+    --argjson self "$GITHUB_RUN_ID" \
+    --arg owner "$GITHUB_REPOSITORY_OWNER" \
+    -f "$CONFLICT_FILTER" <<< "$RUNS")"
   conflicts=$((conflicts + count))
 done
 if (( conflicts > 0 )); then
