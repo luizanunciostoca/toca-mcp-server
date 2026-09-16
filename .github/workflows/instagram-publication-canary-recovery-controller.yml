@@ -13,7 +13,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: instagram-publication-canary-recovery-20260916-0020
+  group: instagram-publication-canary-recovery-20260916-0035
   cancel-in-progress: false
 
 jobs:
@@ -24,12 +24,12 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       TARGET_DATE: '2026-09-16'
-      WINDOW_START: '2026-09-16T00:15:00-03:00'
-      FIRST_DISPATCH_DEADLINE: '2026-09-16T00:24:00-03:00'
-      SECOND_DISPATCH_DEADLINE: '2026-09-16T00:27:30-03:00'
+      WINDOW_START: '2026-09-16T00:30:00-03:00'
+      FIRST_DISPATCH_DEADLINE: '2026-09-16T00:39:00-03:00'
+      SECOND_DISPATCH_DEADLINE: '2026-09-16T00:42:30-03:00'
       TARGET_ITEM: 'MKT-20260917-SUNSET-FEED-0900'
-      EXPECTED_SCHEDULED_AT: '2026-09-16T00:20:00-03:00'
-      EXPECTED_EXPIRES_AT: '2026-09-16T00:30:00-03:00'
+      EXPECTED_SCHEDULED_AT: '2026-09-16T00:35:00-03:00'
+      EXPECTED_EXPIRES_AT: '2026-09-16T00:45:00-03:00'
       EXPECTED_ACCOUNT: '17841402033495654'
       EXPECTED_ASSET_SHA256: 'a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6'
       EXPECTED_CAPTION_SHA256: 'ae72ec055df7b2025fe08ce6cbf4ceefd2173fbeecfc5a731641a3e3a57a1aed'
@@ -119,6 +119,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          live_main=$(gh api "repos/$REPO/branches/main" --jq '.commit.sha')
+          test "$live_main" = "$GITHUB_SHA" || { echo "MAIN_DRIFT_BEFORE_FIRST_DISPATCH:$GITHUB_SHA:$live_main"; exit 1; }
           now=$(date +%s)
           deadline=$(date -d "$FIRST_DISPATCH_DEADLINE" +%s)
           test "$now" -le "$deadline" || { echo 'CANARY_FIRST_DISPATCH_WINDOW_MISSED'; exit 1; }
@@ -177,6 +179,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          live_main=$(gh api "repos/$REPO/branches/main" --jq '.commit.sha')
+          test "$live_main" = "$GITHUB_SHA" || { echo "MAIN_DRIFT_BEFORE_SECOND_DISPATCH:$GITHUB_SHA:$live_main"; exit 1; }
           now=$(date +%s)
           deadline=$(date -d "$SECOND_DISPATCH_DEADLINE" +%s)
           test "$now" -le "$deadline" || { echo 'CANARY_SECOND_READBACK_WINDOW_MISSED'; exit 1; }
