@@ -1,0 +1,169 @@
+name: Temporary Autopilot Corrective Patch
+
+on:
+  push:
+    branches:
+      - ops/restore-marketing-autopilot-gcp-scheduler-20260916
+    paths:
+      - .github/workflows/tmp-autopilot-corrective-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ops/restore-marketing-autopilot-gcp-scheduler-20260916
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply exact corrective patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          registry = Path('scripts/marketing-autopilot-registry.mjs')
+          text = registry.read_text()
+          old = '''async function recordPrecheck() {
+            const binding = policy.bindings?.[contentItemId];
+            assert(binding, 'AUTOPILOT_EXACT_BINDING_REQUIRED');
+            const now = formatBahia(new Date());
+            await appendSchedulerLog([
+              `AUTOPILOT-PRECHECK-${process.env.GITHUB_RUN_ID ?? 'local'}`,
+              now,
+              contentItemId,
+              process.env.GITHUB_RUN_ID ?? '',
+              'GITHUB_ACTIONS_CONTROL_PLANE',
+              binding.expectedScheduledAt,
+              'PRECHECK',
+              'CANARY_READY',
+              '0',
+              '0',
+              '',
+              'NOT_CALLED',
+              '',
+              '',
+              `run=${process.env.GITHUB_RUN_ID ?? ''};sha=${process.env.GITHUB_SHA ?? ''};provider_called=false;writer=${policy.canonicalWriter.workflow}`,
+              'GCP_PUBLISH_NOW_AUTOPILOT_CANARY',
+            ]);
+          }
+          '''
+          new = '''async function recordPrecheck() {
+            const sheet = await readContentSheet();
+            const item = findRow(sheet, contentItemId).object;
+            const scheduledAt = text(item.scheduled_at);
+            const schedulingStatus = text(item.scheduling_status);
+            assert(scheduledAt, 'AUTOPILOT_PRECHECK_SCHEDULED_AT_REQUIRED');
+            assert(
+              schedulingStatus === 'CANARY_READY' || schedulingStatus === 'LIMITED_READY_AFTER_CANARY',
+              `AUTOPILOT_PRECHECK_SCHEDULING_STATUS_INVALID:${schedulingStatus}`,
+            );
+            const now = formatBahia(new Date());
+            await appendSchedulerLog([
+              `AUTOPILOT-PRECHECK-${process.env.GITHUB_RUN_ID ?? 'local'}`,
+              now,
+              contentItemId,
+              process.env.GITHUB_RUN_ID ?? '',
+              'GITHUB_ACTIONS_CONTROL_PLANE',
+              scheduledAt,
+              'PRECHECK',
+              schedulingStatus,
+              '0',
+              '0',
+              '',
+              'NOT_CALLED',
+              '',
+              '',
+              `run=${process.env.GITHUB_RUN_ID ?? ''};sha=${process.env.GITHUB_SHA ?? ''};provider_called=false;writer=${policy.canonicalWriter.workflow}`,
+              policy.policyId,
+            ]);
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('recordPrecheck block mismatch')
+          text = text.replace(old, new, 1)
+          old = '''  assert(
+            text(row.object.master_drive_file_id) === command.driveFileId,
+            'AUTOPILOT_REGISTRY_DRIVE_FILE_DRIFT',
+          );
+          '''
+          new = '''  const deliveryDriveFileId =
+            text(row.object.format) === 'STORY'
+              ? text(row.object.story_drive_file_id)
+              : text(row.object.master_drive_file_id);
+          assert(deliveryDriveFileId === command.driveFileId, 'AUTOPILOT_REGISTRY_DRIVE_FILE_DRIFT');
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('drive binding block mismatch')
+          text = text.replace(old, new, 1)
+          text = text.replace("scheduling_policy: 'GCP_PUBLISH_NOW_AUTOPILOT_CANARY',", 'scheduling_policy: policy.policyId,', 1)
+          text = text.replace("    'GCP_PUBLISH_NOW_AUTOPILOT_CANARY',\n  ]);", '    policy.policyId,\n  ]);', 1)
+          registry.write_text(text)
+
+          workflow = Path('.github/workflows/marketing-autopilot-publication.yml')
+          text = workflow.read_text()
+          old = '''          baseline_run_id="$(jq -r '.rollout.providerReconciliationBaseline.runId' "$POLICY_PATH")"
+                    baseline_completed_at="$(jq -r '.rollout.providerReconciliationBaseline.completedAt' "$POLICY_PATH")"
+                    baseline_content_item="$(jq -r '.rollout.providerReconciliationBaseline.contentItemId' "$POLICY_PATH")"
+                    test "$baseline_content_item" = "$CONTENT_ITEM_ID"
+                    gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${baseline_run_id}" > /tmp/baseline-run.json
+                    jq -e \\
+                      --arg completed "$baseline_completed_at" '
+                        .name == "Instagram GCP Publication Recovery Preflight" and
+                        .status == "completed" and
+                        .conclusion == "success" and
+                        .updated_at == $completed
+                      ' /tmp/baseline-run.json >/dev/null
+          '''
+          new = '''          baseline_run_id="$(jq -r '.rollout.providerReconciliationBaseline.runId' "$POLICY_PATH")"
+                    baseline_completed_at="$(jq -r '.rollout.providerReconciliationBaseline.completedAt' "$POLICY_PATH")"
+                    baseline_content_item="$(jq -r '.rollout.providerReconciliationBaseline.contentItemId' "$POLICY_PATH")"
+                    if [ "$baseline_content_item" = "$CONTENT_ITEM_ID" ]; then
+                      gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${baseline_run_id}" > /tmp/baseline-run.json
+                      jq -e \\
+                        --arg completed "$baseline_completed_at" '
+                          .name == "Instagram GCP Publication Recovery Preflight" and
+                          .status == "completed" and
+                          .conclusion == "success" and
+                          .updated_at == $completed
+                        ' /tmp/baseline-run.json >/dev/null
+                      echo "MARKETING_AUTOPILOT_PROVIDER_BASELINE=VERIFIED run_id=$baseline_run_id"
+                    else
+                      baseline_completed_at='1970-01-01T00:00:00Z'
+                      baseline_run_id='NONE'
+                      echo 'MARKETING_AUTOPILOT_PROVIDER_BASELINE=NOT_APPLICABLE_STRICT_HISTORY_SCAN'
+                    fi
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('baseline guard block mismatch')
+          text = text.replace(old, new, 1)
+          workflow.write_text(text)
+          PY
+      - name: Format and validate touched files
+        run: |
+          pnpm exec prettier --write scripts/marketing-autopilot-registry.mjs .github/workflows/marketing-autopilot-publication.yml
+          pnpm exec eslint scripts/marketing-autopilot-registry.mjs
+          pnpm exec vitest run test/marketing-autopilot-registry-reconciliation.test.ts test/marketing-autopilot-scheduler-restoration.test.ts test/github-native-instagram-publication-boundary.test.ts
+      - name: Commit corrective patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'TOCA OS Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add scripts/marketing-autopilot-registry.mjs .github/workflows/marketing-autopilot-publication.yml
+          git diff --cached --check
+          git commit -m 'fix(marketing): reconcile daily feed and story rollout'
+          git push origin HEAD:ops/restore-marketing-autopilot-gcp-scheduler-20260916
