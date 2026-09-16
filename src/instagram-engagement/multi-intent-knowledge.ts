@@ -6,10 +6,21 @@ import type {
   InstagramEngagementKnowledgeSource,
 } from './knowledge.js';
 
+export interface MultiIntentInstagramEngagementKnowledgeOptions {
+  readonly now?: () => Date;
+}
+
 export class MultiIntentInstagramEngagementKnowledgeSource
   implements InstagramEngagementKnowledgeSource
 {
-  constructor(private readonly delegate: InstagramEngagementKnowledgeSource) {}
+  private readonly now: () => Date;
+
+  constructor(
+    private readonly delegate: InstagramEngagementKnowledgeSource,
+    options: MultiIntentInstagramEngagementKnowledgeOptions = {},
+  ) {
+    this.now = options.now ?? (() => new Date());
+  }
 
   async resolve(
     text: string,
@@ -34,7 +45,7 @@ export class MultiIntentInstagramEngagementKnowledgeSource
   ): Promise<InstagramEngagementKnowledgeMatch | null> {
     const deterministic = await this.delegate.resolve(text, expectedIntent);
     if (deterministic) return deterministic;
-    return resolveCurrentProgrammingKnowledge(text, expectedIntent);
+    return resolveCurrentProgrammingKnowledge(text, expectedIntent, { now: this.now() });
   }
 }
 
