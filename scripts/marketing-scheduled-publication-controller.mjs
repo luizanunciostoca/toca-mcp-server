@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -170,6 +171,8 @@ function validateItem(item, mode, currentMs) {
   fail(snapshot.assetSha256 === item.expectedAssetSha256, 'SCHEDULED_PUBLICATION_REGISTRY_ASSET_MISMATCH');
   fail(snapshot.captionSha256 === item.captionSha256, 'SCHEDULED_PUBLICATION_REGISTRY_CAPTION_MISMATCH');
   fail(/^[a-f0-9]{64}$/.test(item.captionSha256 ?? ''), 'SCHEDULED_PUBLICATION_CAPTION_SHA_INVALID');
+  const actualCaptionSha256 = createHash('sha256').update(item.caption).digest('hex');
+  fail(actualCaptionSha256 === item.captionSha256, 'SCHEDULED_PUBLICATION_CAPTION_HASH_MISMATCH');
 }
 
 function nonempty(value) {
