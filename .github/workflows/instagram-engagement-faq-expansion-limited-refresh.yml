@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   issues: write
   id-token: write
 
@@ -33,6 +34,9 @@ env:
   TOCA_ORGANIZATION_ID: toca
   FAQ_EXPECTED_COUNT: '36'
   KB_SOURCE_IDS: SRC-OPS-001,SRC-MENU-002,SRC-LOC-001,SRC-BRAND-001,SRC-PROD-001
+  AUTHORIZATION_ISSUE: ${{ github.event.issue.number }}
+  ENGAGEMENT_RESERVATION: FAQ_EXPANSION_${{ github.run_id }}_${{ github.run_attempt }}
+  KNOWLEDGE_BACKUP_KEY: ${{ github.run_id }}_${{ github.run_attempt }}
 
 jobs:
   refresh-faq-limited:
@@ -42,7 +46,7 @@ jobs:
       startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram FAQ expansion LIMITED refresh AUTO')
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     steps:
       - name: Checkout exact authorized controller
@@ -51,7 +55,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Validate exact FAQ expansion authorization
+      - name: Acquire shared engagement production reservation from live state
         id: auth
         env:
           GH_TOKEN: ${{ github.token }}
@@ -60,66 +64,12 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = 'refs/heads/main'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-
-          BODY="$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")"
-          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
-          RUNTIME_SHA="$(grep '^RUNTIME_SOURCE_SHA=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
+          bash scripts/instagram-faq-refresh-production-guard.sh ACQUIRE
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
+          BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON")"
           RUNTIME_DIGEST="$(grep '^RUNTIME_IMAGE_DIGEST=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
-          test "$RUNTIME_SHA" = "$GITHUB_SHA"
           [[ "$RUNTIME_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-
-          required=(
-            "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
-            "AUTHORIZATION_STATE=ACTIVE"
-            "INSTAGRAM_FAQ_EXPANSION_LIMITED_REFRESH=AUTHORIZED"
-            "RUNTIME_SOURCE_SHA=$GITHUB_SHA"
-            "RUNTIME_IMAGE_DIGEST=$RUNTIME_DIGEST"
-            "AUTONOMY_STAGE=LIMITED"
-            "AUTO_REPLY_CHANNELS=DIRECT,COMMENT"
-            "CURRENT_LIMITED_STATE_REQUIRED=true"
-            "PERSISTENT_WRITES_AUTHORIZED=true"
-            "DATABASE_MIGRATIONS_AUTHORIZED=true"
-            "SERVICE_MUTATION_AUTHORIZED=true"
-            "SCHEDULER_MUTATION_AUTHORIZED=false"
-            "GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false"
-            "FAQ_EXPECTED_COUNT=$FAQ_EXPECTED_COUNT"
-            "KB_SOURCE_IDS=$KB_SOURCE_IDS"
-            "ZERO_TRAFFIC_STAGE_REQUIRED=true"
-            "BATCH_SIZE=1"
-            "ROLLBACK_ON_FAILURE=true"
-          )
-          for line in "${required[@]}"; do
-            grep -Fxq "$line" <<< "$BODY" || {
-              echo "Missing exact FAQ expansion authorization field: $line" >&2
-              exit 1
-            }
-          done
-
-          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
-          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
-
-          CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
-          control_required=(
-            'PRO_PLUS_CONTROL_PLANE_SCHEMA_VERSION=2'
-            'CONTROL_PLANE_ROLE=INTEGRATION_QUEUE_AND_MAIN_STABILITY'
-            'MAIN_STABILITY=PASS'
-            "EVALUATED_MAIN_SHA=$GITHUB_SHA"
-            'MERGE_RESERVATION=NONE'
-            'ENGAGEMENT_AUTONOMY_STAGE=LIMITED'
-            'ENGAGEMENT_AUTO_REPLY_CHANNELS=DIRECT,COMMENT'
-            'DIRECT_LIMITED_RUNTIME_ACTIVE=true'
-            'COMMENT_LIMITED_RUNTIME_ACTIVE=true'
-            'GENERAL_AUTONOMY=false'
-          )
-          for line in "${control_required[@]}"; do
-            grep -Fxq "$line" <<< "$CONTROL_BODY" || {
-              echo "Main Stability or LIMITED prestate not certified: $line" >&2
-              exit 1
-            }
-          done
-
-          echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "runtime_sha=$RUNTIME_SHA" >> "$GITHUB_OUTPUT"
+          echo "runtime_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
           echo "runtime_image=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
 
@@ -150,17 +100,18 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Verify immutable image and current dual-channel LIMITED prestate
+      - name: Verify immutable image and capture dual-channel LIMITED prestate
         id: prestate
         env:
+          GH_TOKEN: ${{ github.token }}
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
           RUNTIME_DIGEST: ${{ steps.auth.outputs.runtime_digest }}
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT
           DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
           test "$DESCRIBED_DIGEST" = "$RUNTIME_DIGEST"
-
           SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           PRE_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end')"
           test -n "$PRE_REVISION"
@@ -175,7 +126,6 @@ jobs:
             (([($c.env // [])[] | select(.name == "INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS") | .value] | last) == "DIRECT,COMMENT") and
             (([($c.env // [])[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] | last // "false") == "false")
           ' >/dev/null
-
           SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
           SCHEDULER_FINGERPRINT="$(printf '%s' "$SCHEDULER_JSON" | jq -c '{state,schedule,timeZone,httpTarget}' | sha256sum | awk '{print $1}')"
           test -n "$SCHEDULER_FINGERPRINT"
@@ -183,12 +133,36 @@ jobs:
           echo "scheduler_fingerprint=$SCHEDULER_FINGERPRINT" >> "$GITHUB_OUTPUT"
           echo 'DUAL_CHANNEL_LIMITED_PRESTATE=PASS'
 
-      - name: Apply and verify production migrations
+      - name: Backup current shared FAQ and knowledge state
         env:
+          GH_TOKEN: ${{ github.token }}
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT
+          JOB="toca-ig-faq-backup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "INSTAGRAM_FAQ_EXPANSION_STATE_ACTION=BACKUP,INSTAGRAM_FAQ_EXPANSION_BACKUP_KEY=$KNOWLEDGE_BACKUP_KEY" \
+            --command node --args dist/src/ops/instagram-faq-expansion-knowledge-state.js \
+            --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          cleanup
+          trap - EXIT
+
+      - name: Apply and verify production migrations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT
           JOB="toca-ig-faq-migrate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
           trap cleanup EXIT
@@ -204,10 +178,12 @@ jobs:
 
       - name: Synchronize exact 36-FAQ approved snapshot
         env:
+          GH_TOKEN: ${{ github.token }}
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT
           JOB="toca-ig-faq-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
           trap cleanup EXIT
@@ -224,10 +200,12 @@ jobs:
 
       - name: Synchronize five-source canonical knowledge base
         env:
+          GH_TOKEN: ${{ github.token }}
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT
           JOB="toca-ig-kb-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
           trap cleanup EXIT
@@ -243,13 +221,15 @@ jobs:
           cleanup
           trap - EXIT
 
-      - name: Verify migration, FAQ count/hash and five-source KB
+      - name: Verify migration, canonical FAQ hash and five-source KB
         id: knowledge
         env:
+          GH_TOKEN: ${{ github.token }}
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT
           JOB="toca-ig-faq-verify-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
           trap cleanup EXIT
@@ -269,10 +249,12 @@ jobs:
           KB_SOURCE_COUNT="$(jq -r '.kbSourceCount' <<< "$RESULT")"
           KB_CHUNK_COUNT="$(jq -r '.kbChunkCount' <<< "$RESULT")"
           MIGRATION_043="$(jq -r '.migration043Applied' <<< "$RESULT")"
+          CANONICAL_HASH_MATCHED="$(jq -r '.canonicalSnapshotHashMatched' <<< "$RESULT")"
           test "$FAQ_COUNT" = "$FAQ_EXPECTED_COUNT"
           [[ "$FAQ_HASH" =~ ^[0-9a-f]{64}$ ]]
           test "$KB_SOURCE_COUNT" = '5'
           test "$MIGRATION_043" = 'true'
+          test "$CANONICAL_HASH_MATCHED" = 'true'
           [[ "$KB_CHUNK_COUNT" =~ ^[0-9]+$ ]]
           echo "faq_count=$FAQ_COUNT" >> "$GITHUB_OUTPUT"
           echo "faq_hash=$FAQ_HASH" >> "$GITHUB_OUTPUT"
@@ -283,10 +265,12 @@ jobs:
 
       - name: Prove dual-channel readiness without sending
         env:
+          GH_TOKEN: ${{ github.token }}
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT
           JOB="toca-ig-faq-ready-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
           trap cleanup EXIT
@@ -304,10 +288,16 @@ jobs:
       - name: Stage exact dual-channel LIMITED candidate at zero traffic
         id: stage
         env:
+          GH_TOKEN: ${{ github.token }}
           RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT
+          SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          CURRENT_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end')"
+          test "$CURRENT_REVISION" = "$PRE_REVISION"
           RUN_TAIL="${GITHUB_RUN_ID: -7}"
           REVISION_SUFFIX="f${RUN_TAIL}a${GITHUB_RUN_ATTEMPT}"
           CANDIDATE_REVISION="${DAEMON_SERVICE_NAME}-${REVISION_SUFFIX}"
@@ -330,8 +320,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$CANDIDATE_REVISION"
-          test "$CANDIDATE_REVISION" != "$PRE_REVISION"
           REVISION_JSON="$(gcloud run revisions describe "$CANDIDATE_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           printf '%s' "$REVISION_JSON" | jq -e --arg digest "$RUNTIME_DIGEST" --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" --arg sources "$KB_SOURCE_IDS" '
             .spec.containers[0] as $c |
@@ -355,10 +343,23 @@ jobs:
       - name: Cut over exact candidate at 100 percent
         id: cutover
         env:
+          GH_TOKEN: ${{ github.token }}
           CANDIDATE_REVISION: ${{ steps.stage.outputs.candidate_revision }}
+          PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
+          PRE_SCHEDULER_FINGERPRINT: ${{ steps.prestate.outputs.scheduler_fingerprint }}
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/instagram-faq-refresh-production-guard.sh ASSERT
+          SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          CURRENT_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end')"
+          test "$CURRENT_REVISION" = "$PRE_REVISION"
+          printf '%s' "$SERVICE_JSON" | jq -e --arg candidate "$CANDIDATE_REVISION" '
+            ([.status.traffic[]? | select((.revisionName // "") == $candidate) | (.percent // 0)] | add // 0) == 0
+          ' >/dev/null
+          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
+          CURRENT_SCHEDULER_FINGERPRINT="$(printf '%s' "$SCHEDULER_JSON" | jq -c '{state,schedule,timeZone,httpTarget}' | sha256sum | awk '{print $1}')"
+          test "$CURRENT_SCHEDULER_FINGERPRINT" = "$PRE_SCHEDULER_FINGERPRINT"
           gcloud run services update-traffic "$DAEMON_SERVICE_NAME" \
             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
             --to-revisions="${CANDIDATE_REVISION}=100" --quiet
@@ -391,11 +392,30 @@ jobs:
           test "$POST_SCHEDULER_FINGERPRINT" = "$PRE_SCHEDULER_FINGERPRINT"
           echo 'FAQ_EXPANSION_LIMITED_RUNTIME_READBACK=PASS'
 
+      - name: Remove backup tables after successful activation
+        if: success()
+        continue-on-error: true
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB="toca-ig-faq-cleanup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          gcloud run jobs deploy "$JOB" \
+            --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+            --set-env-vars "INSTAGRAM_FAQ_EXPANSION_STATE_ACTION=CLEANUP,INSTAGRAM_FAQ_EXPANSION_BACKUP_KEY=$KNOWLEDGE_BACKUP_KEY" \
+            --command node --args dist/src/ops/instagram-faq-expansion-knowledge-state.js \
+            --tasks 1 --max-retries 0 --task-timeout 120s --quiet
+          gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
       - name: Publish sanitized FAQ expansion PASS evidence
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
-          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
           CANDIDATE_REVISION: ${{ steps.stage.outputs.candidate_revision }}
           PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
         shell: bash
@@ -419,40 +439,76 @@ jobs:
             'MIGRATION_043_APPLIED=true' \
             "FAQ_COUNT=${{ steps.knowledge.outputs.faq_count }}" \
             "FAQ_SNAPSHOT_SHA256=${{ steps.knowledge.outputs.faq_hash }}" \
+            'FAQ_CANONICAL_SNAPSHOT_HASH_MATCHED=true' \
             "KB_SOURCE_COUNT=${{ steps.knowledge.outputs.kb_source_count }}" \
             "KB_CHUNK_COUNT=${{ steps.knowledge.outputs.kb_chunk_count }}" \
             "KB_SOURCE_IDS=$KB_SOURCE_IDS" \
             'SCHEDULER_MUTATION=false' \
+            'KNOWLEDGE_ROLLBACK_BOUNDARY=BACKUP_RESTORE' \
             'GENERAL_AUTONOMY_PROMOTED=false' \
             'ROLLBACK_REQUIRED=false'
           gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$COMMENT" >/dev/null
           gh issue comment 641 --repo "$GITHUB_REPOSITORY" --body "$COMMENT" >/dev/null
 
-      - name: Roll back traffic to previous dual-channel LIMITED revision on failure
+      - name: Restore knowledge state and previous LIMITED traffic on failure
         if: failure()
         env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
           PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
         shell: bash
         run: |
           set +e
+          RESTORE_EXIT=0
+          TRAFFIC_EXIT=0
+          if [[ -n "${RUNTIME_IMAGE:-}" ]]; then
+            JOB="toca-ig-faq-restore-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            gcloud run jobs deploy "$JOB" \
+              --image "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+              --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+              --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest" \
+              --set-env-vars "INSTAGRAM_FAQ_EXPANSION_STATE_ACTION=RESTORE,INSTAGRAM_FAQ_EXPANSION_BACKUP_KEY=$KNOWLEDGE_BACKUP_KEY" \
+              --command node --args dist/src/ops/instagram-faq-expansion-knowledge-state.js \
+              --tasks 1 --max-retries 0 --task-timeout 180s --quiet >/dev/null 2>&1
+            if [[ $? -eq 0 ]]; then
+              gcloud run jobs execute "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet >/dev/null 2>&1
+              RESTORE_EXIT=$?
+            else
+              RESTORE_EXIT=1
+            fi
+            gcloud run jobs delete "$JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+          fi
           if [[ -n "${PRE_REVISION:-}" ]]; then
             gcloud run services update-traffic "$DAEMON_SERVICE_NAME" \
               --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
-              --to-revisions="${PRE_REVISION}=100" --quiet >/dev/null 2>&1 || true
+              --to-revisions="${PRE_REVISION}=100" --quiet >/dev/null 2>&1
+            TRAFFIC_EXIT=$?
           fi
+          printf -v COMMENT '%s\n' \
+            'FAQ_EXPANSION_LIMITED_REFRESH_STATUS=FAIL' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            "KNOWLEDGE_RESTORE_EXIT=$RESTORE_EXIT" \
+            "TRAFFIC_ROLLBACK_EXIT=$TRAFFIC_EXIT" \
+            'GENERAL_AUTONOMY_PROMOTED=false' \
+            'ROLLBACK_ATTEMPTED=true'
+          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$COMMENT" >/dev/null 2>&1 || true
+          gh issue comment 641 --repo "$GITHUB_REPOSITORY" --body "$COMMENT" >/dev/null 2>&1 || true
           echo 'ROLLBACK_ATTEMPTED=true'
           exit 0
 
-      - name: Consume single-use FAQ expansion authorization
+      - name: Release reservation and consume single-use authorization
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
         shell: bash
         run: |
-          set -euo pipefail
-          test -n "${AUTHORIZATION_ISSUE:-}"
-          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
-          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""' | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/')"
-          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
-            -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
+          set +e
+          bash scripts/instagram-faq-refresh-production-guard.sh RELEASE
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" 2>/dev/null)" || exit 0
+          STATE="$(jq -r '.state // ""' <<< "$ISSUE_JSON")"
+          if [[ "$STATE" == 'open' ]]; then
+            BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON" | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/')"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
+              -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null 2>&1 || true
+          fi
+          exit 0
