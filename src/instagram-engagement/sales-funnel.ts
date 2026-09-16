@@ -7,6 +7,9 @@ const INSTAGRAM_WINDOW_MS = 24 * 60 * 60 * 1000;
 const INSTAGRAM_WINDOW_BUFFER_MS = 60 * 60 * 1000;
 const FOLLOW_UP_ONE_DELAY_MS = 2 * 60 * 60 * 1000;
 const FOLLOW_UP_TWO_DELAY_MS = 20 * 60 * 60 * 1000;
+const POST_SALE_DELAY_MS = 30 * 60 * 1000;
+const SATURDAY_CROSS_SELL_DELAY_MS = 2 * 60 * 60 * 1000;
+const UPCOMING_EVENTS_CROSS_SELL_DELAY_MS = 6 * 60 * 60 * 1000;
 
 export type InstagramSalesProduct = 'SUNSET' | 'THE_PARTY' | 'BOTH' | 'UNSPECIFIED';
 export type InstagramSalesJourneyStage =
@@ -124,7 +127,7 @@ export function planInstagramSalesFunnel(
           actionType: 'POST_SALE',
           contentKey: 'SUNSET_POST_SALE',
           playbookKey: 'instagram-post-sale-sunset-v1',
-          dueMs: Math.max(nowMs, lastInboundMs + FOLLOW_UP_ONE_DELAY_MS),
+          dueMs: nowMs + POST_SALE_DELAY_MS,
           priority: 'MEDIUM',
           rationale: 'A confirmed Sunset purchase enters the post-sale relationship flow.',
           factsVerified,
@@ -139,7 +142,7 @@ export function planInstagramSalesFunnel(
             actionType: 'CROSS_SELL',
             contentKey: 'SUNSET_SATURDAY_SAMBA_PAGODE',
             playbookKey: 'instagram-cross-sell-saturday-samba-pagode-v1',
-            dueMs: Math.max(nowMs, lastInboundMs + 3 * 60 * 60 * 1000),
+            dueMs: nowMs + SATURDAY_CROSS_SELL_DELAY_MS,
             priority: 'MEDIUM',
             rationale:
               'Verified Saturday samba/pagode programming may be offered after a Sunset purchase.',
@@ -157,7 +160,7 @@ export function planInstagramSalesFunnel(
           actionType: 'POST_SALE',
           contentKey: 'THE_PARTY_POST_SALE',
           playbookKey: 'instagram-post-sale-the-party-v1',
-          dueMs: Math.max(nowMs, lastInboundMs + FOLLOW_UP_ONE_DELAY_MS),
+          dueMs: nowMs + POST_SALE_DELAY_MS,
           priority: 'MEDIUM',
           rationale: 'A confirmed The Party purchase enters the post-sale relationship flow.',
           factsVerified,
@@ -172,7 +175,7 @@ export function planInstagramSalesFunnel(
         actionType: 'CROSS_SELL',
         contentKey: 'UPCOMING_EVENTS_CROSS_SELL',
         playbookKey: 'instagram-cross-sell-upcoming-events-v1',
-        dueMs: Math.max(nowMs, lastInboundMs + 4 * 60 * 60 * 1000),
+        dueMs: nowMs + UPCOMING_EVENTS_CROSS_SELL_DELAY_MS,
         priority: 'LOW',
         rationale: 'Won customers remain eligible for verified upcoming-event cross-sell.',
         factsVerified,
