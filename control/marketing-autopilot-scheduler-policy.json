@@ -30,7 +30,14 @@
     "preparationLeadSeconds": 300,
     "lateWindowSeconds": 1800,
     "maxCandidatesPerRun": 1,
-    "cron": "3/5 * * * *"
+    "timezone": "America/Bahia",
+    "triggerStrategy": "SLOT_STAGGERED_WITH_LATE_CATCHUP",
+    "primaryCron": "56 8,10,14,15,19 * * *",
+    "catchupCrons": [
+      "7 9,11,15,16,20 * * *",
+      "17 9,11,15,16,20 * * *",
+      "27 9,11,15,16,20 * * *"
+    ]
   },
   "requiredEligibility": {
     "status": "PRODUCED",
