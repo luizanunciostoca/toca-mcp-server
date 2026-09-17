@@ -52,7 +52,6 @@ jobs:
           BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON")"
           ISSUE_NUMBER="$(jq -r '.number' <<< "$ISSUE_JSON")"
           jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '.state=="open" and .user.login==$owner and (.title|startswith("PRODUCTION AUTHORIZATION — AG-01 grounded runtime activation V2 AUTO"))' <<< "$ISSUE_JSON" >/dev/null
-
           CONTROLLER_SHA="$(grep '^AUTHORIZED_CONTROLLER_SHA=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
           RUNTIME_SHA="$(grep '^AUTHORIZED_RUNTIME_SOURCE_SHA=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
           DIGEST="$(grep '^AUTHORIZED_IMAGE_DIGEST=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
@@ -74,17 +73,15 @@ jobs:
             'ROLLBACK_ON_FAILURE=true'; do
             grep -Fxq "$marker" <<< "$BODY" || exit 1
           done
-
           git cat-file -e "$RUNTIME_SHA^{commit}"
           CHANGED="$(git diff --name-only "$RUNTIME_SHA..$GITHUB_SHA")"
           test -n "$CHANGED"
           while IFS= read -r path; do
             case "$path" in
-              .github/workflows/ag01-grounded-runtime-activation-v2.yml|test/ag01-grounded-runtime-activation-v2.test.ts) ;;
+              .github/workflows/ag01-grounded-runtime-activation-v2.yml|.github/workflows/ag01-grounded-activation-rollback-guardian.yml|test/ag01-grounded-runtime-activation-v2.test.ts) ;;
               *) echo "Unapproved runtime drift path: $path" >&2; exit 1 ;;
             esac
           done <<< "$CHANGED"
-
           CONTROL="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
           for line in 'MAIN_STABILITY=PASS' "EVALUATED_MAIN_SHA=$GITHUB_SHA" 'MERGE_RESERVATION=NONE' 'GENERAL_AUTONOMY=false'; do
             grep -Fxq "$line" <<< "$CONTROL" || exit 1
@@ -227,7 +224,7 @@ jobs:
             --data-binary @/tmp/base-request.json "$BASE_URL/v1/knowledge/answer" >/tmp/base-answer.json
           jq -e '.status=="GROUNDED" and (.confidence>=0.85) and (.citedResourceIds|length>0)' /tmp/base-answer.json >/dev/null
 
-      - name: Publish sanitized success evidence
+      - name: Publish success and consume authorization
         if: success()
         shell: bash
         env:
@@ -238,16 +235,22 @@ jobs:
           CANDIDATE: ${{ steps.stage.outputs.candidate }}
         run: |
           set -euo pipefail
-          gh issue comment "$ISSUE" --body "AG01_GROUNDED_RUNTIME_ACTIVATION_V2_STATUS=PASS
-RUNTIME_SOURCE_SHA=$RUNTIME_SHA
-IMAGE_DIGEST=$DIGEST
-PROMOTED_REVISION=$CANDIDATE
-TRAFFIC_PERCENT=100
-STARTUP_PROBE=/healthz
-READINESS_GATE=/ready
-DRIVE_SCOPE=READ_ONLY
-DIRECT_PROVIDER_WRITE=false
-EXTERNAL_BUSINESS_SIDE_EFFECT=false"
+          printf '%s\n' \
+            'AG01_GROUNDED_RUNTIME_ACTIVATION_V2_STATUS=PASS' \
+            "RUNTIME_SOURCE_SHA=$RUNTIME_SHA" \
+            "IMAGE_DIGEST=$DIGEST" \
+            "PROMOTED_REVISION=$CANDIDATE" \
+            'TRAFFIC_PERCENT=100' \
+            'STARTUP_PROBE=/healthz' \
+            'READINESS_GATE=/ready' \
+            'DRIVE_SCOPE=READ_ONLY' \
+            'DIRECT_PROVIDER_WRITE=false' \
+            'EXTERNAL_BUSINESS_SIDE_EFFECT=false' \
+            'AUTHORIZATION_STATE=CONSUMED' \
+            "WORKFLOW_RUN_ID=$GITHUB_RUN_ID" \
+            'REUSE_PROHIBITED=true' > /tmp/success-comment.txt
+          gh issue comment "$ISSUE" --body-file /tmp/success-comment.txt
+          gh issue close "$ISSUE" --reason completed
 
       - name: Roll back if a post-promotion gate failed
         if: failure() && steps.promote.outputs.traffic_changed == 'true'
@@ -264,17 +267,18 @@ EXTERNAL_BUSINESS_SIDE_EFFECT=false"
           RESTORED="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent//0)==100) | .revisionName] | if length==1 then .[0] else empty end')"
           test "$RESTORED" = "$PREVIOUS" || test "$RESTORED" != "$CANDIDATE"
 
-      - name: Consume single-use authorization
-        if: always() && steps.authz.outputs.issue != ''
+      - name: Consume failed authorization
+        if: failure() && steps.authz.outputs.issue != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ steps.authz.outputs.issue }}
-          JOB_STATUS: ${{ job.status }}
         run: |
           set -euo pipefail
-          gh issue comment "$ISSUE" --body "AUTHORIZATION_STATE=CONSUMED
-WORKFLOW_RUN_ID=$GITHUB_RUN_ID
-WORKFLOW_STATUS=$JOB_STATUS
-REUSE_PROHIBITED=true"
+          printf '%s\n' \
+            'AUTHORIZATION_STATE=CONSUMED' \
+            'AG01_GROUNDED_RUNTIME_ACTIVATION_V2_STATUS=FAIL' \
+            "WORKFLOW_RUN_ID=$GITHUB_RUN_ID" \
+            'REUSE_PROHIBITED=true' > /tmp/failure-comment.txt
+          gh issue comment "$ISSUE" --body-file /tmp/failure-comment.txt
           gh issue close "$ISSUE" --reason completed
