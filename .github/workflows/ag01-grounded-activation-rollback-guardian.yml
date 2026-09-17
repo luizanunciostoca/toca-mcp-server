@@ -65,21 +65,37 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
+          current_revision() {
+            local service="$1"
+            gcloud run services describe "$service" \
+              --project "$PROJECT_ID" --region "$REGION" --format=json \
+              | jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end'
+          }
+
+          restore_if_needed() {
+            local service="$1" previous="$2" current
+            current="$(current_revision "$service")"
+            if [[ "$current" == "$previous" ]]; then
+              echo "Canonical revision already owns 100% traffic; rollback mutation not required."
+              return 0
+            fi
+            gcloud run services update-traffic "$service" \
+              --project "$PROJECT_ID" --region "$REGION" \
+              --to-revisions "$previous=100" --quiet
+          }
+
           case "$FAILED_WORKFLOW" in
             'AG-01 Grounded Runtime Activation')
               PREVIOUS_REVISION="$(jq -r '.activeRuntime.ag01Orchestrator.historicalVerification.canonicalProductionRevision // empty' infra/control-plane/policy.json)"
               [[ "$PREVIOUS_REVISION" =~ ^toca-ag01-orchestrator-[a-z0-9-]+$ ]]
-              gcloud run services update-traffic "$AG01_SERVICE" \
-                --project "$PROJECT_ID" --region "$REGION" \
-                --to-revisions "$PREVIOUS_REVISION=100" --quiet
+              restore_if_needed "$AG01_SERVICE" "$PREVIOUS_REVISION"
               ;;
             'Instagram Engagement AG-01 Fallback LIMITED Activation')
               CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
               PREVIOUS_REVISION="$(grep '^ENGAGEMENT_PROMOTED_REVISION=' <<< "$CONTROL_BODY" | tail -1 | cut -d= -f2-)"
               [[ "$PREVIOUS_REVISION" =~ ^toca-managed-instagram-daemon-[a-z0-9-]+$ ]]
-              gcloud run services update-traffic "$DAEMON_SERVICE" \
-                --project "$PROJECT_ID" --region "$REGION" \
-                --to-revisions "$PREVIOUS_REVISION=100" --quiet
+              restore_if_needed "$DAEMON_SERVICE" "$PREVIOUS_REVISION"
               ;;
             *)
               echo "Unsupported workflow: $FAILED_WORKFLOW" >&2
