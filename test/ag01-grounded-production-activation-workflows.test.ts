@@ -6,6 +6,10 @@ const instagram = readFileSync(
   '.github/workflows/instagram-engagement-ag01-fallback-limited-activation.yml',
   'utf8',
 );
+const guardian = readFileSync(
+  '.github/workflows/ag01-grounded-activation-rollback-guardian.yml',
+  'utf8',
+);
 
 describe('grounded production activation workflows', () => {
   it('keeps AG-01 private, zero-traffic first and provider-write free', () => {
@@ -31,6 +35,17 @@ describe('grounded production activation workflows', () => {
     expect(instagram).toContain('INSTAGRAM_ENGAGEMENT_AG01_GROUNDED_FALLBACK_ENABLED=true');
     expect(instagram).toContain('--no-traffic --quiet');
     expect(instagram).toContain('DIRECT,COMMENT');
-    expect(instagram).toContain("GENERAL_AUTONOMY=false");
+    expect(instagram).toContain('GENERAL_AUTONOMY=false');
+  });
+
+  it('restores canonical traffic if either activation fails after mutation', () => {
+    expect(guardian).toContain('AG-01 Grounded Runtime Activation');
+    expect(guardian).toContain('Instagram Engagement AG-01 Fallback LIMITED Activation');
+    expect(guardian).toContain("github.event.workflow_run.conclusion == 'failure'");
+    expect(guardian).toContain("github.event.workflow_run.head_branch == 'main'");
+    expect(guardian).toContain('historicalVerification.canonicalProductionRevision');
+    expect(guardian).toContain('ENGAGEMENT_PROMOTED_REVISION=');
+    expect(guardian).toContain('--to-revisions "$PREVIOUS_REVISION=100"');
+    expect(guardian).not.toContain('scheduler jobs update');
   });
 });
