@@ -40,15 +40,12 @@ jobs:
         run: node scripts/platform-hardening-check.mjs
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Format check
-        run: pnpm format:check
-      - name: Architecture check
-        run: pnpm architecture:check
-      - name: Lint
-        run: pnpm lint
-      - name: Typecheck
-        run: pnpm typecheck
-      - name: Test
-        run: pnpm test
-      - name: Build
-        run: pnpm build
+      - name: Temporary AG-01 prettier diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE=test/ag01-grounded-production-activation-workflows.test.ts
+          cp "$FILE" /tmp/ag01-before.ts
+          pnpm exec prettier "$FILE" --write
+          diff -u /tmp/ag01-before.ts "$FILE" || true
+          exit 1
