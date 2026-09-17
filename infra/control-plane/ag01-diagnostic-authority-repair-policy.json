@@ -9,8 +9,12 @@
   "allowedProjectRole": "roles/iam.serviceAccountViewer",
   "requiredPermissionProof": "iam.serviceAccounts.getIamPolicy",
   "singleUseAuthorizationRequired": true,
+  "claimAuthorizationBeforeMutationRequired": true,
   "exactMainShaRequired": true,
+  "immediateMainShaRevalidationRequired": true,
   "prestateSnapshotRequired": true,
+  "policyEtagRevalidationRequired": true,
+  "conditionalTargetBindingsForbidden": true,
   "poststateExactDeltaRequired": true,
   "rawIamPolicyPublicationAllowed": false,
   "forbid": {
