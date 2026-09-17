@@ -24,9 +24,7 @@ describe('grounded production activation workflows', () => {
   });
 
   it('activates Instagram fallback without widening autonomy or changing scheduler', () => {
-    expect(instagram).toContain(
-      'INSTAGRAM_AG01_GROUNDED_FALLBACK_LIMITED_ACTIVATION=AUTHORIZED',
-    );
+    expect(instagram).toContain('INSTAGRAM_AG01_GROUNDED_FALLBACK_LIMITED_ACTIVATION=AUTHORIZED');
     expect(instagram).toContain('AUTO_REPLY_CHANNELS=DIRECT,COMMENT');
     expect(instagram).toContain('GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false');
     expect(instagram).toContain('DATABASE_MUTATIONS_AUTHORIZED=false');
