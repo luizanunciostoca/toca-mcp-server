@@ -88,7 +88,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
-          gcloud iam service-accounts get-iam-policy "$SOURCE_SERVICE_ACCOUNT" --project "$PROJECT_ID" --format=json > /tmp/source-sa-policy.json
+
+          gcloud iam service-accounts get-iam-policy "$SOURCE_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" --format=json > /tmp/source-sa-policy.json
           jq -e '
             [.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | select(.condition != null)] | length == 0
           ' /tmp/source-sa-policy.json >/dev/null
@@ -101,9 +103,31 @@ jobs:
           done < /tmp/source-wif-members.txt
 
           target_exists=false
-          if gcloud iam service-accounts describe "$TARGET_SERVICE_ACCOUNT" --project "$PROJECT_ID" --format='value(email)' >/tmp/target-email.txt 2>/dev/null; then
+          set +e
+          gcloud iam service-accounts describe "$TARGET_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" --format='value(email)' \
+            > /tmp/target-email.txt 2> /tmp/target-describe.err
+          describe_status=$?
+          set -e
+          if test "$describe_status" -eq 0; then
             test "$(cat /tmp/target-email.txt)" = "$TARGET_SERVICE_ACCOUNT"
             target_exists=true
+          elif grep -Eqi 'NOT_FOUND|not found|does not exist|Unknown service account' /tmp/target-describe.err; then
+            target_exists=false
+          else
+            echo 'TARGET_SERVICE_ACCOUNT_PRESTATE=UNREADABLE' >&2
+            exit "$describe_status"
+          fi
+          rm -f /tmp/target-describe.err /tmp/target-email.txt
+
+          if test "$target_exists" = true; then
+            USER_KEYS_BEFORE="$(gcloud iam service-accounts keys list \
+              --iam-account "$TARGET_SERVICE_ACCOUNT" \
+              --project "$PROJECT_ID" \
+              --managed-by=user \
+              --format='value(name)')"
+            test -z "$USER_KEYS_BEFORE"
+
             gcloud projects get-iam-policy "$PROJECT_ID" --format=json > /tmp/project-policy-before.json
             jq -r --arg member "serviceAccount:${TARGET_SERVICE_ACCOUNT}" '
               [.bindings[]? | select((.members // []) | index($member)) | .role] | unique | .[]
@@ -113,15 +137,25 @@ jobs:
                 [[ "$role" == 'roles/run.viewer' || "$role" == 'roles/logging.viewer' ]] || exit 1
               done < /tmp/target-project-roles-before.txt
             fi
-            gcloud iam service-accounts get-iam-policy "$TARGET_SERVICE_ACCOUNT" --project "$PROJECT_ID" --format=json > /tmp/target-sa-policy-before.json
-            jq -e '[.bindings[]? | select(.role != "roles/iam.workloadIdentityUser")] | length == 0' /tmp/target-sa-policy-before.json >/dev/null
-            jq -r '[.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | .members[]?] | unique | .[]' /tmp/target-sa-policy-before.json > /tmp/target-wif-before.txt
+
+            gcloud iam service-accounts get-iam-policy "$TARGET_SERVICE_ACCOUNT" \
+              --project "$PROJECT_ID" --format=json > /tmp/target-sa-policy-before.json
+            jq -e '
+              [.bindings[]? | select(.role != "roles/iam.workloadIdentityUser")] | length == 0
+            ' /tmp/target-sa-policy-before.json >/dev/null
+            jq -e '
+              [.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | select(.condition != null)] | length == 0
+            ' /tmp/target-sa-policy-before.json >/dev/null
+            jq -r '
+              [.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | .members[]?] | unique | .[]
+            ' /tmp/target-sa-policy-before.json > /tmp/target-wif-before.txt
             if test -s /tmp/target-wif-before.txt; then
               while IFS= read -r member; do
                 grep -Fxq "$member" /tmp/source-wif-members.txt || exit 1
               done < /tmp/target-wif-before.txt
             fi
           fi
+
           echo "target_exists=$target_exists" >> "$GITHUB_OUTPUT"
           echo "wif_member_count=$(wc -l < /tmp/source-wif-members.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
 
@@ -164,7 +198,8 @@ jobs:
         run: |
           set -euo pipefail
           MEMBER="serviceAccount:${TARGET_SERVICE_ACCOUNT}"
-          test "$(gcloud iam service-accounts describe "$TARGET_SERVICE_ACCOUNT" --project "$PROJECT_ID" --format='value(email)')" = "$TARGET_SERVICE_ACCOUNT"
+          test "$(gcloud iam service-accounts describe "$TARGET_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" --format='value(email)')" = "$TARGET_SERVICE_ACCOUNT"
 
           gcloud projects get-iam-policy "$PROJECT_ID" --format=json > /tmp/project-policy-after.json
           jq -r --arg member "$MEMBER" '
@@ -173,14 +208,25 @@ jobs:
           printf '%s\n' roles/logging.viewer roles/run.viewer > /tmp/expected-project-roles.txt
           diff -u /tmp/expected-project-roles.txt /tmp/target-project-roles-after.txt
 
-          gcloud iam service-accounts get-iam-policy "$TARGET_SERVICE_ACCOUNT" --project "$PROJECT_ID" --format=json > /tmp/target-sa-policy-after.json
-          jq -e '[.bindings[]? | select(.role != "roles/iam.workloadIdentityUser")] | length == 0' /tmp/target-sa-policy-after.json >/dev/null
-          jq -e '[.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | select(.condition != null)] | length == 0' /tmp/target-sa-policy-after.json >/dev/null
-          jq -r '[.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | .members[]?] | unique | sort | .[]' /tmp/target-sa-policy-after.json > /tmp/target-wif-after.txt
+          gcloud iam service-accounts get-iam-policy "$TARGET_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" --format=json > /tmp/target-sa-policy-after.json
+          jq -e '
+            [.bindings[]? | select(.role != "roles/iam.workloadIdentityUser")] | length == 0
+          ' /tmp/target-sa-policy-after.json >/dev/null
+          jq -e '
+            [.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | select(.condition != null)] | length == 0
+          ' /tmp/target-sa-policy-after.json >/dev/null
+          jq -r '
+            [.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | .members[]?] | unique | sort | .[]
+          ' /tmp/target-sa-policy-after.json > /tmp/target-wif-after.txt
           sort -u /tmp/source-wif-members.txt > /tmp/source-wif-sorted.txt
           diff -u /tmp/source-wif-sorted.txt /tmp/target-wif-after.txt
 
-          USER_KEYS="$(gcloud iam service-accounts keys list --iam-account "$TARGET_SERVICE_ACCOUNT" --project "$PROJECT_ID" --managed-by=user --format='value(name)')"
+          USER_KEYS="$(gcloud iam service-accounts keys list \
+            --iam-account "$TARGET_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" \
+            --managed-by=user \
+            --format='value(name)')"
           test -z "$USER_KEYS"
           echo 'least_privilege=PASS' >> "$GITHUB_OUTPUT"
           echo 'user_managed_keys=0' >> "$GITHUB_OUTPUT"
@@ -207,7 +253,8 @@ jobs:
             'TRAFFIC_MUTATION=false' \
             'DATABASE_MUTATION=false' \
             'PROVIDER_CALLS=false')"
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="$COMMENT" >/dev/null
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="$COMMENT" >/dev/null
 
       - name: Consume single-use IAM authorization
         if: always()
@@ -220,9 +267,16 @@ jobs:
           set -euo pipefail
           LIVE_ISSUE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           BODY="$(jq -r '.body // ""' <<< "$LIVE_ISSUE")"
+          consumed=false
           if grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY"; then
             UPDATED="$(printf '%s' "$BODY" | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED/')"
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" -f body="$UPDATED" -f state=closed >/dev/null
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+              -f body="$UPDATED" -f state=closed >/dev/null
+            consumed=true
           fi
-          COMMENT="$(printf '%s\n' 'IAM_AUTHORIZATION_CONSUMED=true' "WORKFLOW_STATUS=$JOB_STATUS" 'REUSE_PROHIBITED=true')"
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="$COMMENT" >/dev/null
+          COMMENT="$(printf '%s\n' \
+            "IAM_AUTHORIZATION_CONSUMED=$consumed" \
+            "WORKFLOW_STATUS=$JOB_STATUS" \
+            'REUSE_PROHIBITED=true')"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="$COMMENT" >/dev/null
