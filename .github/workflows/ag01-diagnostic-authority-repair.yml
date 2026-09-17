@@ -1,0 +1,226 @@
+name: AG-01 Diagnostic Authority Repair
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: ag01-diagnostic-authority-repair
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-production
+  PROJECT_NUMBER: '990081828836'
+  INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  SOURCE_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  TARGET_PRINCIPAL: serviceAccount:toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  TARGET_ROLE: roles/iam.serviceAccountViewer
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  REPAIR_POLICY: infra/control-plane/ag01-diagnostic-authority-repair-policy.json
+
+jobs:
+  repair:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION IAM AUTHORIZATION — AG-01 diagnostic authority repair AUTO')
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout exact repair controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate exact repair policy and live single-use authorization
+        id: authz
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')" = "$GITHUB_SHA"
+          jq -e '
+            .schemaVersion == 1 and
+            .repairId == "AG01_DIAGNOSTIC_AUTHORITY_REPAIR_20260917" and
+            .projectId == "toca-mcp-production" and
+            .projectNumber == "990081828836" and
+            .actorServiceAccount == "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com" and
+            .sourceServiceAccount == "toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com" and
+            .targetPrincipal == "serviceAccount:toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com" and
+            .allowedProjectRole == "roles/iam.serviceAccountViewer" and
+            .requiredPermissionProof == "iam.serviceAccounts.getIamPolicy" and
+            .singleUseAuthorizationRequired == true and
+            .exactMainShaRequired == true and
+            .prestateSnapshotRequired == true and
+            .poststateExactDeltaRequired == true and
+            .rawIamPolicyPublicationAllowed == false and
+            .forbid.projectOwner == true and
+            .forbid.projectEditor == true and
+            .forbid.serviceAccountAdmin == true and
+            .forbid.serviceAccountPolicyWrite == true and
+            .forbid.serviceAccountCreate == true and
+            .forbid.serviceAccountKeys == true and
+            .forbid.cloudRunMutation == true and
+            .forbid.trafficMutation == true and
+            .forbid.databaseMutation == true and
+            .forbid.schedulerMutation == true and
+            .forbid.providerCalls == true and
+            .forbid.generalAutonomyPromotion == true
+          ' "$REPAIR_POLICY" >/dev/null
+
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          LIVE_ISSUE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            .state == "open" and
+            .user.login == $owner and
+            (.title | startswith("PRODUCTION IAM AUTHORIZATION — AG-01 diagnostic authority repair AUTO"))
+          ' <<< "$LIVE_ISSUE" >/dev/null
+          BODY="$(jq -r '.body // ""' <<< "$LIVE_ISSUE")"
+          required=(
+            "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
+            'AUTHORIZATION_STATE=ACTIVE'
+            'AG01_DIAGNOSTIC_AUTHORITY_REPAIR=AUTHORIZED'
+            'PROJECT_IAM_BINDING_AUTHORIZED=true'
+            'TARGET_PRINCIPAL=serviceAccount:toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com'
+            'TARGET_ROLE=roles/iam.serviceAccountViewer'
+            'SERVICE_ACCOUNT_POLICY_READ_ONLY=true'
+            'SERVICE_ACCOUNT_MUTATION_AUTHORIZED=false'
+            'SERVICE_ACCOUNT_CREATE_AUTHORIZED=false'
+            'SERVICE_ACCOUNT_KEYS_AUTHORIZED=false'
+            'SERVICE_MUTATION_AUTHORIZED=false'
+            'TRAFFIC_MUTATION_AUTHORIZED=false'
+            'DATABASE_MUTATION_AUTHORIZED=false'
+            'SCHEDULER_MUTATION_AUTHORIZED=false'
+            'PROVIDER_CALLS_AUTHORIZED=false'
+            'RAW_IAM_POLICY_PUBLISHED=false'
+            'GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false'
+          )
+          for line in "${required[@]}"; do grep -Fxq "$line" <<< "$BODY" || exit 1; done
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.INFRA_ADMIN_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Capture project IAM prestate
+        id: prestate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          gcloud projects get-iam-policy "$PROJECT_ID" --format=json > /tmp/project-policy-before.json
+          jq -r --arg member "$TARGET_PRINCIPAL" '
+            [.bindings[]? | select((.members // []) | index($member)) | .role] | unique | sort | .[]
+          ' /tmp/project-policy-before.json > /tmp/roles-before.txt
+          if grep -Fxq 'roles/owner' /tmp/roles-before.txt ||
+             grep -Fxq 'roles/editor' /tmp/roles-before.txt ||
+             grep -Fxq 'roles/iam.serviceAccountAdmin' /tmp/roles-before.txt; then
+            echo 'PREEXISTING_FORBIDDEN_PRIVILEGE=true' >&2
+            exit 1
+          fi
+          cp /tmp/roles-before.txt /tmp/roles-expected-after.txt
+          printf '%s\n' "$TARGET_ROLE" >> /tmp/roles-expected-after.txt
+          sort -u /tmp/roles-expected-after.txt -o /tmp/roles-expected-after.txt
+          echo "preexisting_role_count=$(wc -l < /tmp/roles-before.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Grant only service-account policy read role
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$TARGET_ROLE" = 'roles/iam.serviceAccountViewer'
+          gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+            --member="$TARGET_PRINCIPAL" \
+            --role="$TARGET_ROLE" \
+            --condition=None \
+            --quiet >/dev/null
+
+      - name: Verify exact IAM delta and permission proof
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud projects get-iam-policy "$PROJECT_ID" --format=json > /tmp/project-policy-after.json
+          jq -r --arg member "$TARGET_PRINCIPAL" '
+            [.bindings[]? | select((.members // []) | index($member)) | .role] | unique | sort | .[]
+          ' /tmp/project-policy-after.json > /tmp/roles-after.txt
+          diff -u /tmp/roles-expected-after.txt /tmp/roles-after.txt
+          grep -Fxq 'roles/iam.serviceAccountViewer' /tmp/roles-after.txt
+          ! grep -Fxq 'roles/owner' /tmp/roles-after.txt
+          ! grep -Fxq 'roles/editor' /tmp/roles-after.txt
+          ! grep -Fxq 'roles/iam.serviceAccountAdmin' /tmp/roles-after.txt
+
+          gcloud iam service-accounts get-iam-policy "$SOURCE_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" --format=json > /tmp/source-service-account-policy-proof.json
+          jq -e 'type == "object" and has("bindings")' /tmp/source-service-account-policy-proof.json >/dev/null
+          rm -f /tmp/source-service-account-policy-proof.json /tmp/project-policy-before.json /tmp/project-policy-after.json
+          echo 'exact_delta=PASS' >> "$GITHUB_OUTPUT"
+          echo 'service_account_policy_read=PASS' >> "$GITHUB_OUTPUT"
+
+      - name: Publish sanitized repair evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.authz.outputs.issue_number }}
+          PREEXISTING_ROLE_COUNT: ${{ steps.prestate.outputs.preexisting_role_count }}
+          EXACT_DELTA: ${{ steps.verify.outputs.exact_delta }}
+          POLICY_READ: ${{ steps.verify.outputs.service_account_policy_read }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMENT="$(printf '%s\n' \
+            'AG01_DIAGNOSTIC_AUTHORITY_REPAIR=PASS' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            'TARGET_PRINCIPAL=serviceAccount:toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com' \
+            'GRANTED_ROLE=roles/iam.serviceAccountViewer' \
+            "PREEXISTING_ROLE_COUNT=$PREEXISTING_ROLE_COUNT" \
+            "EXACT_IAM_DELTA=$EXACT_DELTA" \
+            "SOURCE_SERVICE_ACCOUNT_POLICY_READ=$POLICY_READ" \
+            'SERVICE_ACCOUNT_MUTATION=false' \
+            'SERVICE_ACCOUNT_KEYS=false' \
+            'CLOUD_RUN_MUTATION=false' \
+            'TRAFFIC_MUTATION=false' \
+            'DATABASE_MUTATION=false' \
+            'SCHEDULER_MUTATION=false' \
+            'PROVIDER_CALLS=false' \
+            'RAW_IAM_POLICY_PUBLISHED=false')"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="$COMMENT" >/dev/null
+
+      - name: Consume single-use repair authorization
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          JOB_STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          LIVE_ISSUE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          BODY="$(jq -r '.body // ""' <<< "$LIVE_ISSUE")"
+          consumed=false
+          if grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY"; then
+            UPDATED="$(printf '%s' "$BODY" | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED/')"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+              -f body="$UPDATED" -f state=closed >/dev/null
+            consumed=true
+          fi
+          COMMENT="$(printf '%s\n' \
+            "IAM_REPAIR_AUTHORIZATION_CONSUMED=$consumed" \
+            "WORKFLOW_STATUS=$JOB_STATUS" \
+            'REUSE_PROHIBITED=true')"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="$COMMENT" >/dev/null
