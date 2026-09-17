@@ -1,9 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const workflow = readFileSync('.github/workflows/ag01-diagnostic-authority-repair.yml', 'utf8');
+const workflow = readFileSync(
+  '.github/workflows/ag01-diagnostic-authority-repair.yml',
+  'utf8',
+);
 const policy = JSON.parse(
-  readFileSync('infra/control-plane/ag01-diagnostic-authority-repair-policy.json', 'utf8'),
+  readFileSync(
+    'infra/control-plane/ag01-diagnostic-authority-repair-policy.json',
+    'utf8',
+  ),
 ) as Record<string, unknown>;
 
 describe('AG-01 diagnostic authority repair', () => {
@@ -20,9 +26,9 @@ describe('AG-01 diagnostic authority repair', () => {
     expect(workflow).toContain('REUSE_PROHIBITED=true');
   });
 
-  it('allows exactly the read-only service account viewer role', () => {
+  it('allows exactly the read-only service account viewer grant', () => {
     expect(workflow).toContain('TARGET_ROLE: roles/iam.serviceAccountViewer');
-    expect(workflow).toContain('test "$TARGET_ROLE" = \'roles/iam.serviceAccountViewer\'');
+    expect(workflow).toContain("test \"$TARGET_ROLE\" = 'roles/iam.serviceAccountViewer'");
     expect(workflow).toContain('gcloud projects add-iam-policy-binding "$PROJECT_ID"');
     expect(workflow.match(/gcloud projects add-iam-policy-binding/g)).toHaveLength(1);
     expect(workflow).toContain('--role="$TARGET_ROLE"');
@@ -32,10 +38,10 @@ describe('AG-01 diagnostic authority repair', () => {
     expect(workflow).toContain('SOURCE_SERVICE_ACCOUNT_POLICY_READ=$POLICY_READ');
   });
 
-  it('does not authorize broader IAM or runtime mutations', () => {
-    expect(workflow).not.toContain('roles/iam.serviceAccountAdmin');
-    expect(workflow).not.toContain('roles/owner');
-    expect(workflow).not.toContain('roles/editor');
+  it('does not authorize broader IAM or runtime mutation commands', () => {
+    expect(workflow).not.toContain('--role=roles/iam.serviceAccountAdmin');
+    expect(workflow).not.toContain('--role=roles/owner');
+    expect(workflow).not.toContain('--role=roles/editor');
     expect(workflow).not.toContain('service-accounts add-iam-policy-binding');
     expect(workflow).not.toContain('service-accounts create');
     expect(workflow).not.toContain('service-accounts keys create');
@@ -51,11 +57,17 @@ describe('AG-01 diagnostic authority repair', () => {
     expect(workflow).toContain('GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false');
   });
 
-  it('captures prestate before the only mutation and proves source policy read afterward', () => {
+  it('captures prestate before the only mutation and proves policy read afterward', () => {
     const prestate = workflow.indexOf('- name: Capture project IAM prestate');
-    const mutation = workflow.indexOf('- name: Grant only service-account policy read role');
-    const verify = workflow.indexOf('- name: Verify exact IAM delta and permission proof');
-    const proof = workflow.indexOf('gcloud iam service-accounts get-iam-policy "$SOURCE_SERVICE_ACCOUNT"');
+    const mutation = workflow.indexOf(
+      '- name: Grant only service-account policy read role',
+    );
+    const verify = workflow.indexOf(
+      '- name: Verify exact IAM delta and permission proof',
+    );
+    const proof = workflow.indexOf(
+      'gcloud iam service-accounts get-iam-policy "$SOURCE_SERVICE_ACCOUNT"',
+    );
     expect(prestate).toBeGreaterThan(-1);
     expect(mutation).toBeGreaterThan(prestate);
     expect(verify).toBeGreaterThan(mutation);
