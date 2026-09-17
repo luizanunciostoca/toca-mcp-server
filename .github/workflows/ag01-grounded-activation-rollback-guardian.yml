@@ -1,0 +1,106 @@
+name: AG-01 Grounded Activation Rollback Guardian
+
+on:
+  workflow_run:
+    workflows:
+      - AG-01 Grounded Runtime Activation
+      - Instagram Engagement AG-01 Fallback LIMITED Activation
+    types: [completed]
+
+permissions:
+  contents: read
+  issues: read
+  id-token: write
+
+concurrency:
+  group: ag01-grounded-activation-rollback-guardian
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  AG01_SERVICE: toca-ag01-orchestrator
+  DAEMON_SERVICE: toca-managed-instagram-daemon
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  rollback:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout protected main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Refuse stale failed run
+        shell: bash
+        env:
+          FAILED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$FAILED_HEAD_SHA"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$FAILED_HEAD_SHA"
+
+      - name: Authenticate rollback identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Restore canonical pre-activation traffic
+        shell: bash
+        env:
+          FAILED_WORKFLOW: ${{ github.event.workflow_run.name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "$FAILED_WORKFLOW" in
+            'AG-01 Grounded Runtime Activation')
+              PREVIOUS_REVISION="$(jq -r '.activeRuntime.ag01Orchestrator.historicalVerification.canonicalProductionRevision // empty' infra/control-plane/policy.json)"
+              [[ "$PREVIOUS_REVISION" =~ ^toca-ag01-orchestrator-[a-z0-9-]+$ ]]
+              gcloud run services update-traffic "$AG01_SERVICE" \
+                --project "$PROJECT_ID" --region "$REGION" \
+                --to-revisions "$PREVIOUS_REVISION=100" --quiet
+              ;;
+            'Instagram Engagement AG-01 Fallback LIMITED Activation')
+              CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
+              PREVIOUS_REVISION="$(grep '^ENGAGEMENT_PROMOTED_REVISION=' <<< "$CONTROL_BODY" | tail -1 | cut -d= -f2-)"
+              [[ "$PREVIOUS_REVISION" =~ ^toca-managed-instagram-daemon-[a-z0-9-]+$ ]]
+              gcloud run services update-traffic "$DAEMON_SERVICE" \
+                --project "$PROJECT_ID" --region "$REGION" \
+                --to-revisions "$PREVIOUS_REVISION=100" --quiet
+              ;;
+            *)
+              echo "Unsupported workflow: $FAILED_WORKFLOW" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Verify restored traffic
+        shell: bash
+        env:
+          FAILED_WORKFLOW: ${{ github.event.workflow_run.name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "$FAILED_WORKFLOW" == 'AG-01 Grounded Runtime Activation' ]]; then
+            SERVICE="$AG01_SERVICE"
+            EXPECTED="$(jq -r '.activeRuntime.ag01Orchestrator.historicalVerification.canonicalProductionRevision // empty' infra/control-plane/policy.json)"
+          else
+            SERVICE="$DAEMON_SERVICE"
+            CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
+            EXPECTED="$(grep '^ENGAGEMENT_PROMOTED_REVISION=' <<< "$CONTROL_BODY" | tail -1 | cut -d= -f2-)"
+          fi
+          SERVICE_JSON="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          jq -e --arg expected "$EXPECTED" '.status.traffic[]? | select(.revisionName==$expected and .percent==100)' <<< "$SERVICE_JSON" >/dev/null
