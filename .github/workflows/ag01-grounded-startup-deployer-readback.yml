@@ -62,7 +62,7 @@ jobs:
             .claimAuthorizationBeforeReadRequired == true and
             .exactMainShaRequired == true and
             .rawLogPayloadPublicationAllowed == false and
-            .allowedReads == ["run.revisions.describe", "logging.entries.read"] and
+            .allowedReads == ["resourcemanager.projects.get", "run.revisions.describe", "logging.entries.read"] and
             .forbid.projectIamMutation == true and
             .forbid.serviceAccountMutation == true and
             .forbid.serviceAccountCreate == true and
@@ -93,8 +93,10 @@ jobs:
             'NO_SERVICE_MUTATION=true'
             'NO_IAM_MUTATION=true'
             'NO_DATABASE_MUTATION=true'
+            'NO_SCHEDULER_MUTATION=true'
             'NO_PROVIDER_CALLS=true'
             'RAW_LOG_PAYLOAD_PUBLISHED=false'
+            'GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false'
           )
           for line in "${required[@]}"; do grep -Fxq "$line" <<< "$BODY" || exit 1; done
           TARGET="$(grep '^TARGET_REVISION=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
