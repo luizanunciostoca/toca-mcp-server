@@ -14,6 +14,7 @@ describe('AG-01 diagnostic reader bootstrap controller', () => {
     expect(workflow).toContain('LIVE_ISSUE=');
     expect(workflow).toContain('.state == "open"');
     expect(workflow).toContain('AUTHORIZATION_STATE=CONSUMED');
+    expect(workflow).toContain('IAM_AUTHORIZATION_CONSUMED=$consumed');
     expect(workflow).toContain('REUSE_PROHIBITED=true');
   });
 
@@ -56,14 +57,31 @@ describe('AG-01 diagnostic reader bootstrap controller', () => {
   });
 
   it('fails closed on privilege drift and verifies the exact final envelope', () => {
+    expect(workflow).toContain('TARGET_SERVICE_ACCOUNT_PRESTATE=UNREADABLE');
+    expect(workflow).toContain('USER_KEYS_BEFORE=');
     expect(workflow).toContain('target-project-roles-before.txt');
-    expect(workflow).toContain("'roles/run.viewer'");
-    expect(workflow).toContain("'roles/logging.viewer'");
-    expect(workflow).toContain('select(.role != "roles/iam.workloadIdentityUser")');
-    expect(workflow).toContain("printf '%s\\n' roles/logging.viewer roles/run.viewer");
+    expect(workflow).toContain('target-sa-policy-before.json');
+    expect(workflow).toContain('select(.condition != null)');
     expect(workflow).toContain('expected-project-roles.txt');
     expect(workflow).toContain('target-project-roles-after.txt');
     expect(workflow).toContain('USER_MANAGED_KEYS=');
     expect(workflow).toContain('LEAST_PRIVILEGE=');
+  });
+
+  it('runs every existing-account safety check before the first IAM mutation', () => {
+    const prestate = workflow.indexOf('- name: Inspect source WIF and target IAM prestate');
+    const userKeyCheck = workflow.indexOf('USER_KEYS_BEFORE=');
+    const conditionCheck = workflow.indexOf('target-sa-policy-before.json');
+    const create = workflow.indexOf('- name: Create diagnostic service account if absent');
+    const grant = workflow.indexOf('- name: Grant only diagnostic reader project roles');
+    const mirror = workflow.indexOf('- name: Mirror exact GitHub WIF impersonation binding');
+
+    expect(prestate).toBeGreaterThan(-1);
+    expect(userKeyCheck).toBeGreaterThan(prestate);
+    expect(conditionCheck).toBeGreaterThan(prestate);
+    expect(create).toBeGreaterThan(userKeyCheck);
+    expect(create).toBeGreaterThan(conditionCheck);
+    expect(grant).toBeGreaterThan(create);
+    expect(mirror).toBeGreaterThan(grant);
   });
 });
