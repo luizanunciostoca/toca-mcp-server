@@ -52,16 +52,27 @@ describe('AG-01 grounded startup deployer readback', () => {
     expect(workflow).toContain('-f body="$UPDATED" -f state=closed');
   });
 
-  it('allows only declared metadata/revision/log reads and sanitized issue evidence', () => {
-    expect(workflow.match(/gcloud projects describe/g)).toHaveLength(1);
-    expect(workflow.match(/gcloud run revisions describe/g)).toHaveLength(2);
-    expect(workflow.match(/gcloud logging read/g)).toHaveLength(1);
+  it('permits exactly two revision reads and one log read', () => {
+    const gcloudCommands = workflow.match(/^\s*gcloud [^\n]+/gm) ?? [];
+    expect(gcloudCommands).toHaveLength(3);
+    expect(gcloudCommands.filter((line) => line.includes('run revisions describe'))).toHaveLength(2);
+    expect(gcloudCommands.filter((line) => line.includes('logging read'))).toHaveLength(1);
+    for (const command of gcloudCommands) {
+      expect(
+        command.includes('gcloud run revisions describe') || command.includes('gcloud logging read'),
+      ).toBe(true);
+    }
+  });
+
+  it('publishes only sanitized evidence and forbids mutation commands', () => {
     expect(workflow).toContain('RAW_LOG_PAYLOAD_PUBLISHED=false');
     expect(workflow).toContain('TRAFFIC_MUTATION=false');
     expect(workflow).toContain('SERVICE_MUTATION=false');
     expect(workflow).toContain('IAM_MUTATION=false');
     expect(workflow).toContain('DATABASE_MUTATION=false');
     expect(workflow).toContain('PROVIDER_CALLS=false');
+    expect(workflow).not.toContain('gcloud projects describe');
+    expect(workflow).not.toContain('gcloud projects get-iam-policy');
     expect(workflow).not.toContain('gcloud projects add-iam-policy-binding');
     expect(workflow).not.toContain('gcloud projects set-iam-policy');
     expect(workflow).not.toContain('service-accounts create');
@@ -120,11 +131,7 @@ describe('AG-01 grounded startup deployer readback', () => {
       claimAuthorizationBeforeReadRequired: true,
       exactMainShaRequired: true,
       rawLogPayloadPublicationAllowed: false,
-      allowedReads: [
-        'resourcemanager.projects.get',
-        'run.revisions.describe',
-        'logging.entries.read',
-      ],
+      allowedReads: ['run.revisions.describe', 'logging.entries.read'],
     });
   });
 });
