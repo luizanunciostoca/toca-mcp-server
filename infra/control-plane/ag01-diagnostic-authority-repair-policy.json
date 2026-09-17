@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "repairId": "AG01_DIAGNOSTIC_AUTHORITY_REPAIR_20260917",
+  "projectId": "toca-mcp-production",
+  "projectNumber": "990081828836",
+  "actorServiceAccount": "toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com",
+  "sourceServiceAccount": "toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com",
+  "targetPrincipal": "serviceAccount:toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com",
+  "allowedProjectRole": "roles/iam.serviceAccountViewer",
+  "requiredPermissionProof": "iam.serviceAccounts.getIamPolicy",
+  "singleUseAuthorizationRequired": true,
+  "exactMainShaRequired": true,
+  "prestateSnapshotRequired": true,
+  "poststateExactDeltaRequired": true,
+  "rawIamPolicyPublicationAllowed": false,
+  "forbid": {
+    "projectOwner": true,
+    "projectEditor": true,
+    "serviceAccountAdmin": true,
+    "serviceAccountPolicyWrite": true,
+    "serviceAccountCreate": true,
+    "serviceAccountKeys": true,
+    "cloudRunMutation": true,
+    "trafficMutation": true,
+    "databaseMutation": true,
+    "schedulerMutation": true,
+    "providerCalls": true,
+    "generalAutonomyPromotion": true
+  }
+}
