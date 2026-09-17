@@ -28,10 +28,14 @@ describe('AG-01 diagnostic reader bootstrap controller', () => {
     expect(workflow).toContain('roles/run.viewer');
     expect(workflow).toContain('roles/logging.viewer');
     expect(workflow).toContain('roles/iam.workloadIdentityUser');
-    expect(workflow).toContain('EXPECTED_WIF_POOL_PREFIX: principalSet://iam.googleapis.com/projects/990081828836/locations/global/workloadIdentityPools/github/');
-    expect(workflow).toContain('SOURCE_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com');
+    expect(workflow).toContain(
+      'EXPECTED_WIF_POOL_PREFIX: principalSet://iam.googleapis.com/projects/990081828836/locations/global/workloadIdentityPools/github/',
+    );
+    expect(workflow).toContain(
+      'SOURCE_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com',
+    );
     expect(workflow).toContain('diff -u /tmp/source-wif-sorted.txt /tmp/target-wif-after.txt');
-    expect(workflow).toContain("--managed-by=user");
+    expect(workflow).toContain('--managed-by=user');
   });
 
   it('never grants mutation roles or service/provider/database capabilities', () => {
@@ -57,10 +61,14 @@ describe('AG-01 diagnostic reader bootstrap controller', () => {
   });
 
   it('fails closed on pre-existing privilege drift and verifies exactly two project roles', () => {
-    expect(workflow).toContain("[[ \"$role\" == 'roles/run.viewer' || \"$role\" == 'roles/logging.viewer' ]] || exit 1");
-    expect(workflow).toContain("select(.role != \"roles/iam.workloadIdentityUser\")");
+    expect(workflow).toContain(
+      "[[ \"$role\" == 'roles/run.viewer' || \"$role\" == 'roles/logging.viewer' ]] || exit 1",
+    );
+    expect(workflow).toContain('select(.role != "roles/iam.workloadIdentityUser")');
     expect(workflow).toContain("printf '%s\\n' roles/logging.viewer roles/run.viewer");
-    expect(workflow).toContain('diff -u /tmp/expected-project-roles.txt /tmp/target-project-roles-after.txt');
+    expect(workflow).toContain(
+      'diff -u /tmp/expected-project-roles.txt /tmp/target-project-roles-after.txt',
+    );
     expect(workflow).toContain('USER_MANAGED_KEYS=');
     expect(workflow).toContain('LEAST_PRIVILEGE=');
   });
