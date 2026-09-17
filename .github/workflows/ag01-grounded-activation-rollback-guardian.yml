@@ -76,7 +76,6 @@ jobs:
           restore_if_needed() {
             local service="$1" previous="$2" current
             current="$(current_revision "$service")"
-            test -n "$current"
             if [[ "$current" == "$previous" ]]; then
               echo "Canonical revision already owns 100% traffic; rollback mutation not required."
               return 0
