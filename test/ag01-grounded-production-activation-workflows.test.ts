@@ -20,7 +20,13 @@ describe('grounded production activation workflows', () => {
     expect(ag01).toContain('/v1/knowledge/answer');
     expect(ag01).toContain('.confidence>=0.85');
     expect(ag01).toContain('DRIVE_SCOPE=READ_ONLY');
+    expect(ag01).toContain('roles/run.invoker');
+    expect(ag01).toContain('traffic_changed=true');
+    expect(ag01).toContain("if: failure() && steps.promote.outputs.traffic_changed == 'true'");
+    expect(ag01).toContain('sanitized-evidence.env');
     expect(ag01).not.toContain('--allow-unauthenticated');
+    expect(ag01).not.toContain('service-before.json');
+    expect(ag01).not.toContain('grounded-answer.json');
   });
 
   it('activates Instagram fallback without widening autonomy or changing scheduler', () => {
@@ -34,6 +40,9 @@ describe('grounded production activation workflows', () => {
     expect(instagram).toContain('--no-traffic --quiet');
     expect(instagram).toContain('DIRECT,COMMENT');
     expect(instagram).toContain('GENERAL_AUTONOMY=false');
+    expect(instagram).toContain('roles/run.invoker');
+    expect(instagram).toContain('traffic_changed=true');
+    expect(instagram).toContain("if: failure() && steps.promote.outputs.traffic_changed == 'true'");
   });
 
   it('restores canonical traffic if either activation fails after mutation', () => {
