@@ -49,3 +49,15 @@ jobs:
           pnpm exec prettier "$FILE" --write
           diff -u /tmp/ag01-before.ts "$FILE" || true
           exit 1
+      - name: Format check
+        run: pnpm format:check
+      - name: Architecture check
+        run: pnpm architecture:check
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
