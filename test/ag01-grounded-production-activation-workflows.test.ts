@@ -33,15 +33,23 @@ describe('grounded production activation workflows', () => {
     expect(ag01).not.toContain('ag01-grounded-evidence/grounded-answer.json');
   });
 
-  it('captures sanitized startup diagnostics without side effects', () => {
+  it('captures github-only sanitized startup diagnostics without production credentials', () => {
     expect(startupDiagnostics).toContain('AG-01 Grounded Runtime Activation');
     expect(startupDiagnostics).toContain("github.event.workflow_run.conclusion == 'failure'");
-    expect(startupDiagnostics).toContain('gcloud logging read');
+    expect(startupDiagnostics).toContain('actions: read');
+    expect(startupDiagnostics).toContain('gh run view');
     expect(startupDiagnostics).toContain('AG01_PERSISTENCE_NOT_READY');
+    expect(startupDiagnostics).toContain('CLOUD_RUN_STARTUP_PROBE_FAILURE');
+    expect(startupDiagnostics).toContain('APPROVED_ERROR_TOKENS=');
     expect(startupDiagnostics).toContain('RAW_LOG_PAYLOAD_PUBLISHED=false');
+    expect(startupDiagnostics).toContain('GCP_CREDENTIALS_USED=false');
     expect(startupDiagnostics).toContain('TRAFFIC_MUTATION=false');
     expect(startupDiagnostics).toContain('PROVIDER_CALLS=false');
     expect(startupDiagnostics).toContain('DATABASE_MUTATION=false');
+    expect(startupDiagnostics).not.toContain('google-github-actions/auth');
+    expect(startupDiagnostics).not.toContain('gcloud ');
+    expect(startupDiagnostics).not.toContain('READY_REASON=');
+    expect(startupDiagnostics).not.toContain("grep -Eo 'AG01_");
     expect(startupDiagnostics).not.toContain('update-traffic');
     expect(startupDiagnostics).not.toContain('run deploy');
   });
@@ -62,7 +70,7 @@ describe('grounded production activation workflows', () => {
     expect(instagram).toContain("if: failure() && steps.promote.outputs.traffic_changed == 'true'");
   });
 
-  it('restores canonical traffic idempotently if either activation fails after mutation', () => {
+  it('restores canonical traffic idempotently from both full and split traffic states', () => {
     expect(guardian).toContain('AG-01 Grounded Runtime Activation');
     expect(guardian).toContain('Instagram Engagement AG-01 Fallback LIMITED Activation');
     expect(guardian).toContain("github.event.workflow_run.conclusion == 'failure'");
@@ -72,6 +80,7 @@ describe('grounded production activation workflows', () => {
     expect(guardian).toContain('restore_if_needed');
     expect(guardian).toContain('Canonical revision already owns 100% traffic');
     expect(guardian).toContain('--to-revisions "$previous=100"');
+    expect(guardian).not.toContain('test -n "$current"');
     expect(guardian).not.toContain('scheduler jobs update');
   });
 });
