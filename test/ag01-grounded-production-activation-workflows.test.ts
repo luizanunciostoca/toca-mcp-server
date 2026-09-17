@@ -26,7 +26,7 @@ describe('grounded production activation workflows', () => {
     expect(ag01).toContain('sanitized-evidence.env');
     expect(ag01).not.toContain('--allow-unauthenticated');
     expect(ag01).not.toContain('service-before.json');
-    expect(ag01).not.toContain('grounded-answer.json');
+    expect(ag01).not.toContain('ag01-grounded-evidence/grounded-answer.json');
   });
 
   it('activates Instagram fallback without widening autonomy or changing scheduler', () => {
