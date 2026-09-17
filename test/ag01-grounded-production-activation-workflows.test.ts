@@ -32,7 +32,9 @@ describe('grounded production activation workflows', () => {
     expect(instagram).toContain('DATABASE_MUTATIONS_AUTHORIZED=false');
     expect(instagram).toContain('SCHEDULER_MUTATION_AUTHORIZED=false');
     expect(instagram).toContain('PROVIDER_CONFIG_MUTATION_AUTHORIZED=false');
-    expect(instagram).toContain('INSTAGRAM_ENGAGEMENT_AG01_GROUNDED_FALLBACK_ENABLED=true');
+    expect(instagram).toContain(
+      'INSTAGRAM_ENGAGEMENT_AG01_GROUNDED_FALLBACK_ENABLED=true',
+    );
     expect(instagram).toContain('--no-traffic --quiet');
     expect(instagram).toContain('DIRECT,COMMENT');
     expect(instagram).toContain('GENERAL_AUTONOMY=false');
@@ -40,10 +42,14 @@ describe('grounded production activation workflows', () => {
 
   it('restores canonical traffic if either activation fails after mutation', () => {
     expect(guardian).toContain('AG-01 Grounded Runtime Activation');
-    expect(guardian).toContain('Instagram Engagement AG-01 Fallback LIMITED Activation');
+    expect(guardian).toContain(
+      'Instagram Engagement AG-01 Fallback LIMITED Activation',
+    );
     expect(guardian).toContain("github.event.workflow_run.conclusion == 'failure'");
     expect(guardian).toContain("github.event.workflow_run.head_branch == 'main'");
-    expect(guardian).toContain('historicalVerification.canonicalProductionRevision');
+    expect(guardian).toContain(
+      'historicalVerification.canonicalProductionRevision',
+    );
     expect(guardian).toContain('ENGAGEMENT_PROMOTED_REVISION=');
     expect(guardian).toContain('--to-revisions "$PREVIOUS_REVISION=100"');
     expect(guardian).not.toContain('scheduler jobs update');
