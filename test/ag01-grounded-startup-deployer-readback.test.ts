@@ -21,6 +21,8 @@ describe('AG-01 grounded startup deployer readback', () => {
     expect(workflow).toContain(
       'DEDICATED_READER_UNAVAILABLE_REASON=PROJECT_IAM_BOOTSTRAP_AUTHORITY_UNAVAILABLE',
     );
+    expect(workflow).toContain('NO_SCHEDULER_MUTATION=true');
+    expect(workflow).toContain('GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false');
     expect(workflow).toContain('AUTHORIZATION_STATE=CONSUMED');
     expect(workflow).toContain('REUSE_PROHIBITED=true');
   });
@@ -34,7 +36,7 @@ describe('AG-01 grounded startup deployer readback', () => {
     expect(workflow).toContain('DIAGNOSTIC_IDENTITY=DEPLOYER_READ_ONLY_FALLBACK');
   });
 
-  it('claims authorization before any Cloud Run or Logging read', () => {
+  it('claims authorization before any Cloud Run or Logging evidence read', () => {
     const claim = workflow.indexOf('- name: Claim single-use diagnostic authorization before read');
     const evidence = workflow.indexOf('- name: Read and sanitize AG-01 startup evidence');
     const revisionRead = workflow.indexOf('gcloud run revisions describe "$TARGET_REVISION"');
@@ -50,7 +52,8 @@ describe('AG-01 grounded startup deployer readback', () => {
     expect(workflow).toContain('-f body="$UPDATED" -f state=closed');
   });
 
-  it('allows only revision/log reads and sanitized issue evidence', () => {
+  it('allows only declared metadata/revision/log reads and sanitized issue evidence', () => {
+    expect(workflow.match(/gcloud projects describe/g)).toHaveLength(1);
     expect(workflow.match(/gcloud run revisions describe/g)).toHaveLength(2);
     expect(workflow.match(/gcloud logging read/g)).toHaveLength(1);
     expect(workflow).toContain('RAW_LOG_PAYLOAD_PUBLISHED=false');
@@ -117,7 +120,11 @@ describe('AG-01 grounded startup deployer readback', () => {
       claimAuthorizationBeforeReadRequired: true,
       exactMainShaRequired: true,
       rawLogPayloadPublicationAllowed: false,
-      allowedReads: ['run.revisions.describe', 'logging.entries.read'],
+      allowedReads: [
+        'resourcemanager.projects.get',
+        'run.revisions.describe',
+        'logging.entries.read',
+      ],
     });
   });
 });
