@@ -1,0 +1,282 @@
+name: AG-01 Diagnostic Reader Bootstrap
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: ag01-diagnostic-reader-bootstrap
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-production
+  PROJECT_NUMBER: '990081828836'
+  TARGET_SERVICE_ACCOUNT: toca-ag01-diagnostic-reader@toca-mcp-production.iam.gserviceaccount.com
+  SOURCE_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  INFRA_ADMIN_SERVICE_ACCOUNT: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  EXPECTED_WIF_POOL_PREFIX: principalSet://iam.googleapis.com/projects/990081828836/locations/global/workloadIdentityPools/github/
+
+jobs:
+  bootstrap:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION IAM AUTHORIZATION — AG-01 diagnostic reader AUTO')
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout exact IAM controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate live single-use IAM authorization
+        id: authz
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')" = "$GITHUB_SHA"
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          LIVE_ISSUE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            .state == "open" and
+            .user.login == $owner and
+            (.title | startswith("PRODUCTION IAM AUTHORIZATION — AG-01 diagnostic reader AUTO"))
+          ' <<< "$LIVE_ISSUE" >/dev/null
+          BODY="$(jq -r '.body // ""' <<< "$LIVE_ISSUE")"
+          required=(
+            "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
+            'AUTHORIZATION_STATE=ACTIVE'
+            'AG01_DIAGNOSTIC_READER_BOOTSTRAP=AUTHORIZED'
+            'SERVICE_ACCOUNT_CREATE_AUTHORIZED=true'
+            'PROJECT_IAM_BINDINGS_AUTHORIZED=true'
+            'WIF_IMPERSONATION_BINDING_AUTHORIZED=true'
+            'USER_MANAGED_KEYS_AUTHORIZED=false'
+            'SERVICE_MUTATION_AUTHORIZED=false'
+            'TRAFFIC_MUTATION_AUTHORIZED=false'
+            'DATABASE_MUTATION_AUTHORIZED=false'
+            'PROVIDER_CALLS_AUTHORIZED=false'
+            'GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false'
+          )
+          for line in "${required[@]}"; do grep -Fxq "$line" <<< "$BODY" || exit 1; done
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate infrastructure administrator
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.INFRA_ADMIN_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Inspect source WIF and target IAM prestate
+        id: prestate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+
+          gcloud iam service-accounts get-iam-policy "$SOURCE_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" --format=json > /tmp/source-sa-policy.json
+          jq -e '
+            [.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | select(.condition != null)] | length == 0
+          ' /tmp/source-sa-policy.json >/dev/null
+          jq -r '
+            [.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | .members[]?] | unique | .[]
+          ' /tmp/source-sa-policy.json > /tmp/source-wif-members.txt
+          test -s /tmp/source-wif-members.txt
+          while IFS= read -r member; do
+            [[ "$member" == "$EXPECTED_WIF_POOL_PREFIX"* ]] || exit 1
+          done < /tmp/source-wif-members.txt
+
+          target_exists=false
+          set +e
+          gcloud iam service-accounts describe "$TARGET_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" --format='value(email)' \
+            > /tmp/target-email.txt 2> /tmp/target-describe.err
+          describe_status=$?
+          set -e
+          if test "$describe_status" -eq 0; then
+            test "$(cat /tmp/target-email.txt)" = "$TARGET_SERVICE_ACCOUNT"
+            target_exists=true
+          elif grep -Eqi 'NOT_FOUND|not found|does not exist|Unknown service account' /tmp/target-describe.err; then
+            target_exists=false
+          else
+            echo 'TARGET_SERVICE_ACCOUNT_PRESTATE=UNREADABLE' >&2
+            exit "$describe_status"
+          fi
+          rm -f /tmp/target-describe.err /tmp/target-email.txt
+
+          if test "$target_exists" = true; then
+            USER_KEYS_BEFORE="$(gcloud iam service-accounts keys list \
+              --iam-account "$TARGET_SERVICE_ACCOUNT" \
+              --project "$PROJECT_ID" \
+              --managed-by=user \
+              --format='value(name)')"
+            test -z "$USER_KEYS_BEFORE"
+
+            gcloud projects get-iam-policy "$PROJECT_ID" --format=json > /tmp/project-policy-before.json
+            jq -r --arg member "serviceAccount:${TARGET_SERVICE_ACCOUNT}" '
+              [.bindings[]? | select((.members // []) | index($member)) | .role] | unique | .[]
+            ' /tmp/project-policy-before.json > /tmp/target-project-roles-before.txt
+            if test -s /tmp/target-project-roles-before.txt; then
+              while IFS= read -r role; do
+                [[ "$role" == 'roles/run.viewer' || "$role" == 'roles/logging.viewer' ]] || exit 1
+              done < /tmp/target-project-roles-before.txt
+            fi
+
+            gcloud iam service-accounts get-iam-policy "$TARGET_SERVICE_ACCOUNT" \
+              --project "$PROJECT_ID" --format=json > /tmp/target-sa-policy-before.json
+            jq -e '
+              [.bindings[]? | select(.role != "roles/iam.workloadIdentityUser")] | length == 0
+            ' /tmp/target-sa-policy-before.json >/dev/null
+            jq -e '
+              [.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | select(.condition != null)] | length == 0
+            ' /tmp/target-sa-policy-before.json >/dev/null
+            jq -r '
+              [.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | .members[]?] | unique | .[]
+            ' /tmp/target-sa-policy-before.json > /tmp/target-wif-before.txt
+            if test -s /tmp/target-wif-before.txt; then
+              while IFS= read -r member; do
+                grep -Fxq "$member" /tmp/source-wif-members.txt || exit 1
+              done < /tmp/target-wif-before.txt
+            fi
+          fi
+
+          echo "target_exists=$target_exists" >> "$GITHUB_OUTPUT"
+          echo "wif_member_count=$(wc -l < /tmp/source-wif-members.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Create diagnostic service account if absent
+        if: steps.prestate.outputs.target_exists == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud iam service-accounts create toca-ag01-diagnostic-reader \
+            --project "$PROJECT_ID" \
+            --display-name 'AG-01 Diagnostic Reader'
+
+      - name: Grant only diagnostic reader project roles
+        shell: bash
+        run: |
+          set -euo pipefail
+          MEMBER="serviceAccount:${TARGET_SERVICE_ACCOUNT}"
+          for role in roles/run.viewer roles/logging.viewer; do
+            gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+              --member="$MEMBER" \
+              --role="$role" \
+              --condition=None >/dev/null
+          done
+
+      - name: Mirror exact GitHub WIF impersonation binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r member; do
+            gcloud iam service-accounts add-iam-policy-binding "$TARGET_SERVICE_ACCOUNT" \
+              --project "$PROJECT_ID" \
+              --member="$member" \
+              --role=roles/iam.workloadIdentityUser \
+              --condition=None >/dev/null
+          done < /tmp/source-wif-members.txt
+
+      - name: Verify least-privilege final state
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          MEMBER="serviceAccount:${TARGET_SERVICE_ACCOUNT}"
+          test "$(gcloud iam service-accounts describe "$TARGET_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" --format='value(email)')" = "$TARGET_SERVICE_ACCOUNT"
+
+          gcloud projects get-iam-policy "$PROJECT_ID" --format=json > /tmp/project-policy-after.json
+          jq -r --arg member "$MEMBER" '
+            [.bindings[]? | select((.members // []) | index($member)) | .role] | unique | sort | .[]
+          ' /tmp/project-policy-after.json > /tmp/target-project-roles-after.txt
+          printf '%s\n' roles/logging.viewer roles/run.viewer > /tmp/expected-project-roles.txt
+          diff -u /tmp/expected-project-roles.txt /tmp/target-project-roles-after.txt
+
+          gcloud iam service-accounts get-iam-policy "$TARGET_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" --format=json > /tmp/target-sa-policy-after.json
+          jq -e '
+            [.bindings[]? | select(.role != "roles/iam.workloadIdentityUser")] | length == 0
+          ' /tmp/target-sa-policy-after.json >/dev/null
+          jq -e '
+            [.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | select(.condition != null)] | length == 0
+          ' /tmp/target-sa-policy-after.json >/dev/null
+          jq -r '
+            [.bindings[]? | select(.role == "roles/iam.workloadIdentityUser") | .members[]?] | unique | sort | .[]
+          ' /tmp/target-sa-policy-after.json > /tmp/target-wif-after.txt
+          sort -u /tmp/source-wif-members.txt > /tmp/source-wif-sorted.txt
+          diff -u /tmp/source-wif-sorted.txt /tmp/target-wif-after.txt
+
+          USER_KEYS="$(gcloud iam service-accounts keys list \
+            --iam-account "$TARGET_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" \
+            --managed-by=user \
+            --format='value(name)')"
+          test -z "$USER_KEYS"
+          echo 'least_privilege=PASS' >> "$GITHUB_OUTPUT"
+          echo 'user_managed_keys=0' >> "$GITHUB_OUTPUT"
+
+      - name: Publish sanitized bootstrap evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.authz.outputs.issue_number }}
+          WIF_MEMBER_COUNT: ${{ steps.prestate.outputs.wif_member_count }}
+          LEAST_PRIVILEGE: ${{ steps.verify.outputs.least_privilege }}
+          USER_MANAGED_KEYS: ${{ steps.verify.outputs.user_managed_keys }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMENT="$(printf '%s\n' \
+            'AG01_DIAGNOSTIC_READER_BOOTSTRAP=PASS' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            'TARGET_SERVICE_ACCOUNT=toca-ag01-diagnostic-reader@toca-mcp-production.iam.gserviceaccount.com' \
+            'PROJECT_ROLES=roles/logging.viewer,roles/run.viewer' \
+            "WIF_MEMBER_COUNT=$WIF_MEMBER_COUNT" \
+            "LEAST_PRIVILEGE=$LEAST_PRIVILEGE" \
+            "USER_MANAGED_KEYS=$USER_MANAGED_KEYS" \
+            'SERVICE_MUTATION=false' \
+            'TRAFFIC_MUTATION=false' \
+            'DATABASE_MUTATION=false' \
+            'PROVIDER_CALLS=false')"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="$COMMENT" >/dev/null
+
+      - name: Consume single-use IAM authorization
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          JOB_STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          LIVE_ISSUE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          BODY="$(jq -r '.body // ""' <<< "$LIVE_ISSUE")"
+          consumed=false
+          if grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY"; then
+            UPDATED="$(printf '%s' "$BODY" | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED/')"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+              -f body="$UPDATED" -f state=closed >/dev/null
+            consumed=true
+          fi
+          COMMENT="$(printf '%s\n' \
+            "IAM_AUTHORIZATION_CONSUMED=$consumed" \
+            "WORKFLOW_STATUS=$JOB_STATUS" \
+            'REUSE_PROHIBITED=true')"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="$COMMENT" >/dev/null
