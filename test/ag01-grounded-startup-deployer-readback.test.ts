@@ -55,11 +55,14 @@ describe('AG-01 grounded startup deployer readback', () => {
   it('permits exactly two revision reads and one log read', () => {
     const gcloudCommands = workflow.match(/^\s*gcloud [^\n]+/gm) ?? [];
     expect(gcloudCommands).toHaveLength(3);
-    expect(gcloudCommands.filter((line) => line.includes('run revisions describe'))).toHaveLength(2);
+    expect(gcloudCommands.filter((line) => line.includes('run revisions describe'))).toHaveLength(
+      2,
+    );
     expect(gcloudCommands.filter((line) => line.includes('logging read'))).toHaveLength(1);
     for (const command of gcloudCommands) {
       expect(
-        command.includes('gcloud run revisions describe') || command.includes('gcloud logging read'),
+        command.includes('gcloud run revisions describe') ||
+          command.includes('gcloud logging read'),
       ).toBe(true);
     }
   });
