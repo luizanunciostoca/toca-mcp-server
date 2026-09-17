@@ -187,24 +187,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="AG01_STARTUP_CLOUD_READBACK=PASS
-CONTROLLER_SHA=$GITHUB_SHA
-TARGET_REVISION=$TARGET_REVISION
-EXPECTED_HEALTHY_REVISION=$HEALTHY_REVISION
-TARGET_READY_STATUS=$READY_STATUS
-TARGET_READY_REASON=$READY_REASON
-CLASSIFICATION=$CLASSIFICATION
-APPROVED_ERROR_TOKENS=$ERROR_TOKENS
-ENV_PRESENCE=$ENV_PRESENCE
-RAW_LOG_PAYLOAD_PUBLISHED=false
-TRAFFIC_MUTATION=false
-SERVICE_MUTATION=false
-IAM_MUTATION=false
-DATABASE_MUTATION=false
-PROVIDER_CALLS=false" >/dev/null
+          COMMENT="$(printf '%s\n' \
+            'AG01_STARTUP_CLOUD_READBACK=PASS' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            "TARGET_REVISION=$TARGET_REVISION" \
+            "EXPECTED_HEALTHY_REVISION=$HEALTHY_REVISION" \
+            "TARGET_READY_STATUS=$READY_STATUS" \
+            "TARGET_READY_REASON=$READY_REASON" \
+            "CLASSIFICATION=$CLASSIFICATION" \
+            "APPROVED_ERROR_TOKENS=$ERROR_TOKENS" \
+            "ENV_PRESENCE=$ENV_PRESENCE" \
+            'RAW_LOG_PAYLOAD_PUBLISHED=false' \
+            'TRAFFIC_MUTATION=false' \
+            'SERVICE_MUTATION=false' \
+            'IAM_MUTATION=false' \
+            'DATABASE_MUTATION=false' \
+            'PROVIDER_CALLS=false')"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="$COMMENT" >/dev/null
 
       - name: Consume single-use diagnostic authorization
-        if: always() && steps.authz.outputs.issue_number != ''
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.authz.outputs.issue_number }}
@@ -212,9 +214,9 @@ PROVIDER_CALLS=false" >/dev/null
         shell: bash
         run: |
           set -euo pipefail
+          [[ -n "${ISSUE_NUMBER:-}" ]] || exit 0
           BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --jq '.body // ""')"
           UPDATED="$(printf '%s' "$BODY" | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED/')"
           gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" -f body="$UPDATED" -f state=closed >/dev/null
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="DIAGNOSTIC_AUTHORIZATION_CONSUMED=true
-WORKFLOW_STATUS=$JOB_STATUS
-REUSE_PROHIBITED=true" >/dev/null
+          COMMENT="$(printf '%s\n' 'DIAGNOSTIC_AUTHORIZATION_CONSUMED=true' "WORKFLOW_STATUS=$JOB_STATUS" 'REUSE_PROHIBITED=true')"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="$COMMENT" >/dev/null
