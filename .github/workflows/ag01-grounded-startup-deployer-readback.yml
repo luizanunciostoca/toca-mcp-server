@@ -1,0 +1,336 @@
+name: AG-01 Grounded Startup Deployer Readback
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: ag01-grounded-startup-deployer-readback
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-production
+  PROJECT_NUMBER: '990081828836'
+  REGION: southamerica-east1
+  SERVICE: toca-ag01-orchestrator
+  DEPLOYER_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  DIAGNOSTIC_POLICY: infra/control-plane/ag01-deployer-readback-policy.json
+
+jobs:
+  readback:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION DIAGNOSTIC AUTHORIZATION — AG-01 startup deployer readback AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout exact diagnostic controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate bounded deployer read-only authorization
+        id: authz
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')" = "$GITHUB_SHA"
+          jq -e '
+            .schemaVersion == 1 and
+            .diagnosticId == "AG01_STARTUP_DEPLOYER_READBACK_20260917" and
+            .projectId == "toca-mcp-production" and
+            .projectNumber == "990081828836" and
+            .region == "southamerica-east1" and
+            .service == "toca-ag01-orchestrator" and
+            .diagnosticIdentity == "toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com" and
+            .dedicatedReaderUnavailableReason == "PROJECT_IAM_BOOTSTRAP_AUTHORITY_UNAVAILABLE" and
+            .singleUseAuthorizationRequired == true and
+            .claimAuthorizationBeforeReadRequired == true and
+            .exactMainShaRequired == true and
+            .rawLogPayloadPublicationAllowed == false and
+            .allowedReads == ["run.revisions.describe", "logging.entries.read"] and
+            .forbid.projectIamMutation == true and
+            .forbid.serviceAccountMutation == true and
+            .forbid.serviceAccountCreate == true and
+            .forbid.serviceAccountKeys == true and
+            .forbid.cloudRunServiceMutation == true and
+            .forbid.trafficMutation == true and
+            .forbid.databaseMutation == true and
+            .forbid.schedulerMutation == true and
+            .forbid.providerCalls == true and
+            .forbid.generalAutonomyPromotion == true
+          ' "$DIAGNOSTIC_POLICY" >/dev/null
+
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          LIVE_ISSUE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            .state == "open" and
+            .user.login == $owner and
+            (.title | startswith("PRODUCTION DIAGNOSTIC AUTHORIZATION — AG-01 startup deployer readback AUTO"))
+          ' <<< "$LIVE_ISSUE" >/dev/null
+          BODY="$(jq -r '.body // ""' <<< "$LIVE_ISSUE")"
+          required=(
+            "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
+            'AUTHORIZATION_STATE=ACTIVE'
+            'AG01_STARTUP_DEPLOYER_READBACK=AUTHORIZED'
+            'DEPLOYER_READ_ONLY_FALLBACK_ACKNOWLEDGED=true'
+            'DEDICATED_READER_UNAVAILABLE_REASON=PROJECT_IAM_BOOTSTRAP_AUTHORITY_UNAVAILABLE'
+            'NO_TRAFFIC_MUTATION=true'
+            'NO_SERVICE_MUTATION=true'
+            'NO_IAM_MUTATION=true'
+            'NO_DATABASE_MUTATION=true'
+            'NO_PROVIDER_CALLS=true'
+            'RAW_LOG_PAYLOAD_PUBLISHED=false'
+          )
+          for line in "${required[@]}"; do grep -Fxq "$line" <<< "$BODY" || exit 1; done
+          TARGET="$(grep '^TARGET_REVISION=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
+          HEALTHY="$(grep '^EXPECTED_HEALTHY_REVISION=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
+          [[ "$TARGET" =~ ^toca-ag01-orchestrator-[a-z0-9-]+$ ]]
+          [[ "$HEALTHY" =~ ^toca-ag01-orchestrator-[a-z0-9-]+$ ]]
+          test "$TARGET" != "$HEALTHY"
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "target_revision=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "healthy_revision=$HEALTHY" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate canonical deployer for read-only fallback
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify project identity boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
+          test "$(gcloud config get-value account 2>/dev/null)" = "$DEPLOYER_SERVICE_ACCOUNT"
+
+      - name: Claim single-use diagnostic authorization before read
+        id: claim
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.authz.outputs.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')" = "$GITHUB_SHA"
+          LIVE_ISSUE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            .state == "open" and .user.login == $owner
+          ' <<< "$LIVE_ISSUE" >/dev/null
+          BODY="$(jq -r '.body // ""' <<< "$LIVE_ISSUE")"
+          grep -Fxq "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA" <<< "$BODY"
+          grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY"
+          grep -Fxq 'AG01_STARTUP_DEPLOYER_READBACK=AUTHORIZED' <<< "$BODY"
+          UPDATED="$(printf '%s' "$BODY" | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED/')"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+            -f body="$UPDATED" -f state=closed >/dev/null
+          CLAIMED="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          jq -e '.state == "closed"' <<< "$CLAIMED" >/dev/null
+          grep -Fxq 'AUTHORIZATION_STATE=CONSUMED' <<< "$(jq -r '.body // ""' <<< "$CLAIMED")"
+          echo 'claimed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Read and sanitize AG-01 startup evidence
+        id: evidence
+        if: steps.claim.outputs.claimed == 'true'
+        env:
+          TARGET_REVISION: ${{ steps.authz.outputs.target_revision }}
+          HEALTHY_REVISION: ${{ steps.authz.outputs.healthy_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_json="$(mktemp)"
+          healthy_json="$(mktemp)"
+          logs_json="$(mktemp)"
+          gcloud run revisions describe "$TARGET_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > "$target_json"
+          gcloud run revisions describe "$HEALTHY_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > "$healthy_json"
+          gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${SERVICE}\" AND resource.labels.revision_name=\"${TARGET_REVISION}\"" \
+            --project "$PROJECT_ID" --freshness=7d --limit=200 --order=asc --format=json > "$logs_json"
+
+          ready_status="$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .status] | last // "UNKNOWN"' "$target_json")"
+          ready_reason="$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .reason] | last // "UNKNOWN"' "$target_json")"
+          [[ "$ready_status" =~ ^(True|False|Unknown|UNKNOWN)$ ]] || ready_status=UNKNOWN
+          [[ "$ready_reason" =~ ^[A-Za-z0-9_.-]{1,80}$ ]] || ready_reason=REDACTED_UNSAFE_REASON
+
+          has_env(){ jq -e --arg n "$2" '[.spec.containers[0].env[]? | select(.name==$n)] | length > 0' "$1" >/dev/null; }
+          env_summary=''
+          for name in DATABASE_URL AG01_MODEL_PROVIDER AG01_GOOGLE_AUTH_MODE AG01_VERTEX_PROJECT_ID AG01_VERTEX_MODEL GOOGLE_CLOUD_PROJECT; do
+            target_present=false; healthy_present=false
+            has_env "$target_json" "$name" && target_present=true
+            has_env "$healthy_json" "$name" && healthy_present=true
+            env_summary+="${name}:candidate=${target_present},healthy=${healthy_present};"
+          done
+
+          candidate_sa_ok=false
+          healthy_sa_ok=false
+          test "$(jq -r '.spec.serviceAccountName // empty' "$target_json")" = "$RUNTIME_SERVICE_ACCOUNT" && candidate_sa_ok=true
+          test "$(jq -r '.spec.serviceAccountName // empty' "$healthy_json")" = "$RUNTIME_SERVICE_ACCOUNT" && healthy_sa_ok=true
+
+          probe_type="$(jq -r '
+            if .spec.containers[0].startupProbe.httpGet? then "HTTP"
+            elif .spec.containers[0].startupProbe.tcpSocket? then "TCP"
+            elif .spec.containers[0].startupProbe.grpc? then "GRPC"
+            else "NONE" end
+          ' "$target_json")"
+          probe_path="$(jq -r '.spec.containers[0].startupProbe.httpGet.path // "NONE"' "$target_json")"
+          probe_port="$(jq -r '.spec.containers[0].startupProbe.httpGet.port // .spec.containers[0].startupProbe.tcpSocket.port // .spec.containers[0].startupProbe.grpc.port // "NONE"' "$target_json")"
+          [[ "$probe_type" =~ ^(HTTP|TCP|GRPC|NONE)$ ]] || probe_type=UNKNOWN
+          [[ "$probe_path" =~ ^/[A-Za-z0-9_./-]*$|^NONE$ ]] || probe_path=REDACTED
+          [[ "$probe_port" =~ ^[0-9]{1,5}$|^NONE$ ]] || probe_port=REDACTED
+
+          log_text="$(jq -r '
+            [
+              .[] |
+              [
+                (.textPayload // null),
+                (.jsonPayload.message // null),
+                (.jsonPayload.errorCode // null),
+                (.jsonPayload.event // null)
+              ][] |
+              select(type == "string")
+            ] | join("\n")
+          ' "$logs_json")"
+          approved_tokens=(
+            AG01_PERSISTENCE_NOT_READY
+            AG01_PRODUCTION_MODEL_PROVIDER_REQUIRED
+            AG01_PRODUCTION_VERTEX_PROVIDER_REQUIRED
+            AG01_PRODUCTION_GOOGLE_AUTH_MODE_REQUIRED
+            AG01_PRODUCTION_GCP_METADATA_REQUIRED
+            AG01_VERTEX_PROJECT_ID_REQUIRED
+          )
+          found=''
+          for token in "${approved_tokens[@]}"; do
+            if grep -Fq "$token" <<< "$log_text"; then found+="${token},"; fi
+          done
+          found="${found%,}"
+
+          classification=UNCLASSIFIED_STARTUP_FAILURE
+          if [[ -n "$found" ]]; then
+            classification=APPROVED_AG01_STARTUP_ERROR
+          elif grep -Eqi 'relation .* does not exist|undefined table|migration.*missing' <<< "$log_text"; then
+            classification=PERSISTENCE_SCHEMA_OR_MIGRATION_FAILURE
+          elif grep -Eqi 'ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|connection refused|connection timed out' <<< "$log_text"; then
+            classification=STARTUP_DEPENDENCY_CONNECTIVITY_FAILURE
+          elif grep -Eqi 'permission denied|PERMISSION_DENIED|403' <<< "$log_text"; then
+            classification=STARTUP_PERMISSION_FAILURE
+          elif grep -Eqi 'Cannot find module|ERR_MODULE_NOT_FOUND|module not found' <<< "$log_text"; then
+            classification=STARTUP_MODULE_LOAD_FAILURE
+          elif grep -Eqi 'failed to start and listen|PORT=|startup probe' <<< "$log_text"; then
+            classification=CLOUD_RUN_STARTUP_PROBE_FAILURE
+          fi
+
+          rm -f "$target_json" "$healthy_json" "$logs_json"
+          {
+            echo "TARGET_READY_STATUS=$ready_status"
+            echo "TARGET_READY_REASON=$ready_reason"
+            echo "CLASSIFICATION=$classification"
+            echo "APPROVED_ERROR_TOKENS=${found:-NONE}"
+            echo "ENV_PRESENCE=$env_summary"
+            echo "CANDIDATE_RUNTIME_SA_MATCH=$candidate_sa_ok"
+            echo "HEALTHY_RUNTIME_SA_MATCH=$healthy_sa_ok"
+            echo "STARTUP_PROBE_TYPE=$probe_type"
+            echo "STARTUP_PROBE_PATH=$probe_path"
+            echo "STARTUP_PROBE_PORT=$probe_port"
+            echo 'DIAGNOSTIC_IDENTITY=DEPLOYER_READ_ONLY_FALLBACK'
+            echo 'RAW_LOG_PAYLOAD_PUBLISHED=false'
+            echo 'TRAFFIC_MUTATION=false'
+            echo 'SERVICE_MUTATION=false'
+            echo 'IAM_MUTATION=false'
+            echo 'DATABASE_MUTATION=false'
+            echo 'PROVIDER_CALLS=false'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "classification=$classification" >> "$GITHUB_OUTPUT"
+          echo "approved_error_tokens=${found:-NONE}" >> "$GITHUB_OUTPUT"
+          echo "ready_status=$ready_status" >> "$GITHUB_OUTPUT"
+          echo "ready_reason=$ready_reason" >> "$GITHUB_OUTPUT"
+          echo "env_presence=$env_summary" >> "$GITHUB_OUTPUT"
+          echo "candidate_sa_ok=$candidate_sa_ok" >> "$GITHUB_OUTPUT"
+          echo "healthy_sa_ok=$healthy_sa_ok" >> "$GITHUB_OUTPUT"
+          echo "probe_type=$probe_type" >> "$GITHUB_OUTPUT"
+          echo "probe_path=$probe_path" >> "$GITHUB_OUTPUT"
+          echo "probe_port=$probe_port" >> "$GITHUB_OUTPUT"
+
+      - name: Publish sanitized diagnostic evidence
+        if: steps.evidence.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.authz.outputs.issue_number }}
+          TARGET_REVISION: ${{ steps.authz.outputs.target_revision }}
+          HEALTHY_REVISION: ${{ steps.authz.outputs.healthy_revision }}
+          CLASSIFICATION: ${{ steps.evidence.outputs.classification }}
+          ERROR_TOKENS: ${{ steps.evidence.outputs.approved_error_tokens }}
+          READY_STATUS: ${{ steps.evidence.outputs.ready_status }}
+          READY_REASON: ${{ steps.evidence.outputs.ready_reason }}
+          ENV_PRESENCE: ${{ steps.evidence.outputs.env_presence }}
+          CANDIDATE_SA_OK: ${{ steps.evidence.outputs.candidate_sa_ok }}
+          HEALTHY_SA_OK: ${{ steps.evidence.outputs.healthy_sa_ok }}
+          PROBE_TYPE: ${{ steps.evidence.outputs.probe_type }}
+          PROBE_PATH: ${{ steps.evidence.outputs.probe_path }}
+          PROBE_PORT: ${{ steps.evidence.outputs.probe_port }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMENT="$(printf '%s\n' \
+            'AG01_STARTUP_DEPLOYER_READBACK=PASS' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            "TARGET_REVISION=$TARGET_REVISION" \
+            "EXPECTED_HEALTHY_REVISION=$HEALTHY_REVISION" \
+            "TARGET_READY_STATUS=$READY_STATUS" \
+            "TARGET_READY_REASON=$READY_REASON" \
+            "CLASSIFICATION=$CLASSIFICATION" \
+            "APPROVED_ERROR_TOKENS=$ERROR_TOKENS" \
+            "ENV_PRESENCE=$ENV_PRESENCE" \
+            "CANDIDATE_RUNTIME_SA_MATCH=$CANDIDATE_SA_OK" \
+            "HEALTHY_RUNTIME_SA_MATCH=$HEALTHY_SA_OK" \
+            "STARTUP_PROBE_TYPE=$PROBE_TYPE" \
+            "STARTUP_PROBE_PATH=$PROBE_PATH" \
+            "STARTUP_PROBE_PORT=$PROBE_PORT" \
+            'DIAGNOSTIC_IDENTITY=DEPLOYER_READ_ONLY_FALLBACK' \
+            'DEDICATED_READER_UNAVAILABLE_REASON=PROJECT_IAM_BOOTSTRAP_AUTHORITY_UNAVAILABLE' \
+            'RAW_LOG_PAYLOAD_PUBLISHED=false' \
+            'TRAFFIC_MUTATION=false' \
+            'SERVICE_MUTATION=false' \
+            'IAM_MUTATION=false' \
+            'DATABASE_MUTATION=false' \
+            'PROVIDER_CALLS=false')"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="$COMMENT" >/dev/null
+
+      - name: Publish single-use authorization outcome
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          JOB_STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          LIVE_ISSUE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          BODY="$(jq -r '.body // ""' <<< "$LIVE_ISSUE")"
+          consumed=false
+          if grep -Fxq 'AUTHORIZATION_STATE=CONSUMED' <<< "$BODY"; then
+            consumed=true
+          fi
+          COMMENT="$(printf '%s\n' \
+            "DIAGNOSTIC_AUTHORIZATION_CONSUMED=$consumed" \
+            "WORKFLOW_STATUS=$JOB_STATUS" \
+            'REUSE_PROHIBITED=true')"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="$COMMENT" >/dev/null
