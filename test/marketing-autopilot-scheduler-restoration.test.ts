@@ -25,12 +25,12 @@ const policy = JSON.parse(
   };
 };
 
-const productionCanaryId = 'MKT-20260916-SUNSET-STORY-2000';
+const productionCanaryId = 'MKT-20260917-SUNSET-FEED-0900';
 const canaryId = 'MKT-20260916-SUNSET-FEED-0900';
 const storyId = 'MKT-20260916-SUNSET-STORY-1100';
 const feedSha = '1c6c961dff3ed10ce0edfa13e2096c2849ade51ff99ade6a6fe14688cd2d1226';
 const storySha = 'c5fb0667575754c53c06e16fdda44db822dc0753f257c88ae8795f88ce564dda';
-const productionCanarySha = 'e17915b45526be8619eb72da91c3c676d4e8a0c7e0d3d1235a8e53204b2de93c';
+const productionCanarySha = 'a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6';
 
 function feedRow(overrides: Record<string, string> = {}) {
   return {
@@ -114,41 +114,41 @@ function storyRow(overrides: Record<string, string> = {}) {
   };
 }
 
-function productionCanaryStoryRow(overrides: Record<string, string> = {}) {
+function productionCanaryFeedRow(overrides: Record<string, string> = {}) {
   return {
     content_item_id: productionCanaryId,
-    scheduled_at: '2026-09-16T20:00:00-03:00',
+    scheduled_at: '2026-09-17T09:00:00-03:00',
     timezone: 'America/Bahia',
     operation: 'SUNSET',
     channel: 'INSTAGRAM',
-    format: 'STORY',
-    message: 'Daqui, o céu vira parte da experiência.',
-    cta: 'Celebre a vida com a gente.',
+    format: 'FEED',
+    message:
+      'O fim de tarde começa no detalhe: um bom drink, a vista de Morro e o tempo desacelerando na Toca.',
+    cta: 'Salve este convite e venha viver o Sunset.',
     status: 'PRODUCED',
-    creative_id: 'CR-MKT-20260903-SUNSET-STORY-1100-BATCH1',
-    copy_id: 'CP-MKT-20260903-SUNSET-STORY-1100-BATCH1',
+    creative_id: 'CR-MKT-20260903-SUNSET-FEED-0900-V1',
+    copy_id: 'CP-MKT-20260903-SUNSET-FEED-0900-V1',
     approval_status: 'APPROVED',
     approval_mode: 'EXPLICIT_APPROVAL',
     publication_id: '',
     provider_external_id: '',
     provider_status: '',
-    correlation_id: 'CORR-MKT-20260916-SUNSET-STORY-2000-GCP-AUTOPILOT-V1',
-    master_asset_id: '',
-    master_drive_file_id: '',
-    master_status: '',
-    story_creative_id: 'SC-MKT-20260903-SUNSET-STORY-1100-V1',
-    story_drive_file_id: '1ma-_lO9LME3E6f_MQu0kqyfGjZd7vS9j',
-    story_status: 'APPROVED',
-    registry_revision: 'MKTREG-GCP-AUTOPILOT-20260916-2000-V1',
-    scheduling_status: 'LIMITED_READY_AFTER_CANARY',
-    scheduling_policy: 'TOCA_MARKETING_AUTOPILOT_GCP_SCHEDULER_V1',
-    creative_standard_id: 'SUNSET_STORY_V1',
-    creative_standard_version: '2.1',
-    brand_asset_id: 'BRAND-TOCA-WHITE-VERTICAL-V1',
+    correlation_id: 'CORR-MKT-20260917-SUNSET-FEED-0900-ROLLOVER-V1',
+    master_asset_id: 'MM-SUN-0268-FEED4X5-V1',
+    master_drive_file_id: '1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK',
+    master_status: 'MASTER_READY',
+    story_creative_id: '',
+    story_drive_file_id: '',
+    story_status: '',
+    registry_revision: '',
+    scheduling_status: '',
+    scheduling_policy: '',
+    creative_standard_id: 'SUNSET_FEED_PHOTO_V1',
+    creative_standard_version: '1.0',
     creative_truth_policy_id: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
     brand_integrity_status: 'PASSED',
     venue_fidelity_status: 'PASSED',
-    quality_gate_status: 'PREVIEW_QA_PASSED',
+    quality_gate_status: 'PASSED',
     exact_asset_binding: 'TRUE',
     output_sha256: productionCanarySha,
     ...overrides,
@@ -222,8 +222,8 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     expect(workflow).not.toContain('REQUESTED_MODE');
     expect(policy.dailyRollout).toMatchObject({
       canaryContentItemId: productionCanaryId,
-      canaryScheduledAt: '2026-09-16T20:00:00-03:00',
-      rollForwardFromContentItemId: 'MKT-20260916-SUNSET-STORY-1600',
+      canaryScheduledAt: '2026-09-17T09:00:00-03:00',
+      rollForwardFromContentItemId: 'MKT-20260916-SUNSET-STORY-2000',
       rollForwardReason: 'PREVIOUS_CANARY_WINDOW_EXPIRED_NO_SCHEDULE_RUN',
       promoteToLimitedAfterVerifiedCanary: true,
       generalAutonomy: false,
@@ -236,10 +236,10 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     });
   });
 
-  it('selects the production 20:00 Story as the only CANARY candidate', () => {
+  it('selects the production next-day 09:00 Feed as the only CANARY candidate', () => {
     const result = runScheduler({
-      now: '2026-09-16T19:58:00-03:00',
-      rows: [productionCanaryStoryRow()],
+      now: '2026-09-17T08:58:00-03:00',
+      rows: [productionCanaryFeedRow()],
       useProductionPolicy: true,
     });
     expect(result.status, result.stderr).toBe(0);
@@ -249,20 +249,20 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
       canaryVerified: false,
       candidate: {
         contentItemId: productionCanaryId,
-        scheduledAt: '2026-09-16T20:00:00-03:00',
+        scheduledAt: '2026-09-17T09:00:00-03:00',
         waitSeconds: 120,
-        format: 'STORY',
+        format: 'FEED',
         expectedAssetSha256: productionCanarySha,
       },
     });
   });
 
-  it('builds the production 20:00 Story command in CANARY with exact approved binding', () => {
+  it('builds the production next-day 09:00 Feed command in CANARY with exact approved binding', () => {
     const targetCodeSha = '3'.repeat(40);
     const result = runScheduler({
       mode: 'build-command',
-      now: '2026-09-16T20:00:00-03:00',
-      rows: [productionCanaryStoryRow()],
+      now: '2026-09-17T09:00:00-03:00',
+      rows: [productionCanaryFeedRow()],
       useProductionPolicy: true,
       extraEnv: {
         MARKETING_AUTOPILOT_CONTENT_ITEM_ID: productionCanaryId,
@@ -276,20 +276,21 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
       command: {
         action: 'PUBLISH_NOW',
         contentItemId: productionCanaryId,
-        format: 'STORY_IMAGE',
-        assetId: 'SC-MKT-20260903-SUNSET-STORY-1100-V1',
-        driveFileId: '1ma-_lO9LME3E6f_MQu0kqyfGjZd7vS9j',
+        format: 'FEED_IMAGE',
+        assetId: 'MM-SUN-0268-FEED4X5-V1',
+        driveFileId: '1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK',
         expectedAssetSha256: productionCanarySha,
-        caption: 'Daqui, o céu vira parte da experiência.\n\nCelebre a vida com a gente.',
+        caption:
+          'O fim de tarde começa no detalhe: um bom drink, a vista de Morro e o tempo desacelerando na Toca.\n\nSalve este convite e venha viver o Sunset.',
         targetCodeSha,
         creativeTruthBinding: {
-          qualityGateStatus: 'PREVIEW_QA_PASSED',
+          qualityGateStatus: 'PASSED',
           exactAssetBinding: true,
         },
         schedulerBinding: {
           rolloutPhase: 'CANARY',
-          notBefore: '2026-09-16T20:00:00-03:00',
-          expiresAt: '2026-09-16T20:30:00-03:00',
+          notBefore: '2026-09-17T09:00:00-03:00',
+          expiresAt: '2026-09-17T09:30:00-03:00',
         },
       },
     });

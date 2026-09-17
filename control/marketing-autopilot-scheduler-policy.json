@@ -51,8 +51,8 @@
   },
   "dailyRollout": {
     "phase": "CANARY",
-    "canaryContentItemId": "MKT-20260916-SUNSET-STORY-2000",
-    "canaryScheduledAt": "2026-09-16T20:00:00-03:00",
+    "canaryContentItemId": "MKT-20260917-SUNSET-FEED-0900",
+    "canaryScheduledAt": "2026-09-17T09:00:00-03:00",
     "promoteToLimitedAfterVerifiedCanary": true,
     "verifiedCanarySchedulingStatus": "PUBLISHED_VERIFIED",
     "limited": {
@@ -65,9 +65,9 @@
     "generalAutonomy": false,
     "blindRetryAuthorized": false,
     "automaticFallbackAuthorized": false,
-    "rollForwardFromContentItemId": "MKT-20260916-SUNSET-STORY-1600",
+    "rollForwardFromContentItemId": "MKT-20260916-SUNSET-STORY-2000",
     "rollForwardReason": "PREVIOUS_CANARY_WINDOW_EXPIRED_NO_SCHEDULE_RUN",
-    "rollForwardAuthorizedAt": "2026-09-16T17:24:17-03:00",
+    "rollForwardAuthorizedAt": "2026-09-16T21:03:29-03:00",
     "rollForwardAuthority": "USER_EXPLICIT_DAILY_PUBLICATION_AUTHORIZATION_2026-09-16"
   },
   "standingAuthorization": {

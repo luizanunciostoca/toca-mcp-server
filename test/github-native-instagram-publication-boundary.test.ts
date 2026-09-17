@@ -144,7 +144,7 @@ describe('Instagram publication single-writer boundary', () => {
       },
       dailyRollout: {
         phase: 'CANARY',
-        canaryContentItemId: 'MKT-20260916-SUNSET-STORY-2000',
+        canaryContentItemId: 'MKT-20260917-SUNSET-FEED-0900',
         generalAutonomy: false,
       },
       rollout: {
