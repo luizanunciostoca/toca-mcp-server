@@ -1,0 +1,118 @@
+name: AG-01 Grounded Startup Failure Diagnostics
+
+on:
+  workflow_run:
+    workflows:
+      - AG-01 Grounded Runtime Activation
+    types: [completed]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ag01-grounded-startup-failure-diagnostics
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  SERVICE: toca-ag01-orchestrator
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  diagnose:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+
+    steps:
+      - name: Authenticate read-only diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read and classify failed candidate startup evidence
+        env:
+          FAILED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          FAILED_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$FAILED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$FAILED_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+
+          SHORT="${FAILED_HEAD_SHA::8}"
+          CANDIDATE="${SERVICE}-gnd-${SHORT}-${FAILED_RUN_ATTEMPT}"
+          mkdir -p ag01-startup-diagnostic
+
+          REVISION_PRESENT=false
+          READY_STATUS=''
+          READY_REASON=''
+          if gcloud run revisions describe "$CANDIDATE" \
+            --project "$PROJECT_ID" --region "$REGION" --format=json \
+            > /tmp/candidate.json 2>/dev/null; then
+            REVISION_PRESENT=true
+            READY_STATUS="$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .status] | last // empty' /tmp/candidate.json)"
+            READY_REASON="$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .reason] | last // empty' /tmp/candidate.json)"
+          fi
+
+          gcloud logging read \
+            "resource.type=\"cloud_run_revision\" AND resource.labels.revision_name=\"${CANDIDATE}\"" \
+            --project "$PROJECT_ID" --freshness=60m --limit=100 --order=asc --format=json \
+            > /tmp/candidate-logs.json 2>/dev/null || printf '[]\n' > /tmp/candidate-logs.json
+
+          TOKENS="$(grep -Eo 'AG01_[A-Z0-9_:,-]+' /tmp/candidate-logs.json | sort -u | paste -sd, - || true)"
+          NETWORK_SIGNALS="$(grep -Eo 'ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|password authentication failed|Cloud SQL' /tmp/candidate-logs.json | sort -u | paste -sd, - || true)"
+
+          CLASSIFICATION=STARTUP_FAILURE_UNCLASSIFIED
+          if grep -q 'AG01_PERSISTENCE_NOT_READY' /tmp/candidate-logs.json; then
+            CLASSIFICATION=AG01_PERSISTENCE_NOT_READY
+          elif grep -q 'AG01_PRODUCTION_MODEL_PROVIDER_REQUIRED' /tmp/candidate-logs.json; then
+            CLASSIFICATION=AG01_PRODUCTION_MODEL_PROVIDER_REQUIRED
+          elif grep -q 'AG01_PRODUCTION_VERTEX_PROVIDER_REQUIRED' /tmp/candidate-logs.json; then
+            CLASSIFICATION=AG01_PRODUCTION_VERTEX_PROVIDER_REQUIRED
+          elif grep -q 'AG01_PRODUCTION_GOOGLE_AUTH_MODE_REQUIRED' /tmp/candidate-logs.json; then
+            CLASSIFICATION=AG01_PRODUCTION_GOOGLE_AUTH_MODE_REQUIRED
+          elif grep -q 'AG01_PRODUCTION_GCP_METADATA_REQUIRED' /tmp/candidate-logs.json; then
+            CLASSIFICATION=AG01_PRODUCTION_GCP_METADATA_REQUIRED
+          elif grep -q 'AG01_VERTEX_PROJECT_ID_REQUIRED' /tmp/candidate-logs.json; then
+            CLASSIFICATION=AG01_VERTEX_PROJECT_ID_REQUIRED
+          elif [[ -n "$NETWORK_SIGNALS" ]]; then
+            CLASSIFICATION=STARTUP_DEPENDENCY_CONNECTIVITY_FAILURE
+          fi
+
+          cat > ag01-startup-diagnostic/sanitized.env <<EOF
+          AG01_STARTUP_DIAGNOSTIC_STATUS=PASS
+          FAILED_SOURCE_SHA=$FAILED_HEAD_SHA
+          FAILED_RUN_ATTEMPT=$FAILED_RUN_ATTEMPT
+          CANDIDATE_REVISION=$CANDIDATE
+          REVISION_PRESENT=$REVISION_PRESENT
+          READY_STATUS=${READY_STATUS:-UNKNOWN}
+          READY_REASON=${READY_REASON:-UNKNOWN}
+          CLASSIFICATION=$CLASSIFICATION
+          AG01_ERROR_TOKENS=${TOKENS:-NONE}
+          NETWORK_SIGNALS=${NETWORK_SIGNALS:-NONE}
+          RAW_LOG_PAYLOAD_PUBLISHED=false
+          TRAFFIC_MUTATION=false
+          PROVIDER_CALLS=false
+          DATABASE_MUTATION=false
+          EOF
+
+          cat ag01-startup-diagnostic/sanitized.env >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized diagnostic evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ag01-grounded-startup-diagnostic-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: ag01-startup-diagnostic/sanitized.env
+          if-no-files-found: error
+          retention-days: 90
