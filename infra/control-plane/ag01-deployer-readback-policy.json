@@ -11,10 +11,7 @@
   "claimAuthorizationBeforeReadRequired": true,
   "exactMainShaRequired": true,
   "rawLogPayloadPublicationAllowed": false,
-  "allowedReads": [
-    "run.revisions.describe",
-    "logging.entries.read"
-  ],
+  "allowedReads": ["run.revisions.describe", "logging.entries.read"],
   "forbid": {
     "projectIamMutation": true,
     "serviceAccountMutation": true,
