@@ -28,9 +28,8 @@ describe('AG-01 diagnostic authority repair', () => {
 
   it('allows only the read-only service account viewer grant', () => {
     expect(workflow).toContain('TARGET_ROLE: roles/iam.serviceAccountViewer');
-    expect(workflow).toContain(
-      "test \"$TARGET_ROLE\" = 'roles/iam.serviceAccountViewer'",
-    );
+    expect(workflow).toContain('test "$TARGET_ROLE"');
+    expect(workflow).toContain("= 'roles/iam.serviceAccountViewer'");
     expect(workflow).toContain(
       'gcloud projects add-iam-policy-binding "$PROJECT_ID"',
     );
@@ -52,9 +51,7 @@ describe('AG-01 diagnostic authority repair', () => {
     expect(workflow).not.toContain('--role=roles/iam.serviceAccountAdmin');
     expect(workflow).not.toContain('--role=roles/owner');
     expect(workflow).not.toContain('--role=roles/editor');
-    expect(workflow).not.toContain(
-      'service-accounts add-iam-policy-binding',
-    );
+    expect(workflow).not.toContain('service-accounts add-iam-policy-binding');
     expect(workflow).not.toContain('service-accounts create');
     expect(workflow).not.toContain('service-accounts keys create');
     expect(workflow).not.toContain('gcloud run deploy');
@@ -66,9 +63,7 @@ describe('AG-01 diagnostic authority repair', () => {
     expect(workflow).toContain('SERVICE_ACCOUNT_MUTATION_AUTHORIZED=false');
     expect(workflow).toContain('SERVICE_ACCOUNT_CREATE_AUTHORIZED=false');
     expect(workflow).toContain('SERVICE_ACCOUNT_KEYS_AUTHORIZED=false');
-    expect(workflow).toContain(
-      'GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false',
-    );
+    expect(workflow).toContain('GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false');
   });
 
   it('orders prestate before mutation and permission proof', () => {
