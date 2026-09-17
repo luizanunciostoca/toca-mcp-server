@@ -25,7 +25,9 @@ describe('AG-01 diagnostic authority repair', () => {
     const mutation = workflow.indexOf('- name: Grant only service-account policy read role');
     expect(claim).toBeGreaterThan(-1);
     expect(mutation).toBeGreaterThan(claim);
-    expect(workflow).toContain("sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED/'");
+    expect(workflow).toContain(
+      "sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED/'",
+    );
     expect(workflow).toContain('-f body="$UPDATED" -f state=closed');
     expect(workflow).toContain("if: steps.claim.outputs.claimed == 'true'");
     expect(workflow).toContain('AUTHORIZATION_CLAIMED_BEFORE_MUTATION=true');
