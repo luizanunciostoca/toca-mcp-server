@@ -124,6 +124,11 @@ jobs:
           set -euo pipefail
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')" = "$PROJECT_NUMBER"
           gcloud projects get-iam-policy "$PROJECT_ID" --format=json > /tmp/project-policy-before.json
+          PRESTATE_ETAG="$(jq -r '.etag // empty' /tmp/project-policy-before.json)"
+          test -n "$PRESTATE_ETAG"
+          jq -e --arg member "$TARGET_PRINCIPAL" '
+            [.bindings[]? | select((.members // []) | index($member)) | select(.condition != null)] | length == 0
+          ' /tmp/project-policy-before.json >/dev/null
           jq -r --arg member "$TARGET_PRINCIPAL" '
             [.bindings[]? | select((.members // []) | index($member)) | .role] | unique | sort | .[]
           ' /tmp/project-policy-before.json > /tmp/roles-before.txt
@@ -137,12 +142,48 @@ jobs:
           printf '%s\n' "$TARGET_ROLE" >> /tmp/roles-expected-after.txt
           sort -u /tmp/roles-expected-after.txt -o /tmp/roles-expected-after.txt
           echo "preexisting_role_count=$(wc -l < /tmp/roles-before.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+          echo "policy_etag=$PRESTATE_ETAG" >> "$GITHUB_OUTPUT"
+
+      - name: Claim single-use repair authorization before mutation
+        id: claim
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.authz.outputs.issue_number }}
+          PRESTATE_ETAG: ${{ steps.prestate.outputs.policy_etag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')" = "$GITHUB_SHA"
+          gcloud projects get-iam-policy "$PROJECT_ID" --format=json > /tmp/project-policy-preclaim.json
+          test "$(jq -r '.etag // empty' /tmp/project-policy-preclaim.json)" = "$PRESTATE_ETAG"
+          LIVE_ISSUE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            .state == "open" and .user.login == $owner
+          ' <<< "$LIVE_ISSUE" >/dev/null
+          BODY="$(jq -r '.body // ""' <<< "$LIVE_ISSUE")"
+          grep -Fxq "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA" <<< "$BODY"
+          grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY"
+          grep -Fxq 'AG01_DIAGNOSTIC_AUTHORITY_REPAIR=AUTHORIZED' <<< "$BODY"
+          UPDATED="$(printf '%s' "$BODY" | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED/')"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+            -f body="$UPDATED" -f state=closed >/dev/null
+          CLAIMED_ISSUE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          jq -e '.state == "closed"' <<< "$CLAIMED_ISSUE" >/dev/null
+          grep -Fxq 'AUTHORIZATION_STATE=CONSUMED' <<< "$(jq -r '.body // ""' <<< "$CLAIMED_ISSUE")"
+          echo 'claimed=true' >> "$GITHUB_OUTPUT"
 
       - name: Grant only service-account policy read role
+        if: steps.claim.outputs.claimed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRESTATE_ETAG: ${{ steps.prestate.outputs.policy_etag }}
         shell: bash
         run: |
           set -euo pipefail
           test "$TARGET_ROLE" = 'roles/iam.serviceAccountViewer'
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')" = "$GITHUB_SHA"
+          gcloud projects get-iam-policy "$PROJECT_ID" --format=json > /tmp/project-policy-premutation.json
+          test "$(jq -r '.etag // empty' /tmp/project-policy-premutation.json)" = "$PRESTATE_ETAG"
           gcloud projects add-iam-policy-binding "$PROJECT_ID" \
             --member="$TARGET_PRINCIPAL" \
             --role="$TARGET_ROLE" \
@@ -155,6 +196,9 @@ jobs:
         run: |
           set -euo pipefail
           gcloud projects get-iam-policy "$PROJECT_ID" --format=json > /tmp/project-policy-after.json
+          jq -e --arg member "$TARGET_PRINCIPAL" '
+            [.bindings[]? | select((.members // []) | index($member)) | select(.condition != null)] | length == 0
+          ' /tmp/project-policy-after.json >/dev/null
           jq -r --arg member "$TARGET_PRINCIPAL" '
             [.bindings[]? | select((.members // []) | index($member)) | .role] | unique | sort | .[]
           ' /tmp/project-policy-after.json > /tmp/roles-after.txt
@@ -167,7 +211,12 @@ jobs:
           gcloud iam service-accounts get-iam-policy "$SOURCE_SERVICE_ACCOUNT" \
             --project "$PROJECT_ID" --format=json > /tmp/source-service-account-policy-proof.json
           jq -e 'type == "object" and has("bindings")' /tmp/source-service-account-policy-proof.json >/dev/null
-          rm -f /tmp/source-service-account-policy-proof.json /tmp/project-policy-before.json /tmp/project-policy-after.json
+          rm -f \
+            /tmp/source-service-account-policy-proof.json \
+            /tmp/project-policy-before.json \
+            /tmp/project-policy-preclaim.json \
+            /tmp/project-policy-premutation.json \
+            /tmp/project-policy-after.json
           echo 'exact_delta=PASS' >> "$GITHUB_OUTPUT"
           echo 'service_account_policy_read=PASS' >> "$GITHUB_OUTPUT"
 
@@ -189,6 +238,7 @@ jobs:
             "PREEXISTING_ROLE_COUNT=$PREEXISTING_ROLE_COUNT" \
             "EXACT_IAM_DELTA=$EXACT_DELTA" \
             "SOURCE_SERVICE_ACCOUNT_POLICY_READ=$POLICY_READ" \
+            'AUTHORIZATION_CLAIMED_BEFORE_MUTATION=true' \
             'SERVICE_ACCOUNT_MUTATION=false' \
             'SERVICE_ACCOUNT_KEYS=false' \
             'CLOUD_RUN_MUTATION=false' \
@@ -200,7 +250,7 @@ jobs:
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
             -f body="$COMMENT" >/dev/null
 
-      - name: Consume single-use repair authorization
+      - name: Publish single-use authorization outcome
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
@@ -212,10 +262,7 @@ jobs:
           LIVE_ISSUE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           BODY="$(jq -r '.body // ""' <<< "$LIVE_ISSUE")"
           consumed=false
-          if grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY"; then
-            UPDATED="$(printf '%s' "$BODY" | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED/')"
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
-              -f body="$UPDATED" -f state=closed >/dev/null
+          if grep -Fxq 'AUTHORIZATION_STATE=CONSUMED' <<< "$BODY"; then
             consumed=true
           fi
           COMMENT="$(printf '%s\n' \
