@@ -17,7 +17,7 @@ env:
   PROJECT_ID: toca-mcp-production
   REGION: southamerica-east1
   SERVICE: toca-ag01-orchestrator
-  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  DIAGNOSTIC_SERVICE_ACCOUNT: toca-ag01-diagnostic-reader@toca-mcp-production.iam.gserviceaccount.com
   RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
 
@@ -47,9 +47,15 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')" = "$GITHUB_SHA"
-          ISSUE_JSON="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
-          BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON")"
-          ISSUE_NUMBER="$(jq -r '.number' <<< "$ISSUE_JSON")"
+          EVENT_ISSUE="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.number' <<< "$EVENT_ISSUE")"
+          LIVE_ISSUE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            .state == "open" and
+            .user.login == $owner and
+            (.title | startswith("PRODUCTION DIAGNOSTIC AUTHORIZATION — AG-01 startup cloud readback AUTO"))
+          ' <<< "$LIVE_ISSUE" >/dev/null
+          BODY="$(jq -r '.body // ""' <<< "$LIVE_ISSUE")"
           required=(
             "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
             'AUTHORIZATION_STATE=ACTIVE'
@@ -71,11 +77,11 @@ jobs:
           echo "target_revision=$TARGET" >> "$GITHUB_OUTPUT"
           echo "healthy_revision=$HEALTHY" >> "$GITHUB_OUTPUT"
 
-      - name: Authenticate production evidence identity
+      - name: Authenticate dedicated production diagnostic reader
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
-          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          service_account: ${{ env.DIAGNOSTIC_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
@@ -114,12 +120,30 @@ jobs:
           test "$(jq -r '.spec.serviceAccountName // empty' "$target_json")" = "$RUNTIME_SERVICE_ACCOUNT" && candidate_sa_ok=true
           test "$(jq -r '.spec.serviceAccountName // empty' "$healthy_json")" = "$RUNTIME_SERVICE_ACCOUNT" && healthy_sa_ok=true
 
+          probe_type="$(jq -r '
+            if .spec.containers[0].startupProbe.httpGet? then "HTTP"
+            elif .spec.containers[0].startupProbe.tcpSocket? then "TCP"
+            elif .spec.containers[0].startupProbe.grpc? then "GRPC"
+            else "NONE" end
+          ' "$target_json")"
           probe_path="$(jq -r '.spec.containers[0].startupProbe.httpGet.path // "NONE"' "$target_json")"
-          probe_port="$(jq -r '.spec.containers[0].startupProbe.httpGet.port // "NONE"' "$target_json")"
+          probe_port="$(jq -r '.spec.containers[0].startupProbe.httpGet.port // .spec.containers[0].startupProbe.tcpSocket.port // .spec.containers[0].startupProbe.grpc.port // "NONE"' "$target_json")"
+          [[ "$probe_type" =~ ^(HTTP|TCP|GRPC|NONE)$ ]] || probe_type=UNKNOWN
           [[ "$probe_path" =~ ^/[A-Za-z0-9_./-]*$|^NONE$ ]] || probe_path=REDACTED
           [[ "$probe_port" =~ ^[0-9]{1,5}$|^NONE$ ]] || probe_port=REDACTED
 
-          log_text="$(jq -r '[.[] | (.textPayload // ""), (.jsonPayload.message // ""), (.jsonPayload.errorCode // ""), (.jsonPayload.event // "")] | join("\n")' "$logs_json")"
+          log_text="$(jq -r '
+            [
+              .[] |
+              [
+                (.textPayload // null),
+                (.jsonPayload.message // null),
+                (.jsonPayload.errorCode // null),
+                (.jsonPayload.event // null)
+              ][] |
+              select(type == "string")
+            ] | join("\n")
+          ' "$logs_json")"
           approved_tokens=(
             AG01_PERSISTENCE_NOT_READY
             AG01_PRODUCTION_MODEL_PROVIDER_REQUIRED
@@ -157,6 +181,7 @@ jobs:
             echo "ENV_PRESENCE=$env_summary"
             echo "CANDIDATE_RUNTIME_SA_MATCH=$candidate_sa_ok"
             echo "HEALTHY_RUNTIME_SA_MATCH=$healthy_sa_ok"
+            echo "STARTUP_PROBE_TYPE=$probe_type"
             echo "STARTUP_PROBE_PATH=$probe_path"
             echo "STARTUP_PROBE_PORT=$probe_port"
             echo 'RAW_LOG_PAYLOAD_PUBLISHED=false'
@@ -172,6 +197,9 @@ jobs:
           echo "ready_status=$ready_status" >> "$GITHUB_OUTPUT"
           echo "ready_reason=$ready_reason" >> "$GITHUB_OUTPUT"
           echo "env_presence=$env_summary" >> "$GITHUB_OUTPUT"
+          echo "probe_type=$probe_type" >> "$GITHUB_OUTPUT"
+          echo "probe_path=$probe_path" >> "$GITHUB_OUTPUT"
+          echo "probe_port=$probe_port" >> "$GITHUB_OUTPUT"
 
       - name: Publish sanitized diagnostic evidence
         env:
@@ -184,6 +212,9 @@ jobs:
           READY_STATUS: ${{ steps.evidence.outputs.ready_status }}
           READY_REASON: ${{ steps.evidence.outputs.ready_reason }}
           ENV_PRESENCE: ${{ steps.evidence.outputs.env_presence }}
+          PROBE_TYPE: ${{ steps.evidence.outputs.probe_type }}
+          PROBE_PATH: ${{ steps.evidence.outputs.probe_path }}
+          PROBE_PORT: ${{ steps.evidence.outputs.probe_port }}
         shell: bash
         run: |
           set -euo pipefail
@@ -197,6 +228,9 @@ jobs:
             "CLASSIFICATION=$CLASSIFICATION" \
             "APPROVED_ERROR_TOKENS=$ERROR_TOKENS" \
             "ENV_PRESENCE=$ENV_PRESENCE" \
+            "STARTUP_PROBE_TYPE=$PROBE_TYPE" \
+            "STARTUP_PROBE_PATH=$PROBE_PATH" \
+            "STARTUP_PROBE_PORT=$PROBE_PORT" \
             'RAW_LOG_PAYLOAD_PUBLISHED=false' \
             'TRAFFIC_MUTATION=false' \
             'SERVICE_MUTATION=false' \
@@ -215,8 +249,11 @@ jobs:
         run: |
           set -euo pipefail
           [[ -n "${ISSUE_NUMBER:-}" ]] || exit 0
-          BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --jq '.body // ""')"
-          UPDATED="$(printf '%s' "$BODY" | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED/')"
-          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" -f body="$UPDATED" -f state=closed >/dev/null
+          LIVE_ISSUE="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          BODY="$(jq -r '.body // ""' <<< "$LIVE_ISSUE")"
+          if grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY"; then
+            UPDATED="$(printf '%s' "$BODY" | sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED/')"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" -f body="$UPDATED" -f state=closed >/dev/null
+          fi
           COMMENT="$(printf '%s\n' 'DIAGNOSTIC_AUTHORIZATION_CONSUMED=true' "WORKFLOW_STATUS=$JOB_STATUS" 'REUSE_PROHIBITED=true')"
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="$COMMENT" >/dev/null
