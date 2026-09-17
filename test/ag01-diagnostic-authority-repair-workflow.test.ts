@@ -20,6 +20,17 @@ describe('AG-01 diagnostic authority repair', () => {
     expect(workflow).toContain('REUSE_PROHIBITED=true');
   });
 
+  it('claims authorization before the only IAM mutation', () => {
+    const claim = workflow.indexOf('- name: Claim single-use repair authorization before mutation');
+    const mutation = workflow.indexOf('- name: Grant only service-account policy read role');
+    expect(claim).toBeGreaterThan(-1);
+    expect(mutation).toBeGreaterThan(claim);
+    expect(workflow).toContain("sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED/'");
+    expect(workflow).toContain('-f body="$UPDATED" -f state=closed');
+    expect(workflow).toContain("if: steps.claim.outputs.claimed == 'true'");
+    expect(workflow).toContain('AUTHORIZATION_CLAIMED_BEFORE_MUTATION=true');
+  });
+
   it('allows only the read-only service account viewer grant', () => {
     expect(workflow).toContain('TARGET_ROLE: roles/iam.serviceAccountViewer');
     expect(workflow).toContain('test "$TARGET_ROLE"');
@@ -31,6 +42,28 @@ describe('AG-01 diagnostic authority repair', () => {
     expect(workflow).toContain('roles-expected-after.txt');
     expect(workflow).toContain('diff -u /tmp/roles-expected-after.txt /tmp/roles-after.txt');
     expect(workflow).toContain('SOURCE_SERVICE_ACCOUNT_POLICY_READ=$POLICY_READ');
+  });
+
+  it('revalidates main and IAM prestate immediately before mutation', () => {
+    const claim = workflow.indexOf('- name: Claim single-use repair authorization before mutation');
+    const mutation = workflow.indexOf('- name: Grant only service-account policy read role');
+    const grant = workflow.indexOf('gcloud projects add-iam-policy-binding "$PROJECT_ID"');
+    const beforeGrant = workflow.slice(mutation, grant);
+    expect(claim).toBeGreaterThan(-1);
+    expect(mutation).toBeGreaterThan(claim);
+    expect(beforeGrant).toContain('branches/main');
+    expect(beforeGrant).toContain('project-policy-premutation.json');
+    expect(beforeGrant).toContain('PRESTATE_ETAG');
+    expect(workflow).toContain('project-policy-preclaim.json');
+    expect(workflow).toContain('policy_etag=$PRESTATE_ETAG');
+  });
+
+  it('rejects conditioned target bindings before mutation and after repair', () => {
+    const prestate = workflow.indexOf('- name: Capture project IAM prestate');
+    const mutation = workflow.indexOf('- name: Grant only service-account policy read role');
+    const preMutation = workflow.slice(prestate, mutation);
+    expect(preMutation).toContain('select(.condition != null)');
+    expect(workflow.match(/select\(\.condition != null\)/g)).toHaveLength(2);
   });
 
   it('forbids broader IAM and runtime mutation commands', () => {
@@ -74,6 +107,14 @@ describe('AG-01 diagnostic authority repair', () => {
       projectNumber: '990081828836',
       allowedProjectRole: 'roles/iam.serviceAccountViewer',
       requiredPermissionProof: 'iam.serviceAccounts.getIamPolicy',
+      singleUseAuthorizationRequired: true,
+      claimAuthorizationBeforeMutationRequired: true,
+      exactMainShaRequired: true,
+      immediateMainShaRevalidationRequired: true,
+      prestateSnapshotRequired: true,
+      policyEtagRevalidationRequired: true,
+      conditionalTargetBindingsForbidden: true,
+      poststateExactDeltaRequired: true,
       rawIamPolicyPublicationAllowed: false,
     });
   });
