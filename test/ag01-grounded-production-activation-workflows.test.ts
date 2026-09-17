@@ -14,6 +14,10 @@ const startupDiagnostics = readFileSync(
   '.github/workflows/ag01-grounded-startup-failure-diagnostics.yml',
   'utf8',
 );
+const startupCloudReadback = readFileSync(
+  '.github/workflows/ag01-grounded-startup-cloud-readback.yml',
+  'utf8',
+);
 
 describe('grounded production activation workflows', () => {
   it('keeps AG-01 private, zero-traffic first and provider-write free', () => {
@@ -52,6 +56,38 @@ describe('grounded production activation workflows', () => {
     expect(startupDiagnostics).not.toContain("grep -Eo 'AG01_");
     expect(startupDiagnostics).not.toContain('update-traffic');
     expect(startupDiagnostics).not.toContain('run deploy');
+  });
+
+  it('performs bounded cloud startup readback without production mutation or raw log publication', () => {
+    expect(startupCloudReadback).toContain('AG01_STARTUP_CLOUD_READBACK=AUTHORIZED');
+    expect(startupCloudReadback).toContain('NO_TRAFFIC_MUTATION=true');
+    expect(startupCloudReadback).toContain('NO_SERVICE_MUTATION=true');
+    expect(startupCloudReadback).toContain('NO_IAM_MUTATION=true');
+    expect(startupCloudReadback).toContain('NO_DATABASE_MUTATION=true');
+    expect(startupCloudReadback).toContain('NO_PROVIDER_CALLS=true');
+    expect(startupCloudReadback).toContain('RAW_LOG_PAYLOAD_PUBLISHED=false');
+    expect(startupCloudReadback).toContain(
+      'toca-ag01-diagnostic-reader@toca-mcp-production.iam.gserviceaccount.com',
+    );
+    expect(startupCloudReadback).not.toContain(
+      'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com',
+    );
+    expect(startupCloudReadback).toContain('LIVE_ISSUE=');
+    expect(startupCloudReadback).toContain('.state == "open"');
+    expect(startupCloudReadback).toContain('gcloud run revisions describe');
+    expect(startupCloudReadback).toContain('gcloud logging read');
+    expect(startupCloudReadback).toContain('STARTUP_PROBE_TYPE=');
+    expect(startupCloudReadback).toContain('startupProbe.tcpSocket');
+    expect(startupCloudReadback).toContain('startupProbe.grpc');
+    expect(startupCloudReadback).toContain('select(type == "string")');
+    expect(startupCloudReadback).toContain('ENV_PRESENCE=');
+    expect(startupCloudReadback).toContain('APPROVED_ERROR_TOKENS=');
+    expect(startupCloudReadback).toContain('AUTHORIZATION_STATE=CONSUMED');
+    expect(startupCloudReadback).not.toContain('gcloud run deploy');
+    expect(startupCloudReadback).not.toContain('update-traffic');
+    expect(startupCloudReadback).not.toContain('services update');
+    expect(startupCloudReadback).not.toContain('scheduler jobs update');
+    expect(startupCloudReadback).not.toContain('sql connect');
   });
 
   it('activates Instagram fallback without widening autonomy or changing scheduler', () => {
