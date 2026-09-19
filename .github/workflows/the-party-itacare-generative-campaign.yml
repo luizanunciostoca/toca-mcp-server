@@ -1,0 +1,333 @@
+name: The Party Itacare Generative Campaign
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      authorization_ref:
+        description: Owner authorization issue URL bound to the exact main SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: the-party-itacare-generative-campaign
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'issues' &&
+        github.event.issue.user.login == github.repository_owner &&
+        github.event.issue.title == 'PROVIDER AUTHORIZATION — The Party Itacare Generative Campaign') ||
+       github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'toca-mcp-production' }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'southamerica-east1' }}
+      GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY || 'toca-mcp' }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp' }}
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT || 'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com' }}
+      GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_MCP_RUNTIME_SERVICE_ACCOUNT || 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' }}
+      INSTAGRAM_PUBLICATION_ASSET_BUCKET_CONFIGURED: ${{ vars.INSTAGRAM_PUBLICATION_ASSET_BUCKET || 'toca-mcp-publication-assets' }}
+      VIDEO_SCENE_CONTINUATION_PROVIDER: GOOGLE_VERTEX_VEO
+      VIDEO_GOOGLE_AUTH_MODE: GCP_SERVICE_IDENTITY
+      VERTEX_VEO_LOCATION: us-central1
+      VERTEX_VEO_MODEL: veo-3.1-generate-001
+
+    steps:
+      - name: Checkout exact main candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve and validate single-use owner authorization
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_AUTHORIZATION_REF: ${{ inputs.authorization_ref || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          if [ "$GITHUB_EVENT_NAME" = 'issues' ]; then
+            AUTHORIZATION_REF="https://github.com/${GITHUB_REPOSITORY}/issues/${{ github.event.issue.number }}"
+          else
+            AUTHORIZATION_REF="$DISPATCH_AUTHORIZATION_REF"
+          fi
+          PREFIX="https://github.com/${GITHUB_REPOSITORY}/issues/"
+          [[ "$AUTHORIZATION_REF" == "$PREFIX"* ]]
+          ISSUE_NUMBER="${AUTHORIZATION_REF#${PREFIX}}"
+          [[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]]
+
+          AUTH_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          AUTH_BODY="$(printf '%s' "$AUTH_JSON" | jq -r '.body // ""')"
+          printf '%s' "$AUTH_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title == "PROVIDER AUTHORIZATION — The Party Itacare Generative Campaign")
+          ' >/dev/null
+
+          required_lines=(
+            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+            'AUTHORIZATION_STATE=ACTIVE'
+            'CAMPAIGN_ID=TP-ITA-20261011-GENERATIVE-V1'
+            'ITACARE_GENERATIVE_CAMPAIGN=AUTHORIZED'
+            'PUBLICATION_AUTHORIZED=false'
+          )
+          for required in "${required_lines[@]}"; do
+            key="${required%%=*}"
+            key_count="$(grep -Ec "^${key}=" <<< "$AUTH_BODY" || true)"
+            value_count="$(grep -Fxc "$required" <<< "$AUTH_BODY" || true)"
+            if [[ "$key_count" != '1' || "$value_count" != '1' ]]; then
+              echo "ITACARE_AUTHORIZATION_FIELD_INVALID:$required" >&2
+              exit 1
+            fi
+          done
+
+          VIDEO_FIELD_COUNT="$(grep -Ec '^CAMPAIGN_VIDEO_IDS=' <<< "$AUTH_BODY" || true)"
+          test "$VIDEO_FIELD_COUNT" = '1'
+          VIDEO_IDS="$(grep '^CAMPAIGN_VIDEO_IDS=' <<< "$AUTH_BODY" | cut -d= -f2-)"
+          [[ "$VIDEO_IDS" =~ ^VID-[0-9]{2}(,VID-[0-9]{2})*$ ]]
+          IFS=',' read -ra REQUESTED <<< "$VIDEO_IDS"
+          declare -A SEEN=()
+          for id in "${REQUESTED[@]}"; do
+            number="${id#VID-}"
+            value=$((10#$number))
+            test "$value" -ge 1 -a "$value" -le 10
+            if [[ -n "${SEEN[$id]:-}" ]]; then
+              echo "ITACARE_AUTHORIZATION_DUPLICATE_VIDEO_ID:$id" >&2
+              exit 1
+            fi
+            SEEN[$id]=1
+          done
+
+          echo "video_ids=$VIDEO_IDS" >> "$GITHUB_OUTPUT"
+          echo "authorization_ref=$AUTHORIZATION_REF" >> "$GITHUB_OUTPUT"
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce PRO+ v2 Main Stability Gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          STABILITY_ISSUE=640
+          STABILITY_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${STABILITY_ISSUE}")"
+          STABILITY_BODY="$(printf '%s' "$STABILITY_JSON" | jq -r '.body // ""')"
+
+          printf '%s' "$STABILITY_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title == "PRO+ v2 CONTROL PLANE — Integration Queue & Main Stability")
+          ' >/dev/null
+
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          required_stability_lines=(
+            'PRO_PLUS_CONTROL_PLANE_SCHEMA_VERSION=2'
+            'CONTROL_PLANE_ROLE=INTEGRATION_QUEUE_AND_MAIN_STABILITY'
+            'MAIN_STABILITY=PASS'
+            "EVALUATED_MAIN_SHA=$GITHUB_SHA"
+            'MERGE_RESERVATION=NONE'
+          )
+          for required in "${required_stability_lines[@]}"; do
+            key="${required%%=*}"
+            key_count="$(grep -Ec "^${key}=" <<< "$STABILITY_BODY" || true)"
+            value_count="$(grep -Fxc "$required" <<< "$STABILITY_BODY" || true)"
+            if [[ "$key_count" != '1' || "$value_count" != '1' ]]; then
+              echo "ITACARE_MAIN_STABILITY_BLOCKED:$required" >&2
+              exit 1
+            fi
+          done
+
+      - name: Authenticate deployer to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Resolve governed runtime bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GCP_PROJECT_ID"
+          test -n "$GCP_RUNTIME_SERVICE_ACCOUNT"
+          test -n "$INSTAGRAM_PUBLICATION_ASSET_BUCKET_CONFIGURED"
+          test "$VIDEO_SCENE_CONTINUATION_PROVIDER" = 'GOOGLE_VERTEX_VEO'
+          test "$VIDEO_GOOGLE_AUTH_MODE" = 'GCP_SERVICE_IDENTITY'
+          test "$VERTEX_VEO_LOCATION" = 'us-central1'
+          test "$VERTEX_VEO_MODEL" = 'veo-3.1-generate-001'
+          echo "VIDEO_ASSET_BUCKET=$INSTAGRAM_PUBLICATION_ASSET_BUCKET_CONFIGURED" >> "$GITHUB_ENV"
+
+      - name: Build and verify immutable campaign image
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          IMAGE_TAG="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:itacare-video-${GITHUB_SHA}"
+          IMAGE_REPOSITORY="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server"
+          JOB_NAME="toca-itacare-video-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker build --pull -t "$IMAGE_TAG" .
+          docker push "$IMAGE_TAG"
+          DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" \
+            --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          IMAGE="$IMAGE_REPOSITORY@$DIGEST"
+          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$IMAGE" \
+            --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          test "$DESCRIBED_DIGEST" = "$DIGEST"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "IMAGE_DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          echo "JOB_NAME=$JOB_NAME" >> "$GITHUB_ENV"
+
+      - name: Consume single-use provider authorization
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE_NUMBER: ${{ steps.auth.outputs.issue_number }}
+          CAMPAIGN_VIDEO_IDS: ${{ steps.auth.outputs.video_ids }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          AUTH_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}")"
+          printf '%s' "$AUTH_JSON" | jq -e '.state == "open"' >/dev/null
+          printf -v COMMENT '%s\n' \
+            'ITACARE_PROVIDER_AUTHORIZATION_CONSUMED=true' \
+            "CONSUMED_CANDIDATE_SHA=$GITHUB_SHA" \
+            "CONSUMED_VIDEO_IDS=$CAMPAIGN_VIDEO_IDS" \
+            "RUNTIME_IMAGE_DIGEST=$IMAGE_DIGEST" \
+            'PUBLICATION_AUTHORIZED=false'
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}/comments" \
+            -f body="$COMMENT" >/dev/null
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}" \
+            -f state=closed >/dev/null
+
+      - name: Execute governed campaign candidates
+        env:
+          CAMPAIGN_VIDEO_IDS: ${{ steps.auth.outputs.video_ids }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            set +e
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet >/dev/null 2>&1 || true
+            set -e
+          }
+          trap cleanup EXIT
+
+          ENV_VARS="^~^GCP_PROJECT_ID=$GCP_PROJECT_ID~INSTAGRAM_PUBLICATION_ASSET_BUCKET=$VIDEO_ASSET_BUCKET~VIDEO_SCENE_CONTINUATION_PROVIDER=$VIDEO_SCENE_CONTINUATION_PROVIDER~VIDEO_GOOGLE_AUTH_MODE=$VIDEO_GOOGLE_AUTH_MODE~VERTEX_VEO_LOCATION=$VERTEX_VEO_LOCATION~VERTEX_VEO_MODEL=$VERTEX_VEO_MODEL~CAMPAIGN_VIDEO_IDS=$CAMPAIGN_VIDEO_IDS~CAMPAIGN_GENERATION_CONCURRENCY=1"
+
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args dist/src/the-party-itacare-generative-campaign.js \
+            --set-env-vars "$ENV_VARS" \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 2400s \
+            --quiet
+
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+
+          RESULT_JSON=''
+          for attempt in $(seq 1 24); do
+            LINE="$(gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"THE_PARTY_ITACARE_GENERATIVE_CAMPAIGN_RESULT=\"" \
+              --project "$GCP_PROJECT_ID" --freshness=45m --limit=100 --order=desc \
+              --format='value(textPayload)' | grep 'THE_PARTY_ITACARE_GENERATIVE_CAMPAIGN_RESULT=' | head -n1 || true)"
+            if [ -n "$LINE" ]; then
+              RESULT_JSON="${LINE#THE_PARTY_ITACARE_GENERATIVE_CAMPAIGN_RESULT=}"
+              break
+            fi
+            sleep 5
+          done
+          test -n "$RESULT_JSON"
+
+          mkdir -p itacare-video-evidence
+          printf '%s\n' "$RESULT_JSON" | jq -e --arg ids "$CAMPAIGN_VIDEO_IDS" '
+            .schemaVersion == 1 and
+            .campaignId == "TP-ITA-20261011-GENERATIVE-V1" and
+            .status == "GENERATED_REVIEW_REQUIRED" and
+            .publicationAuthorized == false and
+            .requiresPostGenerationHumanReview == true and
+            (.generatedVideoCount == (($ids | split(",")) | length)) and
+            (.generatedSceneCount >= .generatedVideoCount) and
+            ((.videos | length) == .generatedVideoCount) and
+            all(.videos[];
+              .publicationAuthorized == false and
+              .reviewRequired == true and
+              (.outputSha256 | test("^[a-f0-9]{64}$")) and
+              (.manifest.publicationAuthorized == false) and
+              (.manifest.publicationEligible == false) and
+              ((.manifest.sourceScenes | length) > 0) and
+              all(.manifest.sourceScenes[];
+                (.sourceDriveFileId | length) > 0 and
+                (.sourceSha256 | test("^[a-f0-9]{64}$"))))
+          ' > itacare-video-evidence/campaign-result.json
+
+          jq -r '.videos[] | [.id, .deliveryUrl, .outputSha256] | @tsv' itacare-video-evidence/campaign-result.json |
+          while IFS=$'\t' read -r VIDEO_ID DELIVERY_URL EXPECTED_SHA; do
+            FILE="itacare-video-evidence/${VIDEO_ID}.mp4"
+            MANIFEST="itacare-video-evidence/${VIDEO_ID}.manifest.json"
+            curl --fail --silent --show-error --location "$DELIVERY_URL" --output "$FILE"
+            OBSERVED_SHA="$(sha256sum "$FILE" | awk '{print $1}')"
+            test "$OBSERVED_SHA" = "$EXPECTED_SHA"
+            jq --arg id "$VIDEO_ID" -e \
+              '.videos[] | select(.id == $id) | .manifest' \
+              itacare-video-evidence/campaign-result.json > "$MANIFEST"
+            jq -e '
+              .publicationAuthorized == false and
+              .publicationEligible == false and
+              ((.sourceScenes | length) > 0) and
+              all(.sourceScenes[];
+                (.sourceAssetId | length) > 0 and
+                (.sourceDriveFileId | length) > 0 and
+                (.sourceSha256 | test("^[a-f0-9]{64}$")))
+            ' "$MANIFEST" >/dev/null
+            printf '%s  %s\n' "$OBSERVED_SHA" "${VIDEO_ID}.mp4" >> itacare-video-evidence/SHA256SUMS.txt
+          done
+
+          jq -n \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg imageDigest "$IMAGE_DIGEST" \
+            --arg authorizationRef "${{ steps.auth.outputs.authorization_ref }}" \
+            --arg videoIds "$CAMPAIGN_VIDEO_IDS" \
+            '{schemaVersion:1,sourceSha:$sourceSha,runtimeImageDigest:$imageDigest,authorizationRef:$authorizationRef,videoIds:($videoIds|split(",")),authorizationConsumed:true,publicationAuthorized:false,reviewRequired:true}' \
+            > itacare-video-evidence/execution-evidence.json
+
+          cleanup
+          trap - EXIT
+
+      - name: Upload review candidates and evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: the-party-itacare-generative-${{ github.sha }}-${{ github.run_attempt }}
+          path: itacare-video-evidence/
+          if-no-files-found: error
+          retention-days: 14
