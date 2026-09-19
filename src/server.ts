@@ -126,8 +126,12 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     : undefined;
   const instagramDirectPublicationEnabled = directPublicationRuntimeConfigured(config);
   const releaseSha = env.TOCA_RELEASE_SHA?.trim();
+  const publicationEvidenceExactHeadSha =
+    instagramDirectPublicationEnabled && releaseSha ? releaseSha : undefined;
   const capabilityValidationEvidenceManifest = loadCapabilityValidationEvidenceManifest({
-    ...(releaseSha ? { exactHeadSha: releaseSha } : {}),
+    ...(publicationEvidenceExactHeadSha
+      ? { exactHeadSha: publicationEvidenceExactHeadSha }
+      : {}),
   });
   const googleAdsOauthCredentialRefs = [
     config.GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY,
@@ -147,7 +151,8 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
     instagramPublicationWritesEnabled: instagramDirectPublicationEnabled,
     instagramPublicationValidationEvidence: capabilityValidationEvidenceManifest.validations,
-    exactHeadSha: releaseSha ?? capabilityValidationEvidenceManifest.exactHeadSha,
+    exactHeadSha:
+      publicationEvidenceExactHeadSha ?? capabilityValidationEvidenceManifest.exactHeadSha,
     metaAdsReadsEnabled: config.META_ADS_READ_ENABLED,
     metaAdsWritesEnabled: config.META_ADS_WRITE_ENABLED,
     paidMediaDecisionEnabled: true,
