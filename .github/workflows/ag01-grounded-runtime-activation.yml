@@ -157,12 +157,12 @@ jobs:
           SUFFIX="gnd-${SHORT}-${GITHUB_RUN_ATTEMPT}"
           TAG="grounded-${SHORT}-${GITHUB_RUN_ATTEMPT}"
           CANDIDATE="${SERVICE}-${SUFFIX}"
-          gcloud run deploy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --image "$IMAGE" --service-account "$RUNTIME_SERVICE_ACCOUNT" --revision-suffix "$SUFFIX" --update-env-vars "TOCA_RELEASE_SHA=$GITHUB_SHA" --tag "$TAG" --no-traffic --no-allow-unauthenticated --quiet
+          gcloud run deploy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --image "$IMAGE" --service-account "$RUNTIME_SERVICE_ACCOUNT" --revision-suffix "$SUFFIX" --update-env-vars "TOCA_RELEASE_SHA=$GITHUB_SHA,INSTAGRAM_PUBLICATION_WRITES_ENABLED=false" --tag "$TAG" --no-traffic --no-allow-unauthenticated --quiet
           SERVICE_JSON="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           URL="$(jq -r --arg tag "$TAG" '.status.traffic[]? | select(.tag==$tag) | .url // empty' <<< "$SERVICE_JSON")"
           test -n "$URL"
           CANDIDATE_JSON="$(gcloud run revisions describe "$CANDIDATE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
-          jq -e --arg sa "$RUNTIME_SERVICE_ACCOUNT" --arg sha "$GITHUB_SHA" --arg digest "${{ steps.image.outputs.digest }}" '.spec.serviceAccountName==$sa and ([.status.conditions[]? | select(.type=="Ready") | .status]|last)=="True" and (.spec.containers[0].image|contains($digest)) and ([.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value]|last)==$sha' <<< "$CANDIDATE_JSON" >/dev/null
+          jq -e --arg sa "$RUNTIME_SERVICE_ACCOUNT" --arg sha "$GITHUB_SHA" --arg digest "${{ steps.image.outputs.digest }}" '.spec.serviceAccountName==$sa and ([.status.conditions[]? | select(.type=="Ready") | .status]|last)=="True" and (.spec.containers[0].image|contains($digest)) and ([.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value]|last)==$sha and ([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value]|last)=="false"' <<< "$CANDIDATE_JSON" >/dev/null
           jq -e --arg candidate "$CANDIDATE" --arg previous "$PRE_REVISION" '([.status.traffic[]? | select(.revisionName==$candidate) | (.percent//0)]|add//0)==0 and ([.status.traffic[]? | select(.revisionName==$previous) | (.percent//0)]|add//0)==100' <<< "$SERVICE_JSON" >/dev/null
           echo "candidate_revision=$CANDIDATE" >> "$GITHUB_OUTPUT"
           echo "candidate_url=$URL" >> "$GITHUB_OUTPUT"
