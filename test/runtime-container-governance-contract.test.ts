@@ -23,7 +23,10 @@ describe('runtime container governance assets', () => {
     );
     expect(server).toContain("...(releaseSha ? { exactHeadSha: releaseSha } : {})");
     expect(server).toContain(
-      'instagramPublicationValidationEvidence: capabilityValidationEvidenceManifest?.validations ?? []',
+      'instagramPublicationValidationEvidence: capabilityValidationEvidenceManifest.validations',
+    );
+    expect(server).toContain(
+      'exactHeadSha: capabilityValidationEvidenceManifest.exactHeadSha',
     );
   });
 
