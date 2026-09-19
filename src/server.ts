@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { PostgresVideoContentRuntime } from './content/runtime.js';
 import { loadConfig, type RuntimeConfig } from './config.js';
+import { PhotoEnhancementRuntimeService } from './creative/photo-enhancement-runtime.js';
 import {
   createTrustedServiceExecutionIdentity,
   type ExecutionIdentity,
@@ -12,6 +13,7 @@ import { registerTocaCoreSurface } from './mcp/core-surface.js';
 import { registerTocaControlCenterSurface } from './mcp/human-control-center.js';
 import type { InstagramCorePublicationRuntime } from './mcp/instagram-publication-runtime.js';
 import { resolvePaidMediaRuntimeBinding } from './mcp/paid-media-runtime.js';
+import { resolvePhotoEnhancementRuntimeBinding } from './mcp/photo-enhancement-runtime.js';
 import { createRuntimeCapabilityResolver } from './mcp/runtime-capability-resolver.js';
 import { resolveOmnichannelReadbackRuntimeBinding } from './mcp/omnichannel-readback-runtime.js';
 import type { ProviderBindingRef } from './omnichannel/contracts.js';
@@ -30,8 +32,16 @@ import { createPostgresPool } from './persistence/postgres.js';
 import { GoogleAdsAccountVerifier } from './providers/google-ads/google-ads-account-verifier.js';
 import { GoogleAdsRestApiClient } from './providers/google-ads/google-ads-api-client.js';
 import { GoogleAdsPaidMediaProvider } from './providers/google-ads/google-ads-paid-media.js';
+import {
+  GcpGoogleWorkspaceTokenResolver,
+  GOOGLE_DRIVE_READONLY_SCOPE,
+  GOOGLE_WORKSPACE_SCOPED_TOKEN_PROVIDER,
+} from './providers/gcp/google-workspace-token-resolver.js';
+import { GcsPhotoEnhancementArtifactStore } from './providers/gcp/gcs-photo-enhancement-artifact-store.js';
+import { GoogleDrivePhotoSourceLoader } from './providers/google-drive/photo-source-loader.js';
 import { InstagramHistoryProvider } from './providers/instagram/instagram-history-provider.js';
 import { InstagramPublicationExecutor } from './providers/instagram/instagram-publication-executor.js';
+import { LocalPhotoEnhancer } from './providers/local/local-photo-enhancer.js';
 import { MetaInstagramPublicationTransport } from './providers/instagram/meta-instagram-publication-transport.js';
 import { MetaAdsControlledGraphProvider } from './providers/meta-ads/meta-ads-controlled-graph-provider.js';
 import { MetaAdsControlledWriteService } from './providers/meta-ads/meta-ads-controlled-write.js';
@@ -125,6 +135,10 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     ? createPostgresPool({ connectionString: config.DATABASE_URL })
     : undefined;
   const instagramDirectPublicationEnabled = directPublicationRuntimeConfigured(config);
+  const photoEnhancementEnabled = photoEnhancementRuntimeEnabled(env);
+  const photoEnhancement = photoEnhancementEnabled
+    ? createPhotoEnhancementRuntime(env, config)
+    : undefined;
   const releaseSha = env.TOCA_RELEASE_SHA?.trim();
   const capabilityValidationEvidenceManifest = loadCapabilityValidationEvidenceManifest({
     ...(releaseSha ? { exactHeadSha: releaseSha } : {}),
@@ -159,6 +173,18 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     crmSalesRuntimeEnabled: Boolean(pool),
     omnichannelReadbacksEnabled: Boolean(pool),
   });
+  if (photoEnhancementEnabled) {
+    registry.register({
+      name: 'design.photo.enhance',
+      version: '1.0.0',
+      provider: 'TOCA_OS+toca-mcp',
+      riskClass: 'READ',
+      requiredScopes: [GOOGLE_DRIVE_READONLY_SCOPE],
+      capabilityStatus: 'IMPLEMENTED',
+      sideEffects: false,
+      idempotent: true,
+    });
+  }
   const createMetaClientForKey = (accessTokenEnvKey: string) =>
     new MetaApiClient(
       {
@@ -417,6 +443,7 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
       : {}),
   });
   const runtimeResolver = (capabilityId: string) =>
+    resolvePhotoEnhancementRuntimeBinding(capabilityId, photoEnhancement) ??
     resolvePaidMediaRuntimeBinding(capabilityId, {
       ...(googleAdsApi ? { googleAdsDiscoveryClient: googleAdsApi } : {}),
       ...(googleAdsAccountVerifier ? { googleAdsAccountVerifier } : {}),
@@ -481,6 +508,41 @@ function directPublicationRuntimeConfigured(config: RuntimeConfig): boolean {
   );
 }
 
+function photoEnhancementRuntimeEnabled(env: NodeJS.ProcessEnv): boolean {
+  return env.TOCA_CREATIVE_PHOTO_RUNTIME_ENABLED?.trim().toLowerCase() === 'true';
+}
+
+function createPhotoEnhancementRuntime(
+  env: NodeJS.ProcessEnv,
+  config: RuntimeConfig,
+): PhotoEnhancementRuntimeService {
+  const serviceAccountEmail = runtimeText(
+    env.TOCA_CREATIVE_GOOGLE_SERVICE_ACCOUNT_EMAIL ??
+      env.INSTAGRAM_ENGAGEMENT_GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    'TOCA_CREATIVE_GOOGLE_SERVICE_ACCOUNT_EMAIL_REQUIRED',
+  );
+  const projectId = runtimeText(config.GCP_PROJECT_ID, 'GCP_PROJECT_ID_REQUIRED');
+  const bucketName = runtimeText(
+    config.INSTAGRAM_PUBLICATION_ASSET_BUCKET,
+    'INSTAGRAM_PUBLICATION_ASSET_BUCKET_REQUIRED',
+  );
+  const workspaceTokenResolver = new GcpGoogleWorkspaceTokenResolver({
+    serviceAccountEmail,
+    scopes: [GOOGLE_DRIVE_READONLY_SCOPE],
+  });
+  return new PhotoEnhancementRuntimeService({
+    sourceLoader: new GoogleDrivePhotoSourceLoader({
+      secretResolver: workspaceTokenResolver,
+      accessTokenReference: {
+        provider: GOOGLE_WORKSPACE_SCOPED_TOKEN_PROVIDER,
+        key: 'drive-readonly',
+      },
+    }),
+    enhancer: new LocalPhotoEnhancer(),
+    artifactStore: new GcsPhotoEnhancementArtifactStore({ projectId, bucketName }),
+  });
+}
+
 function whatsappRuntimeEnabled(env: NodeJS.ProcessEnv): boolean {
   return env.WHATSAPP_RUNTIME_ENABLED?.trim().toLowerCase() === 'true';
 }
@@ -517,6 +579,7 @@ function runtimeServiceIdentity(
   if (config.NODE_ENV !== 'production' || !config.MCP_ENABLED || !cloudRunService) return undefined;
 
   const directPublicationEnabled = directPublicationRuntimeConfigured(config);
+  const photoEnhancementEnabled = photoEnhancementRuntimeEnabled(env);
   return createTrustedServiceExecutionIdentity({
     principalId: `cloud-run-service:${cloudRunService}`,
     tenantId: scope.tenantId,
@@ -527,6 +590,7 @@ function runtimeServiceIdentity(
       'instagram.toca_schedule.create',
       'instagram.toca_schedule.reschedule',
       'instagram.toca_schedule.cancel',
+      ...(photoEnhancementEnabled ? ['design.photo.enhance'] : []),
       ...(directPublicationEnabled ? DIRECT_INSTAGRAM_PUBLICATION_CAPABILITIES : []),
     ],
     allowedTargetAccounts:

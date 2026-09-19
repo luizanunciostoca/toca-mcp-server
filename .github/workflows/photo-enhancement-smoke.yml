@@ -1,0 +1,284 @@
+name: Photo Enhancement Smoke
+
+on:
+  push:
+    branches:
+      - feat/design-photo-enhance-mcp
+    paths:
+      - .github/workflows/photo-enhancement-smoke.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: photo-enhancement-smoke
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  PUBLICATION_ASSET_BUCKET: toca-mcp-publication-assets
+  JOB_NAME: toca-photo-enhancement-smoke
+  REVIEW_JOB_NAME: toca-photo-enhancement-review-link
+  CONTENT_ITEM_ID: MKT-20260903-SUNSET-FEED-0900
+  SOURCE_ASSET_ID: SUN-0268
+  SOURCE_DRIVE_FILE_ID: 1bhYlL2AvmA9tTFDxYQyQnlX3bK-ZUS2f
+  CORRELATION_ID: smoke-SUN-0268-20260902
+  REVIEW_CORRELATION_ID: review-SUN-0268-20260902
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm quality
+
+      - name: Authenticate to Google Cloud and Drive
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Download exact source for independent evidence
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+            "https://www.googleapis.com/drive/v3/files/${SOURCE_DRIVE_FILE_ID}?alt=media&supportsAllDrives=true" \
+            --output smoke-source.jpg
+          test -s smoke-source.jpg
+          MIME="$(file --brief --mime-type smoke-source.jpg)"
+          case "$MIME" in
+            image/jpeg|image/png|image/webp) ;;
+            *) echo "Unexpected source MIME: $MIME" >&2; exit 1 ;;
+          esac
+          echo "SOURCE_EVIDENCE_SHA256=$(sha256sum smoke-source.jpg | awk '{print $1}')" >> "$GITHUB_ENV"
+
+      - name: Build and push exact candidate image
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/server:photo-enhancement-smoke-${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "SMOKE_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Write isolated runtime env
+        shell: bash
+        run: |
+          cat > /tmp/photo-enhancement-smoke-env.yaml <<EOF
+          NODE_ENV: "production"
+          MCP_ENABLED: "false"
+          INSTAGRAM_PUBLICATION_WRITES_ENABLED: "false"
+          INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: "false"
+          META_ADS_WRITE_ENABLED: "false"
+          GCP_PROJECT_ID: "$PROJECT_ID"
+          INSTAGRAM_PUBLICATION_ASSET_BUCKET: "$PUBLICATION_ASSET_BUCKET"
+          TOCA_CREATIVE_GOOGLE_SERVICE_ACCOUNT_EMAIL: "$RUNTIME_SERVICE_ACCOUNT"
+          EOF
+
+      - name: Deploy write-isolated smoke job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$SMOKE_IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args="dist/src/photo-enhancement-smoke.js,--content-item-id,$CONTENT_ITEM_ID,--source-asset-id,$SOURCE_ASSET_ID,--source-drive-file-id,$SOURCE_DRIVE_FILE_ID,--correlation-id,$CORRELATION_ID" \
+            --env-vars-file /tmp/photo-enhancement-smoke-env.yaml \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 180s \
+            --quiet
+
+      - name: Verify smoke job has no external write authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_JSON="$(gcloud run jobs describe "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          printf '%s' "$JOB_JSON" | jq -e '
+            .spec.template.spec.template.spec.containers[0] as $container |
+            ($container.command == ["node"]) and
+            ($container.args[0] == "dist/src/photo-enhancement-smoke.js") and
+            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$container.env[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$container.env[] | select(.name == "META_ADS_WRITE_ENABLED") | .value] == ["false"])
+          ' >/dev/null
+
+      - name: Execute governed enhancement smoke
+        run: gcloud run jobs execute "$JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Capture and validate enhancement evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT_JSON=""
+          LOGS_JSON='[]'
+          for attempt in $(seq 1 15); do
+            LOGS_JSON="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+              --project "$PROJECT_ID" \
+              --freshness=30m \
+              --limit=300 \
+              --order=asc \
+              --format=json || printf '[]')"
+            RESULT_JSON="$(printf '%s' "$LOGS_JSON" | jq -c \
+              --arg contentItemId "$CONTENT_ITEM_ID" \
+              --arg sourceAssetId "$SOURCE_ASSET_ID" \
+              --arg sourceDriveFileId "$SOURCE_DRIVE_FILE_ID" '
+                def parsed:
+                  if ((.jsonPayload? | type) == "object" and (.jsonPayload.sourceAssetId? != null)) then .jsonPayload
+                  elif ((.jsonPayload.message? | type) == "string") then (.jsonPayload.message | fromjson? // empty)
+                  elif ((.textPayload? | type) == "string") then (.textPayload | fromjson? // empty)
+                  else empty end;
+                [ .[] | parsed | select(
+                    .contentItemId? == $contentItemId and
+                    .sourceAssetId? == $sourceAssetId and
+                    .sourceDriveFileId? == $sourceDriveFileId
+                  ) ] | last // empty
+              ')"
+            [ -n "$RESULT_JSON" ] && break
+            sleep 5
+          done
+          test -n "$RESULT_JSON"
+          printf '%s\n' "$RESULT_JSON" > photo-enhancement-smoke-evidence.json
+          jq -e \
+            --arg contentItemId "$CONTENT_ITEM_ID" \
+            --arg sourceAssetId "$SOURCE_ASSET_ID" \
+            --arg sourceDriveFileId "$SOURCE_DRIVE_FILE_ID" '
+              .contentItemId == $contentItemId and
+              .sourceAssetId == $sourceAssetId and
+              .sourceDriveFileId == $sourceDriveFileId and
+              .sourceImageBound == true and
+              .editMode == "ENHANCE_EXISTING_IMAGE" and
+              .editorProvider == "LOCAL_IMAGEMAGICK" and
+              .reviewRequired == true and
+              .promotionEligible == false and
+              (.sourceSha256 | test("^[a-f0-9]{64}$")) and
+              (.outputSha256 | test("^[a-f0-9]{64}$")) and
+              (.publicationAsset.objectName | length > 0) and
+              .publicationAsset.contentType == "image/jpeg"
+            ' photo-enhancement-smoke-evidence.json >/dev/null
+          test "$(jq -r .sourceSha256 photo-enhancement-smoke-evidence.json)" = "$SOURCE_EVIDENCE_SHA256"
+          echo "ENHANCED_OBJECT_NAME=$(jq -r .publicationAsset.objectName photo-enhancement-smoke-evidence.json)" >> "$GITHUB_ENV"
+          echo "ENHANCED_OUTPUT_SHA256=$(jq -r .outputSha256 photo-enhancement-smoke-evidence.json)" >> "$GITHUB_ENV"
+
+      - name: Deploy ephemeral runtime review-link job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$REVIEW_JOB_NAME" \
+            --image "$SMOKE_IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args="dist/src/photo-enhancement-review-link.js,--object-name,$ENHANCED_OBJECT_NAME,--expected-sha256,$ENHANCED_OUTPUT_SHA256,--correlation-id,$REVIEW_CORRELATION_ID" \
+            --env-vars-file /tmp/photo-enhancement-smoke-env.yaml \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 60s \
+            --quiet
+
+      - name: Verify review-link job has no external write authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_JSON="$(gcloud run jobs describe "$REVIEW_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          printf '%s' "$JOB_JSON" | jq -e '
+            .spec.template.spec.template.spec.containers[0] as $container |
+            ($container.command == ["node"]) and
+            ($container.args[0] == "dist/src/photo-enhancement-review-link.js") and
+            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$container.env[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$container.env[] | select(.name == "META_ADS_WRITE_ENABLED") | .value] == ["false"])
+          ' >/dev/null
+
+      - name: Execute ephemeral review-link job
+        run: gcloud run jobs execute "$REVIEW_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Download and independently verify exact output
+        shell: bash
+        run: |
+          set -euo pipefail
+          REVIEW_JSON=""
+          LOGS_JSON='[]'
+          for attempt in $(seq 1 12); do
+            LOGS_JSON="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${REVIEW_JOB_NAME}\"" \
+              --project "$PROJECT_ID" \
+              --freshness=10m \
+              --limit=100 \
+              --order=asc \
+              --format=json || printf '[]')"
+            REVIEW_JSON="$(printf '%s' "$LOGS_JSON" | jq -c --arg correlationId "$REVIEW_CORRELATION_ID" '
+              def parsed:
+                if ((.jsonPayload? | type) == "object" and (.jsonPayload.reviewUrl? != null)) then .jsonPayload
+                elif ((.jsonPayload.message? | type) == "string") then (.jsonPayload.message | fromjson? // empty)
+                elif ((.textPayload? | type) == "string") then (.textPayload | fromjson? // empty)
+                else empty end;
+              [ .[] | parsed | select(.correlationId? == $correlationId and .reviewUrl? != null) ] | last // empty
+            ')"
+            [ -n "$REVIEW_JSON" ] && break
+            sleep 3
+          done
+          test -n "$REVIEW_JSON"
+          test "$(printf '%s' "$REVIEW_JSON" | jq -r .objectName)" = "$ENHANCED_OBJECT_NAME"
+          test "$(printf '%s' "$REVIEW_JSON" | jq -r .expectedSha256)" = "$ENHANCED_OUTPUT_SHA256"
+          REVIEW_URL="$(printf '%s' "$REVIEW_JSON" | jq -r .reviewUrl)"
+          test "$REVIEW_URL" != "null"
+          curl --fail --silent --show-error --location "$REVIEW_URL" --output smoke-enhanced.jpg
+          unset REVIEW_URL
+          test -s smoke-enhanced.jpg
+          OBSERVED_OUTPUT_SHA256="$(sha256sum smoke-enhanced.jpg | awk '{print $1}')"
+          test "$OBSERVED_OUTPUT_SHA256" = "$ENHANCED_OUTPUT_SHA256"
+          jq -n \
+            --arg objectName "$ENHANCED_OBJECT_NAME" \
+            --arg expectedSha256 "$ENHANCED_OUTPUT_SHA256" \
+            --arg observedSha256 "$OBSERVED_OUTPUT_SHA256" \
+            --arg verification "EPHEMERAL_RUNTIME_SIGNED_URL_INDEPENDENT_CI_READBACK" \
+            '{objectName:$objectName,expectedSha256:$expectedSha256,observedSha256:$observedSha256,verification:$verification,match:true}' \
+            > photo-enhancement-readback-evidence.json
+
+      - name: Upload source, output and durable evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: photo-enhancement-smoke-${{ env.SOURCE_ASSET_ID }}-${{ github.sha }}
+          path: |
+            smoke-source.jpg
+            smoke-enhanced.jpg
+            photo-enhancement-smoke-evidence.json
+            photo-enhancement-readback-evidence.json
+          if-no-files-found: error
+          retention-days: 30

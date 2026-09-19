@@ -1,0 +1,177 @@
+name: Photo Enhancement Repair SUN-0289
+
+on:
+  push:
+    branches:
+      - feat/design-photo-enhance-mcp
+    paths:
+      - .github/workflows/photo-enhancement-repair-sun0289.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  PUBLICATION_ASSET_BUCKET: toca-mcp-publication-assets
+  PINNED_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server@sha256:ac98d394ba31aca43055c864a89dd8335c143ae7b9f83e34537842257f99c1cb
+  CONTENT_ITEM_ID: MKT-20260903-SUNSET-FEED-1500
+  SOURCE_ASSET_ID: SUN-0289
+  SOURCE_DRIVE_FILE_ID: 1FzfP2CmKM5BJItbBOwj31qoLoictPADX
+  CORRELATION_ID: repair-feed-20260903-20260909-v1-SUN-0289
+  REVIEW_CORRELATION_ID: repair-review-feed-20260903-20260909-v1-SUN-0289
+  ENHANCE_JOB_NAME: toca-enhance-sun0289-repair
+  REVIEW_JOB_NAME: toca-review-sun0289-repair
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Authenticate to Google Cloud and Drive
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Download exact source
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+            "https://www.googleapis.com/drive/v3/files/${SOURCE_DRIVE_FILE_ID}?alt=media&supportsAllDrives=true" \
+            --output source-original.bin
+          test -s source-original.bin
+          SOURCE_MIME="$(file --brief --mime-type source-original.bin)"
+          case "$SOURCE_MIME" in image/jpeg|image/png|image/webp) ;; *) exit 1 ;; esac
+          SOURCE_SHA256="$(sha256sum source-original.bin | awk '{print $1}')"
+          echo "SOURCE_EVIDENCE_SHA256=$SOURCE_SHA256" >> "$GITHUB_ENV"
+          echo "SOURCE_EVIDENCE_MIME=$SOURCE_MIME" >> "$GITHUB_ENV"
+
+      - name: Write isolated environment
+        shell: bash
+        run: |
+          cat > /tmp/env.yaml <<EOF
+          NODE_ENV: "production"
+          MCP_ENABLED: "false"
+          INSTAGRAM_PUBLICATION_WRITES_ENABLED: "false"
+          INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: "false"
+          META_ADS_WRITE_ENABLED: "false"
+          GCP_PROJECT_ID: "$PROJECT_ID"
+          INSTAGRAM_PUBLICATION_ASSET_BUCKET: "$PUBLICATION_ASSET_BUCKET"
+          TOCA_CREATIVE_GOOGLE_SERVICE_ACCOUNT_EMAIL: "$RUNTIME_SERVICE_ACCOUNT"
+          EOF
+
+      - name: Deploy enhancement job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$ENHANCE_JOB_NAME" \
+            --image "$PINNED_IMAGE" --project "$PROJECT_ID" --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" --command node \
+            --args="dist/src/photo-enhancement-smoke.js,--content-item-id,$CONTENT_ITEM_ID,--source-asset-id,$SOURCE_ASSET_ID,--source-drive-file-id,$SOURCE_DRIVE_FILE_ID,--correlation-id,$CORRELATION_ID" \
+            --env-vars-file /tmp/env.yaml --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+
+      - name: Verify isolated enhancement job
+        shell: bash
+        run: |
+          JOB_JSON="$(gcloud run jobs describe "$ENHANCE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          printf '%s' "$JOB_JSON" | jq -e --arg image "$PINNED_IMAGE" '
+            .spec.template.spec.template.spec.containers[0] as $c |
+            $c.image == $image and $c.args[0] == "dist/src/photo-enhancement-smoke.js" and
+            ([$c.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$c.env[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$c.env[] | select(.name == "META_ADS_WRITE_ENABLED") | .value] == ["false"])
+          ' >/dev/null
+
+      - name: Execute enhancement
+        run: gcloud run jobs execute "$ENHANCE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Capture enhancement evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT=''
+          for attempt in $(seq 1 15); do
+            LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${ENHANCE_JOB_NAME}\"" --project "$PROJECT_ID" --freshness=30m --limit=200 --order=asc --format=json || printf '[]')"
+            RESULT="$(printf '%s' "$LOGS" | jq -c --arg content "$CONTENT_ITEM_ID" --arg asset "$SOURCE_ASSET_ID" --arg drive "$SOURCE_DRIVE_FILE_ID" '
+              def parsed: if ((.jsonPayload?|type)=="object" and .jsonPayload.sourceAssetId?!=null) then .jsonPayload elif ((.jsonPayload.message?|type)=="string") then (.jsonPayload.message|fromjson?//empty) elif ((.textPayload?|type)=="string") then (.textPayload|fromjson?//empty) else empty end;
+              [ .[] | parsed | select(.contentItemId?==$content and .sourceAssetId?==$asset and .sourceDriveFileId?==$drive) ] | last // empty')"
+            [ -n "$RESULT" ] && break
+            sleep 4
+          done
+          test -n "$RESULT"
+          printf '%s\n' "$RESULT" > enhancement-evidence.json
+          test "$(jq -r .sourceSha256 enhancement-evidence.json)" = "$SOURCE_EVIDENCE_SHA256"
+          jq -e '.sourceImageBound==true and .editMode=="ENHANCE_EXISTING_IMAGE" and .editorProvider=="LOCAL_IMAGEMAGICK" and .reviewRequired==true and .promotionEligible==false and (.outputSha256|test("^[a-f0-9]{64}$"))' enhancement-evidence.json >/dev/null
+          echo "ENHANCED_OBJECT_NAME=$(jq -r .publicationAsset.objectName enhancement-evidence.json)" >> "$GITHUB_ENV"
+          echo "ENHANCED_OUTPUT_SHA256=$(jq -r .outputSha256 enhancement-evidence.json)" >> "$GITHUB_ENV"
+
+      - name: Deploy review-link job
+        shell: bash
+        run: |
+          gcloud run jobs deploy "$REVIEW_JOB_NAME" \
+            --image "$PINNED_IMAGE" --project "$PROJECT_ID" --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" --command node \
+            --args="dist/src/photo-enhancement-review-link.js,--object-name,$ENHANCED_OBJECT_NAME,--expected-sha256,$ENHANCED_OUTPUT_SHA256,--correlation-id,$REVIEW_CORRELATION_ID" \
+            --env-vars-file /tmp/env.yaml --tasks 1 --max-retries 0 --task-timeout 60s --quiet
+
+      - name: Verify isolated review job
+        shell: bash
+        run: |
+          JOB_JSON="$(gcloud run jobs describe "$REVIEW_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          printf '%s' "$JOB_JSON" | jq -e --arg image "$PINNED_IMAGE" '
+            .spec.template.spec.template.spec.containers[0] as $c |
+            $c.image == $image and $c.args[0] == "dist/src/photo-enhancement-review-link.js" and
+            ([$c.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$c.env[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$c.env[] | select(.name == "META_ADS_WRITE_ENABLED") | .value] == ["false"])
+          ' >/dev/null
+
+      - name: Execute review-link
+        run: gcloud run jobs execute "$REVIEW_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --wait --quiet
+
+      - name: Independently verify output
+        shell: bash
+        run: |
+          set -euo pipefail
+          REVIEW=''
+          for attempt in $(seq 1 12); do
+            LOGS="$(gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${REVIEW_JOB_NAME}\"" --project "$PROJECT_ID" --freshness=10m --limit=100 --order=asc --format=json || printf '[]')"
+            REVIEW="$(printf '%s' "$LOGS" | jq -c --arg cid "$REVIEW_CORRELATION_ID" '
+              def parsed: if ((.jsonPayload?|type)=="object" and .jsonPayload.reviewUrl?!=null) then .jsonPayload elif ((.jsonPayload.message?|type)=="string") then (.jsonPayload.message|fromjson?//empty) elif ((.textPayload?|type)=="string") then (.textPayload|fromjson?//empty) else empty end;
+              [ .[] | parsed | select(.correlationId?==$cid and .reviewUrl?!=null) ] | last // empty')"
+            [ -n "$REVIEW" ] && break
+            sleep 3
+          done
+          test -n "$REVIEW"
+          URL="$(printf '%s' "$REVIEW" | jq -r .reviewUrl)"
+          curl --fail --silent --show-error --location "$URL" --output enhanced-output.jpg
+          unset URL
+          OBSERVED="$(sha256sum enhanced-output.jpg | awk '{print $1}')"
+          test "$OBSERVED" = "$ENHANCED_OUTPUT_SHA256"
+          jq -n --arg contentItemId "$CONTENT_ITEM_ID" --arg sourceAssetId "$SOURCE_ASSET_ID" --arg sourceDriveFileId "$SOURCE_DRIVE_FILE_ID" --arg sourceSha256 "$SOURCE_EVIDENCE_SHA256" --arg expectedSha256 "$ENHANCED_OUTPUT_SHA256" --arg observedSha256 "$OBSERVED" --arg pinnedImage "$PINNED_IMAGE" '{contentItemId:$contentItemId,sourceAssetId:$sourceAssetId,sourceDriveFileId:$sourceDriveFileId,sourceSha256:$sourceSha256,expectedSha256:$expectedSha256,observedSha256:$observedSha256,pinnedImage:$pinnedImage,verification:"EPHEMERAL_RUNTIME_SIGNED_URL_INDEPENDENT_CI_READBACK",match:true,externalWritesEnabled:false}' > readback-evidence.json
+
+      - name: Upload durable repair evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: enhancement-SUN-0289-feed-20260903-20260909-v1-repair
+          path: |
+            source-original.bin
+            enhanced-output.jpg
+            enhancement-evidence.json
+            readback-evidence.json
+          if-no-files-found: error
+          retention-days: 30
