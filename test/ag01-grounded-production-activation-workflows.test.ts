@@ -23,6 +23,10 @@ describe('grounded production activation workflows', () => {
   it('keeps AG-01 private, zero-traffic first and provider-write free', () => {
     expect(ag01).toContain('AG01_GROUNDED_RUNTIME_ACTIVATION=AUTHORIZED');
     expect(ag01).toContain('DIRECT_PROVIDER_WRITE_AUTHORIZED=false');
+    expect(ag01).toContain('INSTAGRAM_PUBLICATION_WRITES_ENABLED=false');
+    expect(ag01).toContain(
+      'select(.name=="INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value',
+    );
     expect(ag01).toContain('EXTERNAL_BUSINESS_SIDE_EFFECTS_AUTHORIZED=false');
     expect(ag01).toContain('--no-traffic --no-allow-unauthenticated');
     expect(ag01).toContain('/v1/knowledge/answer');
