@@ -17,12 +17,13 @@ describe('runtime container governance assets', () => {
     expect(orchestratorDockerfile).toContain('COPY control ./control');
   });
 
-  it('binds provider-validation exact-head evidence only when direct Instagram writes are enabled', () => {
+  it('loads provider-validation evidence only when direct Instagram writes are enabled', () => {
     expect(server).toContain(
-      'instagramDirectPublicationEnabled && releaseSha ? releaseSha : undefined',
+      'const capabilityValidationEvidenceManifest = instagramDirectPublicationEnabled',
     );
+    expect(server).toContain("...(releaseSha ? { exactHeadSha: releaseSha } : {})");
     expect(server).toContain(
-      'publicationEvidenceExactHeadSha ?? capabilityValidationEvidenceManifest.exactHeadSha',
+      'instagramPublicationValidationEvidence: capabilityValidationEvidenceManifest?.validations ?? []',
     );
   });
 
