@@ -126,9 +126,11 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
     : undefined;
   const instagramDirectPublicationEnabled = directPublicationRuntimeConfigured(config);
   const releaseSha = env.TOCA_RELEASE_SHA?.trim();
-  const capabilityValidationEvidenceManifest = loadCapabilityValidationEvidenceManifest({
-    ...(releaseSha ? { exactHeadSha: releaseSha } : {}),
-  });
+  const capabilityValidationEvidenceManifest = instagramDirectPublicationEnabled
+    ? loadCapabilityValidationEvidenceManifest({
+        ...(releaseSha ? { exactHeadSha: releaseSha } : {}),
+      })
+    : undefined;
   const googleAdsOauthCredentialRefs = [
     config.GOOGLE_ADS_OAUTH_CLIENT_ID_ENV_KEY,
     config.GOOGLE_ADS_OAUTH_CLIENT_SECRET_ENV_KEY,
@@ -146,8 +148,12 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const registry = createToolRegistry({
     instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
     instagramPublicationWritesEnabled: instagramDirectPublicationEnabled,
-    instagramPublicationValidationEvidence: capabilityValidationEvidenceManifest.validations,
-    exactHeadSha: releaseSha ?? capabilityValidationEvidenceManifest.exactHeadSha,
+    ...(capabilityValidationEvidenceManifest
+      ? {
+          instagramPublicationValidationEvidence: capabilityValidationEvidenceManifest.validations,
+          exactHeadSha: capabilityValidationEvidenceManifest.exactHeadSha,
+        }
+      : {}),
     metaAdsReadsEnabled: config.META_ADS_READ_ENABLED,
     metaAdsWritesEnabled: config.META_ADS_WRITE_ENABLED,
     paidMediaDecisionEnabled: true,
