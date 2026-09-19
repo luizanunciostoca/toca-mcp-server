@@ -148,8 +148,12 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
   const registry = createToolRegistry({
     instagramReadsEnabled: config.INSTAGRAM_READ_ENABLED,
     instagramPublicationWritesEnabled: instagramDirectPublicationEnabled,
-    instagramPublicationValidationEvidence: capabilityValidationEvidenceManifest?.validations ?? [],
-    exactHeadSha: capabilityValidationEvidenceManifest?.exactHeadSha,
+    ...(capabilityValidationEvidenceManifest
+      ? {
+          instagramPublicationValidationEvidence: capabilityValidationEvidenceManifest.validations,
+          exactHeadSha: capabilityValidationEvidenceManifest.exactHeadSha,
+        }
+      : {}),
     metaAdsReadsEnabled: config.META_ADS_READ_ENABLED,
     metaAdsWritesEnabled: config.META_ADS_WRITE_ENABLED,
     paidMediaDecisionEnabled: true,
