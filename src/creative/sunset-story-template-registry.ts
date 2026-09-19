@@ -33,7 +33,9 @@ export type SunsetStoryIntent =
   | 'DRINKS'
   | 'SCENERY'
   | 'LIFESTYLE'
-  | 'SOCIAL_MEMORY';
+  | 'SOCIAL_MEMORY'
+  | 'AMBIENCE'
+  | 'MUSIC';
 
 export interface SunsetStoryTemplateProfile {
   readonly templateId: SunsetStoryTemplateId;
@@ -100,7 +102,7 @@ export const SUNSET_STORY_TEMPLATE_REGISTRY: readonly SunsetStoryTemplateProfile
   {
     templateId: 'SUNSET_TEMPLATE_MASTER_V4',
     templateClass: 'SUNSET_DRINKS_EXPERIENCE',
-    preferredScenes: ['DRINKS', 'LIFESTYLE'],
+    preferredScenes: ['DRINKS', 'LIFESTYLE', 'SOCIAL_EXPERIENCE'],
     preferredSubjectKinds: ['DRINK', 'PERSON', 'OTHER'],
     preferredSubjectZones: ['TOP_CENTER', 'TOP_RIGHT', 'CENTER'],
     preferredTextSpaceZones: ['BOTTOM_CENTER'],
@@ -128,11 +130,17 @@ export const SUNSET_STORY_TEMPLATE_REGISTRY: readonly SunsetStoryTemplateProfile
   {
     templateId: 'SUNSET_TEMPLATE_MASTER_V6',
     templateClass: 'SUNSET_SOCIAL_EXPERIENCE',
-    preferredScenes: ['SOCIAL_EXPERIENCE', 'PEOPLE_GOLDEN_HOUR', 'LIFESTYLE'],
-    preferredSubjectKinds: ['COUPLE', 'GROUP', 'PERSON'],
+    preferredScenes: [
+      'VENUE_AMBIENCE',
+      'ARCHITECTURE',
+      'SOCIAL_EXPERIENCE',
+      'PEOPLE_GOLDEN_HOUR',
+      'LIFESTYLE',
+    ],
+    preferredSubjectKinds: ['ARCHITECTURE', 'SCENERY', 'COUPLE', 'GROUP', 'PERSON'],
     preferredSubjectZones: ['CENTER_RIGHT', 'CENTER', 'BOTTOM_RIGHT'],
     preferredTextSpaceZones: ['TOP_LEFT', 'BOTTOM_CENTER'],
-    intents: ['SOCIAL_MEMORY', 'EXPERIENCE', 'TICKET_CONVERSION'],
+    intents: ['AMBIENCE', 'SOCIAL_MEMORY', 'EXPERIENCE', 'TICKET_CONVERSION'],
     protectedRegions: [
       rect(0.06, 0.08, 0.52, 0.13),
       rect(0.12, 0.55, 0.76, 0.21),
@@ -143,12 +151,12 @@ export const SUNSET_STORY_TEMPLATE_REGISTRY: readonly SunsetStoryTemplateProfile
   },
   {
     templateId: 'SUNSET_TEMPLATE_MASTER_V7',
-    templateClass: 'SUNSET_SOCIAL_EXPERIENCE',
-    preferredScenes: ['SOCIAL_EXPERIENCE', 'PEOPLE_GOLDEN_HOUR', 'LIFESTYLE'],
-    preferredSubjectKinds: ['COUPLE', 'GROUP', 'PERSON'],
-    preferredSubjectZones: ['CENTER_RIGHT', 'CENTER', 'BOTTOM_RIGHT'],
-    preferredTextSpaceZones: ['TOP_LEFT'],
-    intents: ['SOCIAL_MEMORY', 'EXPERIENCE', 'TICKET_CONVERSION'],
+    templateClass: 'SUNSET_VIEW_SCENERY',
+    preferredScenes: ['SEA_VIEW', 'SCENERY', 'VENUE_AMBIENCE', 'ARCHITECTURE'],
+    preferredSubjectKinds: ['SCENERY', 'ARCHITECTURE', 'OTHER'],
+    preferredSubjectZones: ['TOP_CENTER', 'TOP_RIGHT', 'CENTER_RIGHT'],
+    preferredTextSpaceZones: ['TOP_LEFT', 'CENTER_LEFT'],
+    intents: ['SCENERY', 'AMBIENCE', 'EXPERIENCE'],
     protectedRegions: [
       rect(0.06, 0.14, 0.5, 0.16),
       rect(0.12, 0.4, 0.76, 0.24),
@@ -160,11 +168,17 @@ export const SUNSET_STORY_TEMPLATE_REGISTRY: readonly SunsetStoryTemplateProfile
   {
     templateId: 'SUNSET_TEMPLATE_MASTER_V8',
     templateClass: 'SUNSET_HERO_LIFESTYLE',
-    preferredScenes: ['PEOPLE_GOLDEN_HOUR', 'LIFESTYLE', 'SEA_VIEW'],
-    preferredSubjectKinds: ['PERSON', 'COUPLE', 'SCENERY'],
-    preferredSubjectZones: ['CENTER_RIGHT', 'BOTTOM_RIGHT'],
+    preferredScenes: [
+      'MUSIC_DJ',
+      'SOCIAL_EXPERIENCE',
+      'PEOPLE_GOLDEN_HOUR',
+      'LIFESTYLE',
+      'SEA_VIEW',
+    ],
+    preferredSubjectKinds: ['DJ_GEAR', 'PERSON', 'GROUP', 'COUPLE', 'SCENERY'],
+    preferredSubjectZones: ['CENTER_RIGHT', 'BOTTOM_RIGHT', 'CENTER'],
     preferredTextSpaceZones: ['TOP_CENTER', 'CENTER_LEFT'],
-    intents: ['TICKET_CONVERSION', 'LIFESTYLE', 'SCENERY'],
+    intents: ['MUSIC', 'TICKET_CONVERSION', 'LIFESTYLE', 'EXPERIENCE', 'SCENERY'],
     protectedRegions: [
       rect(0.1, 0.15, 0.8, 0.2),
       rect(0.07, 0.42, 0.5, 0.13),
@@ -176,11 +190,11 @@ export const SUNSET_STORY_TEMPLATE_REGISTRY: readonly SunsetStoryTemplateProfile
   {
     templateId: 'SUNSET_TEMPLATE_MASTER_V9',
     templateClass: 'SUNSET_VIEW_SCENERY',
-    preferredScenes: ['SEA_VIEW', 'SCENERY', 'SOCIAL_EXPERIENCE'],
-    preferredSubjectKinds: ['SCENERY', 'GROUP', 'COUPLE', 'OTHER'],
+    preferredScenes: ['SEA_VIEW', 'SCENERY', 'VENUE_AMBIENCE', 'SOCIAL_EXPERIENCE'],
+    preferredSubjectKinds: ['SCENERY', 'ARCHITECTURE', 'GROUP', 'COUPLE', 'OTHER'],
     preferredSubjectZones: ['TOP_CENTER', 'TOP_RIGHT', 'TOP_LEFT'],
     preferredTextSpaceZones: ['CENTER', 'CENTER_LEFT', 'CENTER_RIGHT'],
-    intents: ['SCENERY', 'EXPERIENCE', 'SOCIAL_MEMORY'],
+    intents: ['SCENERY', 'AMBIENCE', 'EXPERIENCE', 'SOCIAL_MEMORY'],
     protectedRegions: [rect(0.1, 0.39, 0.8, 0.28), rect(0.13, 0.82, 0.74, 0.11)],
     maxPrimarySubjectOverlap: 0.16,
     runtimeEligible: false,

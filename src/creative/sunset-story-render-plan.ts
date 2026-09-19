@@ -1,5 +1,6 @@
 import type { NormalizedRect, SunsetStoryImageProfile } from './sunset-story-image-profile.js';
 import type { SunsetStoryCropPlan } from './sunset-story-crop-planner.js';
+import { validateSunsetStoryOutputSafety } from './sunset-story-output-safety.js';
 import type { SunsetStoryIntent, SunsetStoryTemplateId } from './sunset-story-template-registry.js';
 import type {
   SunsetStoryCanonicalAssetElement,
@@ -303,6 +304,7 @@ export function validateSunsetStoryAiRenderPlan(
   validateAssets(plan.assets, contract.assets);
   validateDarkening(plan.localDarkening);
   if (editorOnlyLeak(plan, contract)) throw new Error('SUNSET_RENDER_EDITOR_GUIDANCE_LEAK');
+  validateSunsetStoryOutputSafety(plan, profile, cropPlan);
 
   return plan;
 }
