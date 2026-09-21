@@ -18,14 +18,18 @@ const campaign = asRecord(
     fields: 'id,name,objective,status,effective_status',
   }),
 );
-if (String(campaign.id ?? '') !== CAMPAIGN_ID) throw new Error('META_ADS_READ_CAMPAIGN_MISMATCH');
+if (String(campaign.id ?? '') !== CAMPAIGN_ID) {
+  throw new Error('META_ADS_READ_CAMPAIGN_MISMATCH');
+}
 
 const account = asRecord(
   await api.get(`act_${ACCOUNT_ID}`, {
     fields: 'id,name,currency,account_status',
   }),
 );
-if (!String(account.id ?? '').endsWith(ACCOUNT_ID)) throw new Error('META_ADS_READ_ACCOUNT_MISMATCH');
+if (!String(account.id ?? '').endsWith(ACCOUNT_ID)) {
+  throw new Error('META_ADS_READ_ACCOUNT_MISMATCH');
+}
 
 const common = {
   time_range: JSON.stringify({ since: SINCE, until: UNTIL }),
