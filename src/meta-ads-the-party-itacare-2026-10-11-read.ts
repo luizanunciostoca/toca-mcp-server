@@ -67,15 +67,9 @@ const adSets = await readCollection(`${CAMPAIGN_ID}/adsets`, {
 });
 
 const ads = await readCollection(`${CAMPAIGN_ID}/ads`, {
-  fields: [
-    'id',
-    'name',
-    'adset_id',
-    'campaign_id',
-    'status',
-    'effective_status',
-    'creative',
-  ].join(','),
+  fields: ['id', 'name', 'adset_id', 'campaign_id', 'status', 'effective_status', 'creative'].join(
+    ',',
+  ),
   limit: '500',
 });
 
@@ -91,13 +85,7 @@ const creatives: Record<string, unknown>[] = [];
 
 for (const creativeId of creativeIds) {
   const creativeResponse = await api.get(creativeId, {
-    fields: [
-      'id',
-      'name',
-      'object_story_spec',
-      'asset_feed_spec',
-      'thumbnail_url',
-    ].join(','),
+    fields: ['id', 'name', 'object_story_spec', 'asset_feed_spec', 'thumbnail_url'].join(','),
   });
   creatives.push(asRecord(creativeResponse));
 }
@@ -119,9 +107,7 @@ const output = {
   creatives,
 };
 
-console.log(
-  `META_ADS_THE_PARTY_ITACARE_1011_READ_RESULT=${JSON.stringify(output)}`,
-);
+console.log(`META_ADS_THE_PARTY_ITACARE_1011_READ_RESULT=${JSON.stringify(output)}`);
 
 async function readCollection(
   path: string,
@@ -159,9 +145,7 @@ function inferBudgetMode(
   return 'UNKNOWN';
 }
 
-function sanitizeAdSet(
-  value: Record<string, unknown>,
-): Record<string, unknown> {
+function sanitizeAdSet(value: Record<string, unknown>): Record<string, unknown> {
   const targeting = asRecord(value.targeting);
 
   return {
