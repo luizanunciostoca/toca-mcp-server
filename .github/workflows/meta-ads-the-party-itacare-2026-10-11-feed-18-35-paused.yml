@@ -1,0 +1,18 @@
+name: Meta Ads The Party Itacare 2026-10-11 Feed 18-35 Create Paused
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/meta-ads-the-party-itacare-2026-10-11-feed-18-35-paused.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Placeholder
+        run: echo META_ADS_ITACARE_FEED_WORKFLOW_PLACEHOLDER=1
