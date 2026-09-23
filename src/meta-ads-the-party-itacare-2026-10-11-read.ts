@@ -13,11 +13,11 @@ const accountResponse = await api.get(`act_${ACCOUNT_ID}`, {
 });
 const account = asRecord(accountResponse);
 
-if (!String(account.id ?? '').endsWith(ACCOUNT_ID)) {
+if (!scalarString(account.id).endsWith(ACCOUNT_ID)) {
   throw new Error('META_ADS_ITACARE_READ_ACCOUNT_MISMATCH');
 }
 
-if (String(account.currency ?? '') !== EXPECTED_CURRENCY) {
+if (scalarString(account.currency) !== EXPECTED_CURRENCY) {
   throw new Error('META_ADS_ITACARE_READ_CURRENCY_MISMATCH');
 }
 
@@ -39,7 +39,7 @@ const campaignResponse = await api.get(CAMPAIGN_ID, {
 });
 const campaign = asRecord(campaignResponse);
 
-if (String(campaign.id ?? '') !== CAMPAIGN_ID) {
+if (scalarString(campaign.id) !== CAMPAIGN_ID) {
   throw new Error('META_ADS_ITACARE_READ_CAMPAIGN_MISMATCH');
 }
 
@@ -77,7 +77,7 @@ const creativeIds = new Set<string>();
 
 for (const ad of ads) {
   const creative = asRecord(ad.creative);
-  const creativeId = String(creative.id ?? '');
+  const creativeId = scalarString(creative.id);
   if (creativeId) creativeIds.add(creativeId);
 }
 
@@ -166,6 +166,12 @@ function sanitizeAdSet(value: Record<string, unknown>): Record<string, unknown> 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
+}
+
+function scalarString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return '';
 }
 
 function finiteNumber(value: unknown): number | undefined {
