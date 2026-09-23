@@ -76,42 +76,75 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gcloud run jobs deploy "$JOB_NAME"             --image "$IMAGE"             --project "$GCP_PROJECT_ID"             --region "$GCP_REGION"             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"             --command node             --args dist/src/meta-ads-the-party-itacare-2026-10-11-read.js             --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~META_ADS_READ_ENABLED=true~META_ADS_WRITE_ENABLED=false~META_APP_ID=$META_APP_ID~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=UNUSED_META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$META_REDIRECT_URI~META_REQUESTED_SCOPES=ads_read,ads_management,business_management~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$GCP_PROJECT_ID"             --tasks 1 --max-retries 0 --task-timeout 180s --quiet
+          gcloud run jobs deploy "$JOB_NAME"             --image "$IMAGE"             --project "$GCP_PROJECT_ID"             --region "$GCP_REGION"             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"             --command node             --args dist/src/meta-ads-the-party-itacare-2026-10-11-read.js             --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~META_ADS_READ_ENABLED=true~META_ADS_WRITE_ENABLED=false~META_APP_ID=$META_APP_ID~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=UNUSED_META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$META_REDIRECT_URI~META_REQUESTED_SCOPES=ads_read,ads_management,business_management~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$GCP_PROJECT_ID"             --tasks 1             --max-retries 0             --task-timeout 180s             --quiet
 
-      - name: Execute provider read and capture sanitized evidence
+      - name: Execute provider read
+        id: execute
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          gcloud run jobs execute "$JOB_NAME"             --project "$GCP_PROJECT_ID"             --region "$GCP_REGION"             --wait             --quiet
+
+      - name: Capture sanitized provider evidence and diagnostics
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
-          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
-          RESULT_JSON=''
-          for attempt in $(seq 1 12); do
-            LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_THE_PARTY_ITACARE_1011_READ_RESULT=\"" --project "$GCP_PROJECT_ID" --freshness=15m --limit=50 --order=desc --format='value(textPayload)' | grep 'META_ADS_THE_PARTY_ITACARE_1011_READ_RESULT=' | head -n1 || true)"
-            if [ -n "$LINE" ]; then RESULT_JSON="${LINE#META_ADS_THE_PARTY_ITACARE_1011_READ_RESULT=}"; break; fi
-            sleep 5
-          done
-          test -n "$RESULT_JSON"
-          printf '%s' "$RESULT_JSON" | jq -e '
-            .schemaVersion == 1 and
-            .readOnly == true and
-            .providerMutationExecuted == false and
-            (.account.id | endswith("311793958882290")) and
-            .account.currency == "BRL" and
-            .campaign.id == "52622846509265" and
-            (.budgetMode == "CBO" or .budgetMode == "ABO" or .budgetMode == "UNKNOWN")
-          ' >/dev/null
-          printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-the-party-itacare-1011-read.json
+          gcloud logging read             "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}"             --project "$GCP_PROJECT_ID"             --freshness=20m             --limit=200             --order=asc             --format=json > /tmp/provider-logs.json
+
+          jq '
+            map({
+              timestamp,
+              severity,
+              textPayload,
+              jsonPayload: (
+                if .jsonPayload then
+                  (.jsonPayload | del(.access_token, .accessToken, .token, .authorization))
+                else null end
+              )
+            })
+          ' /tmp/provider-logs.json             | sed -E 's/(EA[A-Za-z0-9]{20,})/[REDACTED_META_TOKEN]/g'             > meta-ads-the-party-itacare-1011-diagnostics.json
+
+          RESULT_LINE="$(
+            jq -r '.[].textPayload // empty' /tmp/provider-logs.json               | grep 'META_ADS_THE_PARTY_ITACARE_1011_READ_RESULT='               | tail -n1 || true
+          )"
+
+          if [ -n "$RESULT_LINE" ]; then
+            RESULT_JSON="${RESULT_LINE#META_ADS_THE_PARTY_ITACARE_1011_READ_RESULT=}"
+            printf '%s' "$RESULT_JSON" | jq -e '
+              .schemaVersion == 1 and
+              .readOnly == true and
+              .providerMutationExecuted == false and
+              (.account.id | endswith("311793958882290")) and
+              .account.currency == "BRL" and
+              .campaign.id == "52622846509265" and
+              (.budgetMode == "CBO" or .budgetMode == "ABO" or .budgetMode == "UNKNOWN")
+            ' >/dev/null
+            printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-the-party-itacare-1011-read.json
+          fi
+
+          if [ "${{ steps.execute.outcome }}" != "success" ]; then
+            echo "META_ADS_ITACARE_PROVIDER_EXECUTION_FAILED=1"
+            exit 1
+          fi
+
+          test -s meta-ads-the-party-itacare-1011-read.json
 
       - name: Upload sanitized read evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: meta-ads-the-party-itacare-1011-read-${{ github.run_id }}-${{ github.run_attempt }}
-          path: meta-ads-the-party-itacare-1011-read.json
-          if-no-files-found: error
+          path: |
+            meta-ads-the-party-itacare-1011-read.json
+            meta-ads-the-party-itacare-1011-diagnostics.json
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Remove temporary read-only job
         if: always()
         run: |
           if [ -n "${JOB_NAME:-}" ]; then
-            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet || true
+            gcloud run jobs delete "$JOB_NAME"               --project "$GCP_PROJECT_ID"               --region "$GCP_REGION"               --quiet || true
           fi
