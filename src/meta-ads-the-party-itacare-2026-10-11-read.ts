@@ -8,19 +8,31 @@ const EXPECTED_CURRENCY = 'BRL';
 const config = loadConfig(process.env);
 const api = createMetaPublicationApiClient(config);
 
-const account = asRecord(await api.get(`act_${ACCOUNT_ID}`, {
-  fields: 'id,name,currency,account_status',
-}));
-if (!String(account.id ?? '').endsWith(ACCOUNT_ID)) throw new Error('META_ADS_ITACARE_READ_ACCOUNT_MISMATCH');
-if (String(account.currency ?? '') !== EXPECTED_CURRENCY) throw new Error('META_ADS_ITACARE_READ_CURRENCY_MISMATCH');
+const account = asRecord(
+  await api.get(`act_${ACCOUNT_ID}`, {
+    fields: 'id,name,currency,account_status',
+  }),
+);
+if (!String(account.id ?? '').endsWith(ACCOUNT_ID)) {
+  throw new Error('META_ADS_ITACARE_READ_ACCOUNT_MISMATCH');
+}
+if (String(account.currency ?? '') !== EXPECTED_CURRENCY) {
+  throw new Error('META_ADS_ITACARE_READ_CURRENCY_MISMATCH');
+}
 
-const campaign = asRecord(await api.get(CAMPAIGN_ID, {
-  fields: 'id,name,objective,status,effective_status,daily_budget,lifetime_budget,budget_remaining,bid_strategy,buying_type,start_time,stop_time',
-}));
-if (String(campaign.id ?? '') !== CAMPAIGN_ID) throw new Error('META_ADS_ITACARE_READ_CAMPAIGN_MISMATCH');
+const campaign = asRecord(
+  await api.get(CAMPAIGN_ID, {
+    fields:
+      'id,name,objective,status,effective_status,daily_budget,lifetime_budget,budget_remaining,bid_strategy,buying_type,start_time,stop_time',
+  }),
+);
+if (String(campaign.id ?? '') !== CAMPAIGN_ID) {
+  throw new Error('META_ADS_ITACARE_READ_CAMPAIGN_MISMATCH');
+}
 
 const adSets = await readCollection(`${CAMPAIGN_ID}/adsets`, {
-  fields: 'id,name,campaign_id,status,effective_status,daily_budget,lifetime_budget,budget_remaining,bid_strategy,billing_event,optimization_goal,start_time,end_time,targeting,promoted_object,destination_type,attribution_spec',
+  fields:
+    'id,name,campaign_id,status,effective_status,daily_budget,lifetime_budget,budget_remaining,bid_strategy,billing_event,optimization_goal,start_time,end_time,targeting,promoted_object,destination_type,attribution_spec',
   limit: '200',
 });
 
@@ -29,12 +41,22 @@ const ads = await readCollection(`${CAMPAIGN_ID}/ads`, {
   limit: '500',
 });
 
-const creativeIds = [...new Set(ads.map((ad) => String(asRecord(ad.creative).id ?? '')).filter(Boolean))];
+const creativeIds = [
+  ...new Set(
+    ads
+      .map((ad) => String(asRecord(ad.creative).id ?? ''))
+      .filter(Boolean),
+  ),
+];
 const creatives: Record<string, unknown>[] = [];
 for (const creativeId of creativeIds) {
-  creatives.push(asRecord(await api.get(creativeId, {
-    fields: 'id,name,object_story_spec,asset_feed_spec,thumbnail_url',
-  })));
+  creatives.push(
+    asRecord(
+      await api.get(creativeId, {
+        fields: 'id,name,object_story_spec,asset_feed_spec,thumbnail_url',
+      }),
+    ),
+  );
 }
 
 const output = {
@@ -54,18 +76,31 @@ const output = {
   creatives,
 };
 
-console.log(`META_ADS_THE_PARTY_ITACARE_1011_READ_RESULT=${JSON.stringify(output)}`);
+console.log(
+  `META_ADS_THE_PARTY_ITACARE_1011_READ_RESULT=${JSON.stringify(output)}`,
+);
 
 async function readCollection(path: string, params: Record<string, string>) {
   const response = asRecord(await api.get(path, params));
   const data = Array.isArray(response.data) ? response.data.map(asRecord) : [];
-  if (data.length >= Number(params.limit ?? 100)) throw new Error('META_ADS_ITACARE_READ_PAGINATION_REQUIRED');
+  if (data.length >= Number(params.limit ?? 100)) {
+    throw new Error('META_ADS_ITACARE_READ_PAGINATION_REQUIRED');
+  }
   return data;
 }
 
-function inferBudgetMode(campaignValue: Record<string, unknown>, sets: Record<string, unknown>[]) {
-  const campaignBudget = finiteNumber(campaignValue.daily_budget) ?? finiteNumber(campaignValue.lifetime_budget);
-  const setsWithBudget = sets.filter((set) => finiteNumber(set.daily_budget) != null || finiteNumber(set.lifetime_budget) != null).length;
+function inferBudgetMode(
+  campaignValue: Record<string, unknown>,
+  sets: Record<string, unknown>[],
+) {
+  const campaignBudget =
+    finiteNumber(campaignValue.daily_budget) ??
+    finiteNumber(campaignValue.lifetime_budget);
+  const setsWithBudget = sets.filter(
+    (set) =>
+      finiteNumber(set.daily_budget) != null ||
+      finiteNumber(set.lifetime_budget) != null,
+  ).length;
   if (campaignBudget != null && campaignBudget > 0) return 'CBO';
   if (setsWithBudget > 0) return 'ABO';
   return 'UNKNOWN';
