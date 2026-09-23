@@ -82,7 +82,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          set +e
           gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          EXECUTION_RC=$?
+          set -e
+          if [ "$EXECUTION_RC" -ne 0 ]; then
+            echo "META_ADS_ITACARE_READ_EXECUTION_FAILED=$EXECUTION_RC"
+            gcloud logging read \
+              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" \
+              --project "$GCP_PROJECT_ID" \
+              --freshness=15m \
+              --limit=100 \
+              --order=desc \
+              --format='value(textPayload)' \
+              | grep -E 'META_|Error|ERROR|error|failed|FAILED|Exception' \
+              | sed -E 's/(access[_-]?token|token|secret)=?[^ ]*/\\1=[REDACTED]/Ig' \
+              | head -n 80 || true
+            exit "$EXECUTION_RC"
+          fi
           RESULT_JSON=''
           for attempt in $(seq 1 12); do
             LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_THE_PARTY_ITACARE_1011_READ_RESULT=\"" --project "$GCP_PROJECT_ID" --freshness=15m --limit=50 --order=desc --format='value(textPayload)' | grep 'META_ADS_THE_PARTY_ITACARE_1011_READ_RESULT=' | head -n1 || true)"
