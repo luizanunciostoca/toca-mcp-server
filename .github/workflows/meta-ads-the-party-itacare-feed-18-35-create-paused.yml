@@ -172,7 +172,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          set +e
           gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          EXECUTE_RC=$?
+          set -e
+          if [ "$EXECUTE_RC" -ne 0 ]; then
+            echo "META_ADS_ITACARE_FEED_18_35_EXECUTE_FAILED=$EXECUTE_RC"
+            gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" --project "$GCP_PROJECT_ID" --freshness=15m --limit=160 --order=desc --format='value(textPayload)' | grep -E 'META_ADS_ITACARE_FEED_18_35|META_HTTP_|META_CODE_|META_REASON_|Error|Exception|FAILED' | head -n 140 || true
+            exit "$EXECUTE_RC"
+          fi
           LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_ITACARE_FEED_18_35_EXECUTE_RESULT=\"" --project "$GCP_PROJECT_ID" --freshness=15m --limit=100 --order=desc --format='value(textPayload)' | grep 'META_ADS_ITACARE_FEED_18_35_EXECUTE_RESULT=' | head -n1)"
           RESULT_JSON="${LINE#META_ADS_ITACARE_FEED_18_35_EXECUTE_RESULT=}"
           printf '%s' "$RESULT_JSON" | jq -e '
