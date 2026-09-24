@@ -1,4 +1,5 @@
 name: Meta Ads The Party Itacare Feed 18-35 Create Paused
+# Governance trigger after canonical formatting
 
 on:
   push:
