@@ -1,0 +1,35 @@
+name: TEMP Format Meta Ads Itacare Feed 18-35
+
+on:
+  push:
+    branches:
+      - wave/meta-ads-itacare-feed-18-35-create-paused-20260923
+    paths:
+      - 'src/meta-ads-the-party-itacare-2026-10-11-feed-18-35-create-paused.ts'
+      - '.github/workflows/temp-format-meta-ads-itacare-feed-18-35.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prettier --write src/meta-ads-the-party-itacare-2026-10-11-feed-18-35-create-paused.ts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: formatted-meta-ads-itacare-feed-18-35
+          path: src/meta-ads-the-party-itacare-2026-10-11-feed-18-35-create-paused.ts
+          if-no-files-found: error
+          retention-days: 1
