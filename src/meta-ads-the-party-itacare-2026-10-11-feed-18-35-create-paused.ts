@@ -5,6 +5,8 @@ import { loadConfig } from './config.js';
 import { MetaAdsControlledGraphProvider } from './providers/meta-ads/meta-ads-controlled-graph-provider.js';
 import { createMetaPublicationApiClient } from './providers/meta/meta-publication-client.js';
 
+// Governed validation retrigger after canonical formatting.
+
 const ACCOUNT_ID = '311793958882290';
 const CAMPAIGN_ID = '52622846509265';
 const PAGE_ID = '306103746115875';
