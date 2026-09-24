@@ -638,5 +638,9 @@ function finiteNumber(value: unknown): number | undefined {
 
 function normalizeRunnerError(error: unknown): string {
   const message = error instanceof Error ? error.message : 'UNKNOWN_ERROR';
-  return message.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500);
+  return message
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 500);
 }
