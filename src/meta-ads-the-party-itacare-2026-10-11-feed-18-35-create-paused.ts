@@ -126,8 +126,7 @@ function buildDescriptor(): Descriptor {
       messages: {
         BRAND:
           'Itacaré tem noites especiais. E tem noites que viram história. Dia 11 de outubro, a Praia da Ribeira recebe Illusionize + Brisotti para a The Party of Itacaré. Não é qualquer festa. É A festa. Garanta seu ingresso.',
-        DATE:
-          '11 DE OUTUBRO. Salva essa data. Illusionize + Brisotti na Praia da Ribeira. The Party of Itacaré. Garanta seu ingresso.',
+        DATE: '11 DE OUTUBRO. Salva essa data. Illusionize + Brisotti na Praia da Ribeira. The Party of Itacaré. Garanta seu ingresso.',
         LINEUP:
           'Dois nomes. Um beach club. Uma noite em Itacaré. ILLUSIONIZE + BRISOTTI, dia 11 de outubro, na Praia da Ribeira. Garanta seu ingresso.',
         ILLUSIONIZE:
@@ -147,8 +146,7 @@ function buildDescriptor(): Descriptor {
       messages: {
         BRAND:
           'Ilhéus, no dia 11 de outubro o destino é Itacaré. Praia da Ribeira, beach club, Illusionize + Brisotti e uma noite inteira para sair da rotina. Não é qualquer festa. É A festa. Garanta seu ingresso.',
-        DATE:
-          '11 de outubro tem destino: Itacaré. Illusionize + Brisotti na Praia da Ribeira. Chame sua turma de Ilhéus e programe a viagem. Ingressos disponíveis.',
+        DATE: '11 de outubro tem destino: Itacaré. Illusionize + Brisotti na Praia da Ribeira. Chame sua turma de Ilhéus e programe a viagem. Ingressos disponíveis.',
         LINEUP:
           'Uma noite dessas está mais perto do que parece. Saia de Ilhéus para viver Illusionize + Brisotti em um beach club na Praia da Ribeira, em Itacaré. Garanta seu ingresso.',
         ILLUSIONIZE:
@@ -168,8 +166,7 @@ function buildDescriptor(): Descriptor {
       messages: {
         BRAND:
           'Itabuna → Itacaré. Já pode colocar essa rota nos planos. Illusionize + Brisotti, Praia da Ribeira e uma noite inteira no beach club. Dia 11 de outubro. Não é qualquer festa. É A festa.',
-        DATE:
-          '11/10: Itabuna → Itacaré. Illusionize + Brisotti. Praia da Ribeira. The Party. Garanta seu ingresso.',
+        DATE: '11/10: Itabuna → Itacaré. Illusionize + Brisotti. Praia da Ribeira. The Party. Garanta seu ingresso.',
         LINEUP:
           'Itabuna, prepare a turma. Illusionize + Brisotti esperam por você em Itacaré no dia 11 de outubro. Praia, beach club e pista até a madrugada. Garanta seu ingresso.',
         ILLUSIONIZE:
@@ -189,8 +186,7 @@ function buildDescriptor(): Descriptor {
       messages: {
         BRAND:
           'Vitória da Conquista, dia 11 de outubro o destino é Itacaré. Praia da Ribeira, Illusionize + Brisotti e uma noite inteira para viver a The Party. Não é qualquer festa. É A festa.',
-        DATE:
-          '11 de outubro tem destino: Itacaré. Vitória da Conquista, programe a viagem e chame sua turma para Illusionize + Brisotti na Praia da Ribeira.',
+        DATE: '11 de outubro tem destino: Itacaré. Vitória da Conquista, programe a viagem e chame sua turma para Illusionize + Brisotti na Praia da Ribeira.',
         LINEUP:
           'Vitória da Conquista, prepare a rota para Itacaré. Illusionize + Brisotti, Praia da Ribeira e uma noite inteira de The Party. Garanta seu ingresso.',
         ILLUSIONIZE:
@@ -258,7 +254,9 @@ async function executePaused(): Promise<Readonly<Record<string, unknown>>> {
   assertExactApproval();
   const approvedSha256 = requiredEnv('META_ADS_ITACARE_FEED_18_35_APPROVED_SHA256');
   const descriptorBase64 = requiredEnv('META_ADS_ITACARE_FEED_18_35_DESCRIPTOR_B64');
-  const supplied = JSON.parse(Buffer.from(descriptorBase64, 'base64').toString('utf8')) as Descriptor;
+  const supplied = JSON.parse(
+    Buffer.from(descriptorBase64, 'base64').toString('utf8'),
+  ) as Descriptor;
   assertDescriptor(supplied);
   if (JSON.stringify(supplied) !== JSON.stringify(descriptor)) {
     throw new Error('META_ADS_ITACARE_FEED_18_35_DESCRIPTOR_MISMATCH');
@@ -335,7 +333,12 @@ async function executePaused(): Promise<Readonly<Record<string, unknown>>> {
     }
   }
 
-  const verification = await verifyCreated(createdAdSetIds, createdCreativeIds, createdAdIds, imageHashes);
+  const verification = await verifyCreated(
+    createdAdSetIds,
+    createdCreativeIds,
+    createdAdIds,
+    imageHashes,
+  );
   return {
     status: 'CREATED_PAUSED',
     providerMutationExecuted: true,
@@ -546,7 +549,9 @@ async function verifyCreated(
 
   const verifiedAds: Record<string, unknown>[] = [];
   for (const id of adIds) {
-    const row = asRecord(await api.get(id, { fields: 'id,name,status,effective_status,adset_id,creative' }));
+    const row = asRecord(
+      await api.get(id, { fields: 'id,name,status,effective_status,adset_id,creative' }),
+    );
     if (scalarString(row.status) !== 'PAUSED') {
       throw new Error('META_ADS_ITACARE_FEED_18_35_AD_NOT_PAUSED');
     }
