@@ -140,7 +140,7 @@ jobs:
           set -e
           if [ "$PREPARE_RC" -ne 0 ]; then
             echo "META_ADS_ITACARE_FEED_18_35_PREPARE_FAILED=$PREPARE_RC"
-            gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" --project "$GCP_PROJECT_ID" --freshness=15m --limit=100 --order=desc --format='value(textPayload)' | grep 'META_ADS_ITACARE_FEED_18_35' | head -n 80 || true
+            gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" --project "$GCP_PROJECT_ID" --freshness=15m --limit=120 --order=desc --format='value(textPayload)' | grep -E 'META_ADS_ITACARE_FEED_18_35|Error|ERROR|error|Exception|failed|FAILED' | sed -E 's/(access[_-]?token|token|secret)=?[^ ]*/\\1=[REDACTED]/Ig' | head -n 100 || true
             exit "$PREPARE_RC"
           fi
           LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_ITACARE_FEED_18_35_PREPARE_RESULT=\"" --project "$GCP_PROJECT_ID" --freshness=15m --limit=100 --order=desc --format='value(textPayload)' | grep 'META_ADS_ITACARE_FEED_18_35_PREPARE_RESULT=' | head -n1)"
