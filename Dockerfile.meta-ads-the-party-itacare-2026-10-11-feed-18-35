@@ -1,0 +1,19 @@
+FROM node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS build
+WORKDIR /app
+RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY tsconfig.json ./
+COPY src ./src
+RUN pnpm build
+
+FROM node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --prod --frozen-lockfile
+COPY --from=build /app/dist ./dist
+COPY ops/meta-ads/the-party-itacare-2026-10-11/feed-18-35 ./ops/meta-ads/the-party-itacare-2026-10-11/feed-18-35
+USER node
+CMD ["node", "dist/src/meta-ads-the-party-itacare-2026-10-11-feed-18-35-create-paused.js"]

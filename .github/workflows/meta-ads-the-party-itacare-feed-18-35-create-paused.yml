@@ -121,7 +121,7 @@ jobs:
           JOB_NAME="toca-meta-ads-itacare-feed-18-35-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
           echo "JOB_NAME=$JOB_NAME" >> "$GITHUB_ENV"
-          docker build -t "$IMAGE" .
+          docker build -f Dockerfile.meta-ads-the-party-itacare-2026-10-11-feed-18-35 -t "$IMAGE" .
           docker push "$IMAGE"
 
       - name: Deploy PREPARE read-only job
