@@ -1,0 +1,199 @@
+name: Meta Ads The Party Itacare Feed 18-35 Create Paused
+# Governance trigger after canonical formatting
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/meta-ads-the-party-itacare-feed-18-35-create-paused.yml'
+      - 'src/meta-ads-the-party-itacare-2026-10-11-feed-18-35-create-paused.ts'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: meta-ads-the-party-itacare-feed-18-35-create-paused
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_APP_ID: '2281930145887404'
+  META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+  EXPECTED_APPROVAL: APPROVED_THE_PARTY_ITACARE_FEED_18_35_CREATE_PAUSED_20260923
+  DRIVE_CREATIVE_1_ID: 1HRkEn3M1U-MrgHowCllceBC5kDNvVUhx
+  DRIVE_CREATIVE_2_ID: 1l9nGtL4OJ9VyJtEUZju9eajloOYdqDx5
+  DRIVE_CREATIVE_3_ID: 1mygYM6Lr48LOGEOzomQ5Rgy7EhIiwJ_u
+  DRIVE_CREATIVE_4_ID: 1k1jYcsdpiwzXEtqoLGRUXVZcQbKo1XDl
+  DRIVE_CREATIVE_5_ID: 1wOQgEsBG15nTJW6RcRRWjdC6uSeQP6Sz
+  CREATIVE_1_SHA256: 156d87d1045efacdeaa4e9de17e33a74ab2645b7a49124e25eacd471b0f7ea85
+  CREATIVE_2_SHA256: ea9b7d263906ab62bdae043ab385d5d13e73065cf2e339e7fe44d82b43909693
+  CREATIVE_3_SHA256: 31cf4408c8100026115131b270b54b27487d06eee68f251389abb87f9f2f911e
+  CREATIVE_4_SHA256: fe75d300b3ab86de009a120a1ca8725c4b032defe6c37d7b949cbb6423558b02
+  CREATIVE_5_SHA256: e0d0fad62b05477a49e9efecaa78e9f3b212f44b6af544db8afb9350103b4ae4
+
+jobs:
+  create-paused:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm quality
+
+      - name: Authenticate to Google Cloud and TOCA OS Drive
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Authenticate Docker to Artifact Registry
+        run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+
+      - name: Hydrate and verify approved Feed creatives
+        shell: bash
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          root='ops/meta-ads/the-party-itacare-2026-10-11/feed-18-35'
+          mkdir -p "$root"
+          ids=(
+            "$DRIVE_CREATIVE_1_ID"
+            "$DRIVE_CREATIVE_2_ID"
+            "$DRIVE_CREATIVE_3_ID"
+            "$DRIVE_CREATIVE_4_ID"
+            "$DRIVE_CREATIVE_5_ID"
+          )
+          files=(
+            "$root/creative-01-brand.jpg"
+            "$root/creative-02-date.jpg"
+            "$root/creative-03-lineup.jpg"
+            "$root/creative-04-illusionize.jpg"
+            "$root/creative-05-price.jpg"
+          )
+          hashes=(
+            "$CREATIVE_1_SHA256"
+            "$CREATIVE_2_SHA256"
+            "$CREATIVE_3_SHA256"
+            "$CREATIVE_4_SHA256"
+            "$CREATIVE_5_SHA256"
+          )
+          for i in "${!files[@]}"; do
+            curl --fail --silent --show-error --location --retry 3               -H "Authorization: Bearer $DRIVE_ACCESS_TOKEN"               "https://www.googleapis.com/drive/v3/files/${ids[$i]}?alt=media"               -o "${files[$i]}"
+            test "$(wc -c < "${files[$i]}")" -gt 100000
+            test "$(xxd -p -l 2 "${files[$i]}")" = "ffd8"
+            printf '%s  %s\n' "${hashes[$i]}" "${files[$i]}" | sha256sum --check --strict
+          done
+
+      - name: Build immutable execution image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:meta-ads-itacare-feed-18-35-${GITHUB_SHA}"
+          JOB_NAME="toca-meta-ads-itacare-feed-18-35-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "JOB_NAME=$JOB_NAME" >> "$GITHUB_ENV"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Deploy PREPARE read-only job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB_NAME"             --image "$IMAGE"             --project "$GCP_PROJECT_ID"             --region "$GCP_REGION"             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"             --set-secrets "TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest"             --command node             --args dist/src/meta-ads-the-party-itacare-2026-10-11-feed-18-35-create-paused.js             --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_ADS_READ_ENABLED=true~META_ADS_WRITE_ENABLED=false~META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN~META_APP_ID=$META_APP_ID~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=UNUSED_META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$META_REDIRECT_URI~META_REQUESTED_SCOPES=ads_read,ads_management,business_management~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$GCP_PROJECT_ID~META_ADS_ITACARE_FEED_18_35_MODE=PREPARE~META_ADS_ITACARE_FEED_18_35_EXPLICIT_APPROVAL=$EXPECTED_APPROVAL"             --tasks 1 --max-retries 0 --task-timeout 240s --quiet
+
+      - name: Execute PREPARE and capture descriptor
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_ITACARE_FEED_18_35_PREPARE_RESULT=\"" --project "$GCP_PROJECT_ID" --freshness=15m --limit=100 --order=desc --format='value(textPayload)' | grep 'META_ADS_ITACARE_FEED_18_35_PREPARE_RESULT=' | head -n1)"
+          RESULT_JSON="${LINE#META_ADS_ITACARE_FEED_18_35_PREPARE_RESULT=}"
+          printf '%s' "$RESULT_JSON" | jq -e '
+            .status == "READY_FOR_CREATE_PAUSED" and
+            .providerMutationExecuted == false and
+            .accountId == "311793958882290" and
+            .campaignId == "52622846509265" and
+            .ageRange == [18,35] and
+            .plannedAdSetCount == 4 and
+            .plannedAdCount == 20
+          ' >/dev/null
+          SHA="$(printf '%s' "$RESULT_JSON" | jq -r .requestSha256)"
+          DESC="$(printf '%s' "$RESULT_JSON" | jq -r .descriptorBase64)"
+          test "${#SHA}" -eq 64
+          test -n "$DESC"
+          echo "APPROVED_SHA=$SHA" >> "$GITHUB_ENV"
+          echo "DESCRIPTOR_B64=$DESC" >> "$GITHUB_ENV"
+          printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-itacare-feed-18-35-prepare.json
+
+      - name: Redeploy CREATE_PAUSED governed job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB_NAME"             --image "$IMAGE"             --project "$GCP_PROJECT_ID"             --region "$GCP_REGION"             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"             --set-cloudsql-instances "$CLOUD_SQL_INSTANCE"             --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest"             --command node             --args dist/src/meta-ads-the-party-itacare-2026-10-11-feed-18-35-create-paused.js             --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_ADS_READ_ENABLED=true~META_ADS_WRITE_ENABLED=true~META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN~META_ADS_ALLOWED_ACCOUNT_ID=311793958882290~META_ADS_ALLOWED_CURRENCY=BRL~META_ADS_MAX_DAILY_BUDGET_MINOR=100000~META_ADS_ALLOWED_GEO_KEYS=ITACARE,ILHEUS,ITABUNA,VITORIA_DA_CONQUISTA~META_ADS_ALLOWED_PIXEL_ID=461233076843065~META_ADS_ALLOWED_PAGE_ID=306103746115875~META_ADS_ALLOWED_INSTAGRAM_ACTOR_ID=17841402033495654~META_ADS_APPROVED_REQUEST_SHA256=$APPROVED_SHA~META_APP_ID=$META_APP_ID~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=UNUSED_META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$META_REDIRECT_URI~META_REQUESTED_SCOPES=ads_read,ads_management,business_management~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$GCP_PROJECT_ID~META_ADS_ITACARE_FEED_18_35_MODE=EXECUTE_PAUSED~META_ADS_ITACARE_FEED_18_35_EXPLICIT_APPROVAL=$EXPECTED_APPROVAL~META_ADS_ITACARE_FEED_18_35_APPROVED_SHA256=$APPROVED_SHA~META_ADS_ITACARE_FEED_18_35_DESCRIPTOR_B64=$DESCRIPTOR_B64"             --tasks 1 --max-retries 0 --task-timeout 360s --quiet
+
+      - name: Execute CREATE_PAUSED and provider readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_ITACARE_FEED_18_35_EXECUTE_RESULT=\"" --project "$GCP_PROJECT_ID" --freshness=15m --limit=100 --order=desc --format='value(textPayload)' | grep 'META_ADS_ITACARE_FEED_18_35_EXECUTE_RESULT=' | head -n1)"
+          RESULT_JSON="${LINE#META_ADS_ITACARE_FEED_18_35_EXECUTE_RESULT=}"
+          printf '%s' "$RESULT_JSON" | jq -e '
+            .status == "CREATED_PAUSED" and
+            .providerMutationExecuted == true and
+            .campaignId == "52622846509265" and
+            .counts.adSets == 4 and
+            .counts.creatives == 20 and
+            .counts.ads == 20 and
+            .activationBlockedPendingBudgetRedistribution == true and
+            ([.verification.adSets[].status] | all(. == "PAUSED")) and
+            ([.verification.ads[].status] | all(. == "PAUSED"))
+          ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-itacare-feed-18-35-created-paused.json
+
+      - name: Upload immutable evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: meta-ads-itacare-feed-18-35-created-paused-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            meta-ads-itacare-feed-18-35-prepare.json
+            meta-ads-itacare-feed-18-35-created-paused.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove temporary job
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${JOB_NAME:-}" ]; then
+            gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet || true
+          fi
