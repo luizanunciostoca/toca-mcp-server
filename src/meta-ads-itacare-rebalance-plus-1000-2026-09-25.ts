@@ -177,7 +177,11 @@ try {
       try {
         await api.post(id, { lifetime_budget: String(snap.lifetimeBudget), status: snap.status });
       } catch (rollbackError) {
-        console.error('META_ADS_ITACARE_REBALANCE_ROLLBACK_ADSET_FAILED', id, normalizeError(rollbackError));
+        console.error(
+          'META_ADS_ITACARE_REBALANCE_ROLLBACK_ADSET_FAILED',
+          id,
+          normalizeError(rollbackError),
+        );
       }
     }
     for (const [, ads] of originalAds) {
@@ -185,7 +189,11 @@ try {
         try {
           await api.post(ad.id, { status: ad.status });
         } catch (rollbackError) {
-          console.error('META_ADS_ITACARE_REBALANCE_ROLLBACK_AD_FAILED', ad.id, normalizeError(rollbackError));
+          console.error(
+            'META_ADS_ITACARE_REBALANCE_ROLLBACK_AD_FAILED',
+            ad.id,
+            normalizeError(rollbackError),
+          );
         }
       }
     }
