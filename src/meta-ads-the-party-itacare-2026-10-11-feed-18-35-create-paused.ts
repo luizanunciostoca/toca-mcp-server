@@ -8,14 +8,14 @@ import { createMetaPublicationApiClient } from './providers/meta/meta-publicatio
 const ACCOUNT_ID = '311793958882290';
 const CAMPAIGN_ID = '52622846509265';
 const PAGE_ID = '306103746115875';
+const INSTAGRAM_ACTOR_ID = '17841402033495654';
 const DESTINATION_URL = 'https://www.sympla.com.br/evento/the-party-exclusive-itacare/3569762';
 const PIXEL_ID = '461233076843065';
-const START_TIME = '2026-09-24T08:00:00-03:00';
 const END_TIME = '2026-10-11T22:00:00-03:00';
 const APPROVAL = 'APPROVED_THE_PARTY_ITACARE_FEED_18_35_CREATE_PAUSED_20260923';
 
 type CityKey = 'ITACARE' | 'ILHEUS' | 'ITABUNA' | 'VITORIA_DA_CONQUISTA';
-type CreativeKey = 'BRAND' | 'DATE' | 'LINEUP' | 'ILLUSIONIZE' | 'PRICE';
+type CreativeKey = 'BRAND' | 'DATE' | 'LINEUP' | 'ILLUSIONIZE' | 'SALES_OPEN';
 
 interface CreativeSpec {
   readonly key: CreativeKey;
@@ -41,9 +41,9 @@ interface Descriptor {
   readonly accountId: string;
   readonly campaignId: string;
   readonly pageId: string;
+  readonly instagramActorId: string;
   readonly destinationUrl: string;
   readonly pixelId: string;
-  readonly startTime: string;
   readonly endTime: string;
   readonly ageMin: 18;
   readonly ageMax: 35;
@@ -106,11 +106,11 @@ function buildDescriptor(): Descriptor {
       headline: 'ILLUSIONIZE • 11/10 • ITACARÉ',
     },
     {
-      key: 'PRICE',
-      driveFileId: '1wOQgEsBG15nTJW6RcRRWjdC6uSeQP6Sz',
-      fileName: 'creative-05-price.jpg',
-      sha256: 'e0d0fad62b05477a49e9efecaa78e9f3b212f44b6af544db8afb9350103b4ae4',
-      headline: '1º LOTE • R$110',
+      key: 'SALES_OPEN',
+      driveFileId: '1XJpAqCVgqkVEX-bsS5zCG4GR8pjRZMo1',
+      fileName: 'creative-05-sales-open.jpg',
+      sha256: 'c0208fdd4788bbf6c01e59d05b7cb5784585bcc20c50c198de3bd357ee57d07a',
+      headline: 'VENDAS ABERTAS • ILLUSIONIZE',
     },
   ];
 
@@ -131,7 +131,7 @@ function buildDescriptor(): Descriptor {
           'Dois nomes. Um beach club. Uma noite em Itacaré. ILLUSIONIZE + BRISOTTI, dia 11 de outubro, na Praia da Ribeira. Garanta seu ingresso.',
         ILLUSIONIZE:
           'ILLUSIONIZE EM ITACARÉ. Agora tem data: 11.10.2026. Praia da Ribeira • Beach Club Terra Boa. Garanta seu ingresso para a The Party of Itacaré.',
-        PRICE:
+        SALES_OPEN:
           'Se você já decidiu que vai, existe um bom motivo para não deixar para depois. 1º lote: R$110. Illusionize + Brisotti, Praia da Ribeira, 11 de outubro. Garanta o valor do lote atual.',
       },
     },
@@ -151,7 +151,7 @@ function buildDescriptor(): Descriptor {
           'Uma noite dessas está mais perto do que parece. Saia de Ilhéus para viver Illusionize + Brisotti em um beach club na Praia da Ribeira, em Itacaré. Garanta seu ingresso.',
         ILLUSIONIZE:
           'Ilhéus, Illusionize está a uma viagem de distância. Dia 11 de outubro, na Praia da Ribeira, em Itacaré. Garanta seu ingresso.',
-        PRICE:
+        SALES_OPEN:
           'Ilhéus, se Itacaré já está nos planos, resolva o ingresso agora. 1º lote: R$110. Illusionize + Brisotti, 11 de outubro. Garanta o valor do lote atual.',
       },
     },
@@ -171,7 +171,7 @@ function buildDescriptor(): Descriptor {
           'Itabuna, prepare a turma. Illusionize + Brisotti esperam por você em Itacaré no dia 11 de outubro. Praia, beach club e pista até a madrugada. Garanta seu ingresso.',
         ILLUSIONIZE:
           'Itabuna, marque 11 de outubro. O destino é Itacaré. Illusionize na Praia da Ribeira. Garanta seu ingresso.',
-        PRICE:
+        SALES_OPEN:
           'Itabuna, não espere todo mundo decidir para garantir o seu. 1º lote: R$110. Illusionize + Brisotti, Itacaré, 11 de outubro. Garanta o valor do lote atual.',
       },
     },
@@ -191,7 +191,7 @@ function buildDescriptor(): Descriptor {
           'Vitória da Conquista, prepare a rota para Itacaré. Illusionize + Brisotti, Praia da Ribeira e uma noite inteira de The Party. Garanta seu ingresso.',
         ILLUSIONIZE:
           'Vitória da Conquista, Illusionize espera por você em Itacaré no dia 11 de outubro. Praia da Ribeira • Beach Club Terra Boa. Garanta seu ingresso.',
-        PRICE:
+        SALES_OPEN:
           'Vitória da Conquista, se Itacaré já está nos planos, resolva o ingresso agora. 1º lote: R$110. Illusionize + Brisotti, 11 de outubro. Garanta o valor do lote atual.',
       },
     },
@@ -202,9 +202,9 @@ function buildDescriptor(): Descriptor {
     accountId: ACCOUNT_ID,
     campaignId: CAMPAIGN_ID,
     pageId: PAGE_ID,
+    instagramActorId: INSTAGRAM_ACTOR_ID,
     destinationUrl: DESTINATION_URL,
     pixelId: PIXEL_ID,
-    startTime: START_TIME,
     endTime: END_TIME,
     ageMin: 18,
     ageMax: 35,
@@ -290,8 +290,9 @@ async function executePaused(): Promise<Readonly<Record<string, unknown>>> {
         promotedObject: {
           pixel_id: descriptor.pixelId,
           custom_event_type: 'PURCHASE',
+          smart_pse_enabled: false,
         },
-        startTime: descriptor.startTime,
+        attributionSpec: [{ event_type: 'CLICK_THROUGH', window_days: 7 }],
         endTime: descriptor.endTime,
         status: 'PAUSED',
       },
@@ -306,6 +307,7 @@ async function executePaused(): Promise<Readonly<Record<string, unknown>>> {
         {
           name: `THE PARTY 11.10 | ${city.label} | ${creative.key} | FEED 18-35`,
           pageId: descriptor.pageId,
+          instagramActorId: descriptor.instagramActorId,
           objectStorySpec: {
             link_data: {
               link: descriptor.destinationUrl,
@@ -313,7 +315,10 @@ async function executePaused(): Promise<Readonly<Record<string, unknown>>> {
               message: city.messages[creative.key],
               name: creative.headline,
               description: '11 de outubro • Itacaré',
-              call_to_action: { type: 'SHOP_NOW' },
+              call_to_action: {
+                type: 'SHOP_NOW',
+                value: { link: descriptor.destinationUrl },
+              },
             },
           },
         },
@@ -323,7 +328,7 @@ async function executePaused(): Promise<Readonly<Record<string, unknown>>> {
       const ad = await provider.createAd(
         { adAccountId: descriptor.accountId, currency: 'BRL' },
         {
-          name: `${city.label} | ${creative.key} | FEED 18-35 | 23.09`,
+          name: `${city.label} | ${creative.key} | FEED 18-35 | 25.09`,
           adSetId: adSet.id,
           creativeId: createdCreative.id,
           status: 'PAUSED',
@@ -361,6 +366,7 @@ function targetingFor(city: CitySpec): Record<string, unknown> {
   return {
     age_min: descriptor.ageMin,
     age_max: descriptor.ageMax,
+    targeting_automation: { advantage_audience: 0 },
     geo_locations: {
       custom_locations: [
         {
@@ -382,7 +388,7 @@ function targetingFor(city: CitySpec): Record<string, unknown> {
 }
 
 function adSetNameFor(city: CitySpec): string {
-  return `TESTE FEED | ${city.label} | 18-35 | NOVOS CRIATIVOS | 23.09`;
+  return `TESTE FEED | ${city.label} | 18-35 | NOVOS CRIATIVOS | 25.09`;
 }
 
 async function verifyProviderPrerequisites(): Promise<void> {
@@ -583,6 +589,7 @@ function assertDescriptor(value: Descriptor): void {
     value.accountId !== ACCOUNT_ID ||
     value.campaignId !== CAMPAIGN_ID ||
     value.pageId !== PAGE_ID ||
+    value.instagramActorId !== INSTAGRAM_ACTOR_ID ||
     value.destinationUrl !== DESTINATION_URL ||
     value.pixelId !== PIXEL_ID ||
     value.ageMin !== 18 ||
