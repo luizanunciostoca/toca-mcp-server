@@ -119,9 +119,7 @@ const output = {
 
 console.log(`META_ADS_ITACARE_PERFORMANCE_RESULT=${JSON.stringify(output)}`);
 
-async function readInsights(
-  params: Record<string, string>,
-): Promise<Record<string, unknown>[]> {
+async function readInsights(params: Record<string, string>): Promise<Record<string, unknown>[]> {
   const response = asRecord(await api.get(`${CAMPAIGN_ID}/insights`, params));
   const rows = Array.isArray(response.data) ? response.data.map(asRecord) : [];
   if (rows.length >= 500) throw new Error('META_ADS_PERF_PAGINATION_REQUIRED');
