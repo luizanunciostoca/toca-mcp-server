@@ -5,6 +5,8 @@ import { loadConfig } from './config.js';
 import { MetaAdsControlledGraphProvider } from './providers/meta-ads/meta-ads-controlled-graph-provider.js';
 import { createMetaPublicationApiClient } from './providers/meta/meta-publication-client.js';
 
+// Governed validation retrigger after canonical formatting.
+
 const ACCOUNT_ID = '311793958882290';
 const CAMPAIGN_ID = '52622846509265';
 const PAGE_ID = '306103746115875';
@@ -64,15 +66,20 @@ const config = loadConfig(process.env);
 const api = createMetaPublicationApiClient(config);
 const provider = new MetaAdsControlledGraphProvider(api);
 
-const mode = requiredEnv('META_ADS_ITACARE_FEED_18_35_MODE');
-if (mode === 'PREPARE') {
-  const result = await prepare();
-  console.log(`META_ADS_ITACARE_FEED_18_35_PREPARE_RESULT=${JSON.stringify(result)}`);
-} else if (mode === 'EXECUTE_PAUSED') {
-  const result = await executePaused();
-  console.log(`META_ADS_ITACARE_FEED_18_35_EXECUTE_RESULT=${JSON.stringify(result)}`);
-} else {
-  throw new Error('META_ADS_ITACARE_FEED_18_35_MODE_UNSUPPORTED');
+try {
+  const mode = requiredEnv('META_ADS_ITACARE_FEED_18_35_MODE');
+  if (mode === 'PREPARE') {
+    const result = await prepare();
+    console.log(`META_ADS_ITACARE_FEED_18_35_PREPARE_RESULT=${JSON.stringify(result)}`);
+  } else if (mode === 'EXECUTE_PAUSED') {
+    const result = await executePaused();
+    console.log(`META_ADS_ITACARE_FEED_18_35_EXECUTE_RESULT=${JSON.stringify(result)}`);
+  } else {
+    throw new Error('META_ADS_ITACARE_FEED_18_35_MODE_UNSUPPORTED');
+  }
+} catch (error) {
+  console.error(`META_ADS_ITACARE_FEED_18_35_FATAL=${normalizeRunnerError(error)}`);
+  throw error;
 }
 
 function buildDescriptor(): Descriptor {
@@ -635,4 +642,13 @@ function finiteNumber(value: unknown): number | undefined {
     if (Number.isFinite(parsed)) return parsed;
   }
   return undefined;
+}
+
+function normalizeRunnerError(error: unknown): string {
+  const message = error instanceof Error ? error.message : 'UNKNOWN_ERROR';
+  return message
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 500);
 }
