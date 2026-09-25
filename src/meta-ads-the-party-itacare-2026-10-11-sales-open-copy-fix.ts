@@ -85,7 +85,10 @@ try {
         fields: 'id,name,campaign_id,status,effective_status,lifetime_budget,targeting',
       }),
     );
-    if (scalarString(adSet.status) !== 'PAUSED' || scalarString(adSet.campaign_id) !== CAMPAIGN_ID) {
+    if (
+      scalarString(adSet.status) !== 'PAUSED' ||
+      scalarString(adSet.campaign_id) !== CAMPAIGN_ID
+    ) {
       throw new Error(`META_ADS_ITACARE_SALES_OPEN_COPY_FIX_ADSET_ENVELOPE_${target.adSetId}`);
     }
 
