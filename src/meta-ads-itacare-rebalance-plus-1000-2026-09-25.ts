@@ -1,7 +1,6 @@
 import { loadConfig } from './config.js';
 import { createMetaPublicationApiClient } from './providers/meta/meta-publication-client.js';
 
-const ACCOUNT_ID = '311793958882290';
 const CAMPAIGN_ID = '52622846509265';
 const APPROVAL = 'APPROVED_ITACARE_REBALANCE_PLUS_1000_20260925';
 
@@ -72,9 +71,9 @@ const campaign = (await api.get(CAMPAIGN_ID, {
   fields: 'id,name,status,effective_status,objective',
 })) as Record<string, unknown>;
 if (
-  String(campaign.id) !== CAMPAIGN_ID ||
-  String(campaign.status) !== 'ACTIVE' ||
-  String(campaign.objective) !== 'OUTCOME_SALES'
+  scalarString(campaign.id) !== CAMPAIGN_ID ||
+  scalarString(campaign.status) !== 'ACTIVE' ||
+  scalarString(campaign.objective) !== 'OUTCOME_SALES'
 ) {
   throw new Error('META_ADS_ITACARE_REBALANCE_CAMPAIGN_MISMATCH');
 }
@@ -106,7 +105,7 @@ for (const id of [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE]) {
   if (rows.length !== 5) throw new Error('META_ADS_ITACARE_REBALANCE_NEW_AD_COUNT_' + id);
   originalAds.set(
     id,
-    rows.map((r) => ({ id: String(r.id), status: String(r.status) })),
+    rows.map((r) => ({ id: scalarString(r.id), status: scalarString(r.status) })),
   );
 }
 
@@ -132,7 +131,7 @@ try {
   // Activate ads first while parent remains paused, then activate parent.
   for (const id of [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE]) {
     const ads = await readAds(id);
-    for (const ad of ads) await api.post(String(ad.id), { status: 'ACTIVE' });
+    for (const ad of ads) await api.post(requiredScalar(ad.id, 'AD_ID'), { status: 'ACTIVE' });
     await api.post(id, { status: 'ACTIVE' });
   }
 
@@ -146,7 +145,7 @@ try {
   const finalAds: Record<string, unknown>[] = [];
   for (const id of [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE]) {
     const ads = await readAds(id);
-    if (ads.length !== 5 || ads.some((a) => String(a.status) !== 'ACTIVE')) {
+    if (ads.length !== 5 || ads.some((a) => scalarString(a.status) !== 'ACTIVE')) {
       throw new Error('META_ADS_ITACARE_REBALANCE_AD_READBACK_' + id);
     }
     finalAds.push(
@@ -177,13 +176,17 @@ try {
     for (const [id, snap] of before) {
       try {
         await api.post(id, { lifetime_budget: String(snap.lifetimeBudget), status: snap.status });
-      } catch {}
+      } catch (rollbackError) {
+        console.error('META_ADS_ITACARE_REBALANCE_ROLLBACK_ADSET_FAILED', id, normalizeError(rollbackError));
+      }
     }
     for (const [, ads] of originalAds) {
       for (const ad of ads) {
         try {
           await api.post(ad.id, { status: ad.status });
-        } catch {}
+        } catch (rollbackError) {
+          console.error('META_ADS_ITACARE_REBALANCE_ROLLBACK_AD_FAILED', ad.id, normalizeError(rollbackError));
+        }
       }
     }
   }
@@ -212,13 +215,13 @@ async function readAdSet(id: string): Promise<Snapshot> {
   const r = (await api.get(id, {
     fields: 'id,name,campaign_id,status,effective_status,lifetime_budget,budget_remaining',
   })) as Record<string, unknown>;
-  if (String(r.campaign_id) !== CAMPAIGN_ID)
+  if (scalarString(r.campaign_id) !== CAMPAIGN_ID)
     throw new Error('META_ADS_ITACARE_REBALANCE_CAMPAIGN_' + id);
   return {
-    id: String(r.id),
-    name: String(r.name ?? ''),
-    status: String(r.status ?? ''),
-    effectiveStatus: String(r.effective_status ?? ''),
+    id: scalarString(r.id),
+    name: scalarString(r.name),
+    status: scalarString(r.status),
+    effectiveStatus: scalarString(r.effective_status),
     lifetimeBudget: num(r.lifetime_budget),
     budgetRemaining: num(r.budget_remaining),
   };
@@ -231,6 +234,22 @@ async function readAds(adSetId: string): Promise<Record<string, unknown>[]> {
     limit: '100',
   })) as Record<string, unknown>;
   return Array.isArray(r.data) ? (r.data as Record<string, unknown>[]) : [];
+}
+
+function scalarString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return '';
+}
+
+function requiredScalar(value: unknown, label: string): string {
+  const result = scalarString(value);
+  if (!result) throw new Error('META_ADS_ITACARE_REBALANCE_' + label + '_MISSING');
+  return result;
+}
+
+function normalizeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function num(v: unknown): number {
