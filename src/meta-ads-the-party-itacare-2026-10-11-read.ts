@@ -90,21 +90,50 @@ for (const creativeId of creativeIds) {
   creatives.push(asRecord(creativeResponse));
 }
 
+const targetAdSets = adSets.filter((row) => scalarString(row.name).startsWith('TESTE FEED | '));
+const targetAdSetIds = new Set(targetAdSets.map((row) => scalarString(row.id)).filter(Boolean));
+const targetAds = ads.filter((row) => targetAdSetIds.has(scalarString(row.adset_id)));
+const targetCreativeIds = new Set(
+  targetAds.map((row) => scalarString(asRecord(row.creative).id)).filter(Boolean),
+);
+const targetCreatives = creatives.filter((row) => targetCreativeIds.has(scalarString(row.id)));
+
 const output = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   readOnly: true,
   providerMutationExecuted: false,
   account: {
     id: account.id,
-    name: account.name,
     currency: account.currency,
     accountStatus: account.account_status,
   },
-  campaign,
+  campaign: {
+    id: campaign.id,
+    name: campaign.name,
+    status: campaign.status,
+    effective_status: campaign.effective_status,
+  },
   budgetMode: inferBudgetMode(campaign, adSets),
-  adSets: adSets.map(sanitizeAdSet),
-  ads,
-  creatives,
+  totals: {
+    adSets: adSets.length,
+    ads: ads.length,
+    creatives: creatives.length,
+  },
+  target: {
+    adSets: targetAdSets.map(sanitizeAdSet),
+    ads: targetAds.map((row) => ({
+      id: row.id,
+      name: row.name,
+      adset_id: row.adset_id,
+      status: row.status,
+      effective_status: row.effective_status,
+      creative: row.creative,
+    })),
+    creatives: targetCreatives.map((row) => ({
+      id: row.id,
+      name: row.name,
+    })),
+  },
 };
 
 console.log(`META_ADS_THE_PARTY_ITACARE_1011_READ_RESULT=${JSON.stringify(output)}`);
