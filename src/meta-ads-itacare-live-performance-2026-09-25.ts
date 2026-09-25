@@ -1,7 +1,6 @@
 import { loadConfig } from './config.js';
 import { createMetaPublicationApiClient } from './providers/meta/meta-publication-client.js';
 
-const ACCOUNT_ID = '311793958882290';
 const CAMPAIGN_ID = '52622846509265';
 const SINCE = process.env.META_ADS_READ_SINCE?.trim() || '2026-09-07';
 const UNTIL = process.env.META_ADS_READ_UNTIL?.trim() || '2026-09-25';
