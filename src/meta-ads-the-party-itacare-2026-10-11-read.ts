@@ -93,12 +93,12 @@ for (const creativeId of creativeIds) {
 const targetAdSets = adSets.filter((row) =>
   scalarString(row.name).startsWith('TESTE FEED | '),
 );
-const targetAdSetIds = new Set(targetAdSets.map((row) => scalarString(row.id)).filter(Boolean));
+const targetAdSetIds = new Set(
+  targetAdSets.map((row) => scalarString(row.id)).filter(Boolean),
+);
 const targetAds = ads.filter((row) => targetAdSetIds.has(scalarString(row.adset_id)));
 const targetCreativeIds = new Set(
-  targetAds
-    .map((row) => scalarString(asRecord(row.creative).id))
-    .filter(Boolean),
+  targetAds.map((row) => scalarString(asRecord(row.creative).id)).filter(Boolean),
 );
 const targetCreatives = creatives.filter((row) => targetCreativeIds.has(scalarString(row.id)));
 
