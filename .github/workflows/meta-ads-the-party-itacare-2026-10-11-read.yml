@@ -108,13 +108,16 @@ jobs:
           done
           test -n "$RESULT_JSON"
           printf '%s' "$RESULT_JSON" | jq -e '
-            .schemaVersion == 1 and
+            .schemaVersion == 2 and
             .readOnly == true and
             .providerMutationExecuted == false and
             (.account.id | endswith("311793958882290")) and
             .account.currency == "BRL" and
             .campaign.id == "52622846509265" and
-            (.budgetMode == "CBO" or .budgetMode == "ABO" or .budgetMode == "UNKNOWN")
+            (.budgetMode == "CBO" or .budgetMode == "ABO" or .budgetMode == "UNKNOWN") and
+            (.target.adSets | type == "array") and
+            (.target.ads | type == "array") and
+            (.target.creatives | type == "array")
           ' >/dev/null
           printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-the-party-itacare-1011-read.json
 
