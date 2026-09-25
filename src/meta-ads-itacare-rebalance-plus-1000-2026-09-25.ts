@@ -16,10 +16,26 @@ const OLD_ITABUNA_STORIES = '52625517821465';
 const OLD_VITORIA_STORIES = '52625517841265';
 
 const EXPECTED = {
-  [NEW_ILHEUS]: { name: 'TESTE FEED | ILHÉUS | 18-35 | NOVOS CRIATIVOS | 25.09', budget: 30000, activate: true },
-  [NEW_VITORIA]: { name: 'TESTE FEED | VITÓRIA DA CONQUISTA | 18-35 | NOVOS CRIATIVOS | 25.09', budget: 30000, activate: true },
-  [NEW_ITACARE]: { name: 'TESTE FEED | ITACARÉ | 18-35 | NOVOS CRIATIVOS | 25.09', budget: 20000, activate: true },
-  [NEW_ITABUNA]: { name: 'TESTE FEED | ITABUNA | 18-35 | NOVOS CRIATIVOS | 25.09', budget: 47249, activate: false },
+  [NEW_ILHEUS]: {
+    name: 'TESTE FEED | ILHÉUS | 18-35 | NOVOS CRIATIVOS | 25.09',
+    budget: 30000,
+    activate: true,
+  },
+  [NEW_VITORIA]: {
+    name: 'TESTE FEED | VITÓRIA DA CONQUISTA | 18-35 | NOVOS CRIATIVOS | 25.09',
+    budget: 30000,
+    activate: true,
+  },
+  [NEW_ITACARE]: {
+    name: 'TESTE FEED | ITACARÉ | 18-35 | NOVOS CRIATIVOS | 25.09',
+    budget: 20000,
+    activate: true,
+  },
+  [NEW_ITABUNA]: {
+    name: 'TESTE FEED | ITABUNA | 18-35 | NOVOS CRIATIVOS | 25.09',
+    budget: 47249,
+    activate: false,
+  },
 } as const;
 
 if (requiredEnv('META_ADS_ITACARE_REBALANCE_APPROVAL') !== APPROVAL) {
@@ -52,15 +68,23 @@ const ids = [
 const before = new Map<string, Snapshot>();
 for (const id of ids) before.set(id, await readAdSet(id));
 
-const campaign = await api.get(CAMPAIGN_ID, { fields: 'id,name,status,effective_status,objective' }) as Record<string, unknown>;
-if (String(campaign.id) !== CAMPAIGN_ID || String(campaign.status) !== 'ACTIVE' || String(campaign.objective) !== 'OUTCOME_SALES') {
+const campaign = (await api.get(CAMPAIGN_ID, {
+  fields: 'id,name,status,effective_status,objective',
+})) as Record<string, unknown>;
+if (
+  String(campaign.id) !== CAMPAIGN_ID ||
+  String(campaign.status) !== 'ACTIVE' ||
+  String(campaign.objective) !== 'OUTCOME_SALES'
+) {
   throw new Error('META_ADS_ITACARE_REBALANCE_CAMPAIGN_MISMATCH');
 }
 
 for (const [id, rule] of Object.entries(EXPECTED)) {
   const snap = before.get(id);
-  if (!snap || snap.name !== rule.name) throw new Error('META_ADS_ITACARE_REBALANCE_NEW_ADSET_MISMATCH_' + id);
-  if (id !== NEW_ITABUNA && snap.status !== 'PAUSED') throw new Error('META_ADS_ITACARE_REBALANCE_NEW_ADSET_NOT_PAUSED_' + id);
+  if (!snap || snap.name !== rule.name)
+    throw new Error('META_ADS_ITACARE_REBALANCE_NEW_ADSET_MISMATCH_' + id);
+  if (id !== NEW_ITABUNA && snap.status !== 'PAUSED')
+    throw new Error('META_ADS_ITACARE_REBALANCE_NEW_ADSET_NOT_PAUSED_' + id);
 }
 
 for (const id of [OLD_ITABUNA_FEED, OLD_ITABUNA_STORIES, OLD_VITORIA_STORIES]) {
@@ -80,7 +104,10 @@ const originalAds = new Map<string, { id: string; status: string }[]>();
 for (const id of [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE]) {
   const rows = await readAds(id);
   if (rows.length !== 5) throw new Error('META_ADS_ITACARE_REBALANCE_NEW_AD_COUNT_' + id);
-  originalAds.set(id, rows.map((r) => ({ id: String(r.id), status: String(r.status) })));
+  originalAds.set(
+    id,
+    rows.map((r) => ({ id: String(r.id), status: String(r.status) })),
+  );
 }
 
 let mutationStarted = false;
@@ -122,19 +149,29 @@ try {
     if (ads.length !== 5 || ads.some((a) => String(a.status) !== 'ACTIVE')) {
       throw new Error('META_ADS_ITACARE_REBALANCE_AD_READBACK_' + id);
     }
-    finalAds.push(...ads.map((a) => ({ id: a.id, adset_id: id, status: a.status, effective_status: a.effective_status })));
+    finalAds.push(
+      ...ads.map((a) => ({
+        id: a.id,
+        adset_id: id,
+        status: a.status,
+        effective_status: a.effective_status,
+      })),
+    );
   }
 
-  console.log('META_ADS_ITACARE_REBALANCE_RESULT=' + JSON.stringify({
-    status: 'REBALANCED_AND_ACTIVATED',
-    providerMutationExecuted: true,
-    approvedIncrementMinor: 100000,
-    newChallengerBudgetMinor: 80000,
-    broadItabunaAdditionalMinor: 20000,
-    broadItabunaNewLifetimeBudgetMinor: broadNewBudget,
-    adSets: Array.from(after.values()),
-    activeNewAds: finalAds,
-  }));
+  console.log(
+    'META_ADS_ITACARE_REBALANCE_RESULT=' +
+      JSON.stringify({
+        status: 'REBALANCED_AND_ACTIVATED',
+        providerMutationExecuted: true,
+        approvedIncrementMinor: 100000,
+        newChallengerBudgetMinor: 80000,
+        broadItabunaAdditionalMinor: 20000,
+        broadItabunaNewLifetimeBudgetMinor: broadNewBudget,
+        adSets: Array.from(after.values()),
+        activeNewAds: finalAds,
+      }),
+  );
 } catch (error) {
   if (mutationStarted) {
     for (const [id, snap] of before) {
@@ -144,7 +181,9 @@ try {
     }
     for (const [, ads] of originalAds) {
       for (const ad of ads) {
-        try { await api.post(ad.id, { status: ad.status }); } catch {}
+        try {
+          await api.post(ad.id, { status: ad.status });
+        } catch {}
       }
     }
   }
@@ -160,18 +199,21 @@ function assertFinal(after: Map<string, Snapshot>, broadBudget: number): void {
   };
   for (const [id, budget] of Object.entries(expectedBudgets)) {
     const s = after.get(id)!;
-    if (s.lifetimeBudget !== budget || s.status !== 'ACTIVE') throw new Error('META_ADS_ITACARE_REBALANCE_FINAL_' + id);
+    if (s.lifetimeBudget !== budget || s.status !== 'ACTIVE')
+      throw new Error('META_ADS_ITACARE_REBALANCE_FINAL_' + id);
   }
   for (const id of [OLD_ITABUNA_FEED, OLD_ITABUNA_STORIES, OLD_VITORIA_STORIES, NEW_ITABUNA]) {
-    if (after.get(id)!.status !== 'PAUSED') throw new Error('META_ADS_ITACARE_REBALANCE_PAUSE_FINAL_' + id);
+    if (after.get(id)!.status !== 'PAUSED')
+      throw new Error('META_ADS_ITACARE_REBALANCE_PAUSE_FINAL_' + id);
   }
 }
 
 async function readAdSet(id: string): Promise<Snapshot> {
-  const r = await api.get(id, {
+  const r = (await api.get(id, {
     fields: 'id,name,campaign_id,status,effective_status,lifetime_budget,budget_remaining',
-  }) as Record<string, unknown>;
-  if (String(r.campaign_id) !== CAMPAIGN_ID) throw new Error('META_ADS_ITACARE_REBALANCE_CAMPAIGN_' + id);
+  })) as Record<string, unknown>;
+  if (String(r.campaign_id) !== CAMPAIGN_ID)
+    throw new Error('META_ADS_ITACARE_REBALANCE_CAMPAIGN_' + id);
   return {
     id: String(r.id),
     name: String(r.name ?? ''),
@@ -183,11 +225,11 @@ async function readAdSet(id: string): Promise<Snapshot> {
 }
 
 async function readAds(adSetId: string): Promise<Record<string, unknown>[]> {
-  const r = await api.get(CAMPAIGN_ID + '/ads', {
+  const r = (await api.get(CAMPAIGN_ID + '/ads', {
     fields: 'id,name,adset_id,status,effective_status',
     filtering: JSON.stringify([{ field: 'adset.id', operator: 'EQUAL', value: adSetId }]),
     limit: '100',
-  }) as Record<string, unknown>;
+  })) as Record<string, unknown>;
   return Array.isArray(r.data) ? (r.data as Record<string, unknown>[]) : [];
 }
 
