@@ -59,6 +59,23 @@ const ageRows = await readInsights({
     'campaign_id,spend,impressions,reach,frequency,clicks,inline_link_clicks,cpc,cpm,ctr,inline_link_click_ctr,actions,action_values,purchase_roas',
 });
 
+type Summary = {
+  spend: number;
+  impressions: number;
+  reach: number;
+  frequency: number;
+  clicks: number;
+  linkClicks: number;
+  cpc: number;
+  cpm: number;
+  ctr: number;
+  linkCtr: number;
+  purchases: number;
+  purchaseValue: number;
+  cpa: number | null;
+  roas: number | null;
+};
+
 const output = {
   schemaVersion: 1,
   readOnly: true,
@@ -71,13 +88,16 @@ const output = {
     ...summarize(row),
   })),
   topAds: adRows
-    .map((row) => ({
-      id: row.ad_id,
-      name: row.ad_name,
-      adSetId: row.adset_id,
-      adSetName: row.adset_name,
-      ...summarize(row),
-    }))
+    .map((row) => {
+      const summary = summarize(row);
+      return {
+        id: row.ad_id,
+        name: row.ad_name,
+        adSetId: row.adset_id,
+        adSetName: row.adset_name,
+        ...summary,
+      };
+    })
     .sort((a, b) => {
       const purchaseDiff = finiteNumber(b.purchases) - finiteNumber(a.purchases);
       if (purchaseDiff !== 0) return purchaseDiff;
@@ -108,7 +128,7 @@ async function readInsights(
   return rows;
 }
 
-function summarize(row: Record<string, unknown>): Record<string, unknown> {
+function summarize(row: Record<string, unknown>): Summary {
   const spend = numberValue(row.spend);
   const purchases = actionValue(row.actions, [
     'offsite_conversion.fb_pixel_purchase',
