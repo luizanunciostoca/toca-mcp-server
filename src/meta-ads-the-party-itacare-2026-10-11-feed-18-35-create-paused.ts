@@ -132,7 +132,7 @@ function buildDescriptor(): Descriptor {
         ILLUSIONIZE:
           'ILLUSIONIZE EM ITACARÉ. Agora tem data: 11.10.2026. Praia da Ribeira • Beach Club Terra Boa. Garanta seu ingresso para a The Party of Itacaré.',
         SALES_OPEN:
-          'Se você já decidiu que vai, existe um bom motivo para não deixar para depois. 1º lote: R$110. Illusionize + Brisotti, Praia da Ribeira, 11 de outubro. Garanta o valor do lote atual.',
+          'É oficial: as vendas estão abertas. Illusionize + Brisotti, 11 de outubro, Praia da Ribeira, Itacaré. Garanta seu ingresso.',
       },
     },
     {
@@ -152,7 +152,7 @@ function buildDescriptor(): Descriptor {
         ILLUSIONIZE:
           'Ilhéus, Illusionize está a uma viagem de distância. Dia 11 de outubro, na Praia da Ribeira, em Itacaré. Garanta seu ingresso.',
         SALES_OPEN:
-          'Ilhéus, se Itacaré já está nos planos, resolva o ingresso agora. 1º lote: R$110. Illusionize + Brisotti, 11 de outubro. Garanta o valor do lote atual.',
+          'Ilhéus, as vendas estão abertas. Dia 11 de outubro, Illusionize + Brisotti esperam por você em Itacaré. Garanta seu ingresso.',
       },
     },
     {
@@ -172,7 +172,7 @@ function buildDescriptor(): Descriptor {
         ILLUSIONIZE:
           'Itabuna, marque 11 de outubro. O destino é Itacaré. Illusionize na Praia da Ribeira. Garanta seu ingresso.',
         SALES_OPEN:
-          'Itabuna, não espere todo mundo decidir para garantir o seu. 1º lote: R$110. Illusionize + Brisotti, Itacaré, 11 de outubro. Garanta o valor do lote atual.',
+          'Itabuna, as vendas estão abertas. Dia 11 de outubro, o destino é Itacaré para Illusionize + Brisotti. Garanta seu ingresso.',
       },
     },
     {
@@ -192,7 +192,7 @@ function buildDescriptor(): Descriptor {
         ILLUSIONIZE:
           'Vitória da Conquista, Illusionize espera por você em Itacaré no dia 11 de outubro. Praia da Ribeira • Beach Club Terra Boa. Garanta seu ingresso.',
         SALES_OPEN:
-          'Vitória da Conquista, se Itacaré já está nos planos, resolva o ingresso agora. 1º lote: R$110. Illusionize + Brisotti, 11 de outubro. Garanta o valor do lote atual.',
+          'Vitória da Conquista, as vendas estão abertas. Programe a viagem para Itacaré no dia 11 de outubro e garanta seu ingresso.',
       },
     },
   ];
@@ -290,7 +290,6 @@ async function executePaused(): Promise<Readonly<Record<string, unknown>>> {
         promotedObject: {
           pixel_id: descriptor.pixelId,
           custom_event_type: 'PURCHASE',
-          smart_pse_enabled: false,
         },
         attributionSpec: [{ event_type: 'CLICK_THROUGH', window_days: 7 }],
         endTime: descriptor.endTime,
