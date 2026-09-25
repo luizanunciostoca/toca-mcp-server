@@ -21,6 +21,7 @@ export interface MetaAdSetDraft {
   readonly optimizationGoal?: string;
   readonly targeting: Readonly<Record<string, unknown>>;
   readonly promotedObject?: Readonly<Record<string, unknown>>;
+  readonly attributionSpec?: readonly Readonly<Record<string, unknown>>[];
   readonly startTime?: string;
   readonly endTime?: string;
   readonly status: 'PAUSED';
