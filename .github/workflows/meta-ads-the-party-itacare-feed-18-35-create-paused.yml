@@ -28,17 +28,17 @@ env:
   TOKEN_SECRET_ID: toca-meta-oauth-token
   META_APP_ID: '2281930145887404'
   META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
-  EXPECTED_APPROVAL: APPROVED_THE_PARTY_ITACARE_FEED_18_35_CREATE_PAUSED_20260923
+  EXPECTED_APPROVAL: APPROVED_THE_PARTY_ITACARE_FEED_18_35_CREATE_PAUSED_20260925
   DRIVE_CREATIVE_1_ID: 1HRkEn3M1U-MrgHowCllceBC5kDNvVUhx
   DRIVE_CREATIVE_2_ID: 1l9nGtL4OJ9VyJtEUZju9eajloOYdqDx5
   DRIVE_CREATIVE_3_ID: 1mygYM6Lr48LOGEOzomQ5Rgy7EhIiwJ_u
   DRIVE_CREATIVE_4_ID: 1k1jYcsdpiwzXEtqoLGRUXVZcQbKo1XDl
-  DRIVE_CREATIVE_5_ID: 1wOQgEsBG15nTJW6RcRRWjdC6uSeQP6Sz
+  DRIVE_CREATIVE_5_ID: 1XJpAqCVgqkVEX-bsS5zCG4GR8pjRZMo1
   CREATIVE_1_SHA256: 156d87d1045efacdeaa4e9de17e33a74ab2645b7a49124e25eacd471b0f7ea85
   CREATIVE_2_SHA256: ea9b7d263906ab62bdae043ab385d5d13e73065cf2e339e7fe44d82b43909693
   CREATIVE_3_SHA256: 31cf4408c8100026115131b270b54b27487d06eee68f251389abb87f9f2f911e
   CREATIVE_4_SHA256: fe75d300b3ab86de009a120a1ca8725c4b032defe6c37d7b949cbb6423558b02
-  CREATIVE_5_SHA256: e0d0fad62b05477a49e9efecaa78e9f3b212f44b6af544db8afb9350103b4ae4
+  CREATIVE_5_SHA256: c0208fdd4788bbf6c01e59d05b7cb5784585bcc20c50c198de3bd357ee57d07a
 
 jobs:
   create-paused:
@@ -97,7 +97,7 @@ jobs:
             "$root/creative-02-date.jpg"
             "$root/creative-03-lineup.jpg"
             "$root/creative-04-illusionize.jpg"
-            "$root/creative-05-price.jpg"
+            "$root/creative-05-sales-open.jpg"
           )
           hashes=(
             "$CREATIVE_1_SHA256"
@@ -143,7 +143,13 @@ jobs:
             gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" --project "$GCP_PROJECT_ID" --freshness=15m --limit=120 --order=desc --format='value(textPayload)' | grep -E 'META_ADS_ITACARE_FEED_18_35|Error|ERROR|error|Exception|failed|FAILED' | sed -E 's/(access[_-]?token|token|secret)=?[^ ]*/\\1=[REDACTED]/Ig' | head -n 100 || true
             exit "$PREPARE_RC"
           fi
-          LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_ITACARE_FEED_18_35_PREPARE_RESULT=\"" --project "$GCP_PROJECT_ID" --freshness=15m --limit=100 --order=desc --format='value(textPayload)' | grep 'META_ADS_ITACARE_FEED_18_35_PREPARE_RESULT=' | head -n1)"
+          LINE=''
+          for attempt in $(seq 1 18); do
+            LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_ITACARE_FEED_18_35_PREPARE_RESULT=\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=100 --order=desc --format='value(textPayload)' | grep 'META_ADS_ITACARE_FEED_18_35_PREPARE_RESULT=' | head -n1 || true)"
+            if [ -n "$LINE" ]; then break; fi
+            sleep 5
+          done
+          test -n "$LINE"
           RESULT_JSON="${LINE#META_ADS_ITACARE_FEED_18_35_PREPARE_RESULT=}"
           printf '%s' "$RESULT_JSON" | jq -e '
             .status == "READY_FOR_CREATE_PAUSED" and
@@ -181,7 +187,13 @@ jobs:
             gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" --project "$GCP_PROJECT_ID" --freshness=15m --limit=160 --order=desc --format='value(textPayload)' | grep -E 'META_ADS_ITACARE_FEED_18_35|META_HTTP_|META_CODE_|META_REASON_|Error|Exception|FAILED' | head -n 140 || true
             exit "$EXECUTE_RC"
           fi
-          LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_ITACARE_FEED_18_35_EXECUTE_RESULT=\"" --project "$GCP_PROJECT_ID" --freshness=15m --limit=100 --order=desc --format='value(textPayload)' | grep 'META_ADS_ITACARE_FEED_18_35_EXECUTE_RESULT=' | head -n1)"
+          LINE=''
+          for attempt in $(seq 1 18); do
+            LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_ITACARE_FEED_18_35_EXECUTE_RESULT=\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=100 --order=desc --format='value(textPayload)' | grep 'META_ADS_ITACARE_FEED_18_35_EXECUTE_RESULT=' | head -n1 || true)"
+            if [ -n "$LINE" ]; then break; fi
+            sleep 5
+          done
+          test -n "$LINE"
           RESULT_JSON="${LINE#META_ADS_ITACARE_FEED_18_35_EXECUTE_RESULT=}"
           printf '%s' "$RESULT_JSON" | jq -e '
             .status == "CREATED_PAUSED" and
