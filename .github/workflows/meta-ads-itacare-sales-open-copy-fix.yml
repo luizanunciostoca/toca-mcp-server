@@ -1,0 +1,135 @@
+name: Meta Ads Itacare Sales Open Copy Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/meta-ads-itacare-sales-open-copy-fix.yml'
+      - 'src/meta-ads-the-party-itacare-2026-10-11-sales-open-copy-fix.ts'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: meta-ads-itacare-sales-open-copy-fix
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_APP_ID: '2281930145887404'
+  META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+  EXPECTED_APPROVAL: APPROVED_THE_PARTY_ITACARE_SALES_OPEN_COPY_FIX_20260925
+  APPROVED_REQUEST_SHA256: f060eb9e6b4f5a3d3726b34137e6a56611ee6223f74601c9fa9dd55121afe303
+
+jobs:
+  correct:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm quality
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Authenticate Docker to Artifact Registry
+        run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+
+      - name: Build immutable correction image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:meta-ads-itacare-sales-copy-fix-${GITHUB_SHA}"
+          JOB_NAME="toca-meta-ads-itacare-sales-copy-fix-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "JOB_NAME=$JOB_NAME" >> "$GITHUB_ENV"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Deploy governed correction job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$JOB_NAME" \
+            --image "$IMAGE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
+            --set-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,TOCA_SECRET_META_ACCESS_TOKEN=$TOKEN_SECRET_ID:latest" \
+            --command node \
+            --args dist/src/meta-ads-the-party-itacare-2026-10-11-sales-open-copy-fix.js \
+            --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_ADS_READ_ENABLED=true~META_ADS_WRITE_ENABLED=true~META_ACCESS_TOKEN_ENV_KEY=TOCA_SECRET_META_ACCESS_TOKEN~META_ADS_ALLOWED_ACCOUNT_ID=311793958882290~META_ADS_ALLOWED_CURRENCY=BRL~META_ADS_MAX_DAILY_BUDGET_MINOR=100000~META_ADS_ALLOWED_GEO_KEYS=ITACARE,ILHEUS,ITABUNA,VITORIA_DA_CONQUISTA~META_ADS_ALLOWED_PIXEL_ID=461233076843065~META_ADS_ALLOWED_PAGE_ID=306103746115875~META_ADS_ALLOWED_INSTAGRAM_ACTOR_ID=17841402033495654~META_ADS_APPROVED_REQUEST_SHA256=$APPROVED_REQUEST_SHA256~META_APP_ID=$META_APP_ID~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=UNUSED_META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$META_REDIRECT_URI~META_REQUESTED_SCOPES=ads_read,ads_management,business_management~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$GCP_PROJECT_ID~META_ADS_ITACARE_SALES_OPEN_COPY_FIX_APPROVAL=$EXPECTED_APPROVAL" \
+            --tasks 1 --max-retries 0 --task-timeout 300s --quiet
+
+      - name: Execute correction and capture readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          gcloud run jobs execute "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --wait --quiet
+          RC=$?
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME}" --project "$GCP_PROJECT_ID" --freshness=20m --limit=160 --order=desc --format='value(textPayload)' | grep -E 'META_ADS_ITACARE_SALES_OPEN_COPY_FIX|META_HTTP_|META_CODE_|META_REASON_|Error|Exception|FAILED' | head -n 140 || true
+            exit "$RC"
+          fi
+          LINE=''
+          for attempt in $(seq 1 18); do
+            LINE="$(gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND textPayload:\"META_ADS_ITACARE_SALES_OPEN_COPY_FIX_RESULT=\"" --project "$GCP_PROJECT_ID" --freshness=20m --limit=100 --order=desc --format='value(textPayload)' | grep 'META_ADS_ITACARE_SALES_OPEN_COPY_FIX_RESULT=' | head -n1 || true)"
+            if [ -n "$LINE" ]; then break; fi
+            sleep 5
+          done
+          test -n "$LINE"
+          RESULT_JSON="${LINE#META_ADS_ITACARE_SALES_OPEN_COPY_FIX_RESULT=}"
+          printf '%s' "$RESULT_JSON" | jq -e '
+            .status == "CORRECTED_PAUSED" and
+            .providerMutationExecuted == true and
+            .activationPerformed == false and
+            .campaignId == "52622846509265" and
+            .correctedAdCount == 4 and
+            ([.verification[].adStatus] | all(. == "PAUSED")) and
+            ([.verification[].message] | all((contains("R$110") or contains("1º lote")) | not))
+          ' >/dev/null
+          printf '%s\n' "$RESULT_JSON" | jq . > meta-ads-itacare-sales-open-copy-fix.json
+
+      - name: Upload correction evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: meta-ads-itacare-sales-open-copy-fix-${{ github.run_id }}-${{ github.run_attempt }}
+          path: meta-ads-itacare-sales-open-copy-fix.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove temporary job
+        if: always()
+        run: gcloud run jobs delete "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet || true
