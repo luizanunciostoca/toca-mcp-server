@@ -80,10 +80,10 @@ const ids = [
   OLD_VITORIA_STORIES,
 ] as const;
 
-const before = new Map<string, Snapshot>();
-for (const id of ids) before.set(id, await readAdSet(id));
+const beforeAll = await readAllAdSets();
+const before = selectSnapshots(beforeAll);
 
-const campaign = (await api.get(CAMPAIGN_ID, {
+const campaign = (await getWithBackoff(CAMPAIGN_ID, {
   fields: 'id,name,status,effective_status,objective',
 })) as Record<string, unknown>;
 if (
@@ -115,9 +115,10 @@ const broadSpent = broad.lifetimeBudget - broad.budgetRemaining;
 if (broadSpent < 0) throw new Error('META_ADS_ITACARE_REBALANCE_BROAD_SPEND_INVALID');
 const broadNewBudget = broadSpent + 20000;
 
+const beforeAds = await readAllAds();
 const originalAds = new Map<string, { id: string; status: string }[]>();
 for (const id of [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE]) {
-  const rows = await readAds(id);
+  const rows = adsForAdSet(beforeAds, id);
   if (rows.length !== 5) throw new Error('META_ADS_ITACARE_REBALANCE_NEW_AD_COUNT_' + id);
   originalAds.set(
     id,
@@ -157,7 +158,7 @@ try {
 
   // Activate ads first while parent remains paused, then activate parent.
   for (const id of [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE]) {
-    const ads = await readAds(id);
+    const ads = adsForAdSet(beforeAds, id);
     for (const ad of ads)
       await postStage('ACTIVATE_NEW_AD', requiredScalar(ad.id, 'AD_ID'), { status: 'ACTIVE' });
     await postStage('ACTIVATE_NEW_ADSET', id, { status: 'ACTIVE' });
@@ -165,22 +166,8 @@ try {
 
   await postStage('ACTIVATE_ITABUNA_BROAD', OLD_ITABUNA_BROAD, { status: 'ACTIVE' });
 
-  const after = new Map<string, Snapshot>();
-  for (const id of ids) {
-    try {
-      after.set(id, await readAdSet(id));
-    } catch (error) {
-      console.error(
-        'META_ADS_ITACARE_REBALANCE_STAGE_ERROR=' +
-          JSON.stringify({
-            stage: 'FINAL_READBACK_ADSET',
-            id,
-            error: error instanceof Error ? error.message : 'UNKNOWN_ERROR',
-          }),
-      );
-      throw error;
-    }
-  }
+  await sleepMs(3000);
+  const after = selectSnapshots(await readAllAdSets());
 
   try {
     assertFinal(after, broadNewBudget);
@@ -197,8 +184,9 @@ try {
   }
 
   const finalAds: Record<string, unknown>[] = [];
+  const afterAds = await readAllAds();
   for (const id of [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE]) {
-    const ads = await readAds(id);
+    const ads = adsForAdSet(afterAds, id);
     if (ads.length !== 5 || ads.some((a) => scalarString(a.status) !== 'ACTIVE')) {
       throw new Error('META_ADS_ITACARE_REBALANCE_AD_READBACK_' + id);
     }
@@ -229,7 +217,9 @@ try {
   if (mutationStarted) {
     for (const [id, snap] of before) {
       try {
-        await api.post(id, { lifetime_budget: String(snap.lifetimeBudget), status: snap.status });
+        await withRateLimitBackoff('POST', id, () =>
+          api.post(id, { lifetime_budget: String(snap.lifetimeBudget), status: snap.status }),
+        );
       } catch (rollbackError) {
         console.error(
           'META_ADS_ITACARE_REBALANCE_ROLLBACK_ADSET_FAILED',
@@ -241,7 +231,7 @@ try {
     for (const [, ads] of originalAds) {
       for (const ad of ads) {
         try {
-          await api.post(ad.id, { status: ad.status });
+          await withRateLimitBackoff('POST', ad.id, () => api.post(ad.id, { status: ad.status }));
         } catch (rollbackError) {
           console.error(
             'META_ADS_ITACARE_REBALANCE_ROLLBACK_AD_FAILED',
@@ -273,40 +263,95 @@ function assertFinal(after: Map<string, Snapshot>, broadBudget: number): void {
   }
 }
 
-async function readAdSet(id: string): Promise<Snapshot> {
-  const r = (await api.get(id, {
+async function readAllAdSets(): Promise<Map<string, Snapshot>> {
+  const response = (await getWithBackoff(CAMPAIGN_ID + '/adsets', {
     fields: 'id,name,campaign_id,status,effective_status,lifetime_budget,budget_remaining',
+    limit: '100',
   })) as Record<string, unknown>;
-  if (scalarString(r.campaign_id) !== CAMPAIGN_ID)
-    throw new Error('META_ADS_ITACARE_REBALANCE_CAMPAIGN_' + id);
-  return {
-    id: scalarString(r.id),
-    name: scalarString(r.name),
-    status: scalarString(r.status),
-    effectiveStatus: scalarString(r.effective_status),
-    lifetimeBudget: num(r.lifetime_budget),
-    budgetRemaining: num(r.budget_remaining),
-  };
+  const rows = Array.isArray(response.data) ? (response.data as Record<string, unknown>[]) : [];
+  const out = new Map<string, Snapshot>();
+  for (const row of rows) {
+    const id = scalarString(row.id);
+    if (!id) continue;
+    if (scalarString(row.campaign_id) !== CAMPAIGN_ID) continue;
+    out.set(id, {
+      id,
+      name: scalarString(row.name),
+      status: scalarString(row.status),
+      effectiveStatus: scalarString(row.effective_status),
+      lifetimeBudget: num(row.lifetime_budget),
+      budgetRemaining: num(row.budget_remaining),
+    });
+  }
+  return out;
 }
 
-async function readAds(adSetId: string): Promise<Record<string, unknown>[]> {
-  try {
-    const r = (await api.get(adSetId + '/ads', {
-      fields: 'id,name,adset_id,status,effective_status',
-      limit: '100',
-    })) as Record<string, unknown>;
-    return Array.isArray(r.data) ? (r.data as Record<string, unknown>[]) : [];
-  } catch (error) {
-    console.error(
-      'META_ADS_ITACARE_REBALANCE_STAGE_ERROR=' +
-        JSON.stringify({
-          stage: 'READ_ADS',
-          id: adSetId,
-          error: error instanceof Error ? error.message : 'UNKNOWN_ERROR',
-        }),
-    );
-    throw error;
+function selectSnapshots(all: Map<string, Snapshot>): Map<string, Snapshot> {
+  const selected = new Map<string, Snapshot>();
+  for (const id of ids) {
+    const value = all.get(id);
+    if (!value) throw new Error('META_ADS_ITACARE_REBALANCE_ADSET_MISSING_' + id);
+    selected.set(id, value);
   }
+  return selected;
+}
+
+async function readAllAds(): Promise<Record<string, unknown>[]> {
+  const response = (await getWithBackoff(CAMPAIGN_ID + '/ads', {
+    fields: 'id,name,adset_id,status,effective_status',
+    limit: '500',
+  })) as Record<string, unknown>;
+  return Array.isArray(response.data) ? (response.data as Record<string, unknown>[]) : [];
+}
+
+function adsForAdSet(
+  rows: readonly Record<string, unknown>[],
+  adSetId: string,
+): Record<string, unknown>[] {
+  return rows.filter((row) => scalarString(row.adset_id) === adSetId);
+}
+
+async function getWithBackoff(
+  path: string,
+  query: Readonly<Record<string, string>>,
+): Promise<unknown> {
+  return withRateLimitBackoff('GET', path, () => api.get(path, query));
+}
+
+async function withRateLimitBackoff<T>(
+  method: 'GET' | 'POST',
+  path: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const delays = [0, 5000, 10000, 20000, 40000];
+  let lastError: unknown;
+  for (let attempt = 0; attempt < delays.length; attempt += 1) {
+    const delay = delays[attempt] ?? 0;
+    if (delay > 0) await sleepMs(delay);
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      const message = normalizeError(error);
+      const isRateLimit = message.includes('META_CODE_17') || message.includes('2446079');
+      console.error(
+        'META_ADS_ITACARE_REBALANCE_RETRY=' +
+          JSON.stringify({
+            method,
+            path,
+            attempt: attempt + 1,
+            rateLimited: isRateLimit,
+            error: message,
+          }),
+      );
+      if (!isRateLimit || attempt === delays.length - 1) throw error;
+    }
+  }
+  throw lastError;
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function scalarString(value: unknown): string {
@@ -346,7 +391,7 @@ async function postStage(
   body: Readonly<Record<string, string>>,
 ): Promise<unknown> {
   try {
-    return await api.post(id, body);
+    return await withRateLimitBackoff('POST', id, () => api.post(id, body));
   } catch (error) {
     console.error(
       'META_ADS_ITACARE_REBALANCE_STAGE_ERROR=' +
