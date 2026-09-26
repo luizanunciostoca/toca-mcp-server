@@ -166,9 +166,35 @@ try {
   await postStage('ACTIVATE_ITABUNA_BROAD', OLD_ITABUNA_BROAD, { status: 'ACTIVE' });
 
   const after = new Map<string, Snapshot>();
-  for (const id of ids) after.set(id, await readAdSet(id));
+  for (const id of ids) {
+    try {
+      after.set(id, await readAdSet(id));
+    } catch (error) {
+      console.error(
+        'META_ADS_ITACARE_REBALANCE_STAGE_ERROR=' +
+          JSON.stringify({
+            stage: 'FINAL_READBACK_ADSET',
+            id,
+            error: error instanceof Error ? error.message : 'UNKNOWN_ERROR',
+          }),
+      );
+      throw error;
+    }
+  }
 
-  assertFinal(after, broadNewBudget);
+  try {
+    assertFinal(after, broadNewBudget);
+  } catch (error) {
+    console.error(
+      'META_ADS_ITACARE_REBALANCE_STAGE_ERROR=' +
+        JSON.stringify({
+          stage: 'ASSERT_FINAL',
+          error: error instanceof Error ? error.message : 'UNKNOWN_ERROR',
+          adSets: Array.from(after.values()),
+        }),
+    );
+    throw error;
+  }
 
   const finalAds: Record<string, unknown>[] = [];
   for (const id of [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE]) {
@@ -264,12 +290,23 @@ async function readAdSet(id: string): Promise<Snapshot> {
 }
 
 async function readAds(adSetId: string): Promise<Record<string, unknown>[]> {
-  const r = (await api.get(CAMPAIGN_ID + '/ads', {
-    fields: 'id,name,adset_id,status,effective_status',
-    filtering: JSON.stringify([{ field: 'adset.id', operator: 'EQUAL', value: adSetId }]),
-    limit: '100',
-  })) as Record<string, unknown>;
-  return Array.isArray(r.data) ? (r.data as Record<string, unknown>[]) : [];
+  try {
+    const r = (await api.get(adSetId + '/ads', {
+      fields: 'id,name,adset_id,status,effective_status',
+      limit: '100',
+    })) as Record<string, unknown>;
+    return Array.isArray(r.data) ? (r.data as Record<string, unknown>[]) : [];
+  } catch (error) {
+    console.error(
+      'META_ADS_ITACARE_REBALANCE_STAGE_ERROR=' +
+        JSON.stringify({
+          stage: 'READ_ADS',
+          id: adSetId,
+          error: error instanceof Error ? error.message : 'UNKNOWN_ERROR',
+        }),
+    );
+    throw error;
+  }
 }
 
 function scalarString(value: unknown): string {
