@@ -138,29 +138,32 @@ let mutationStarted = false;
 try {
   // Pause proven non-converters first.
   for (const id of [OLD_ITABUNA_FEED, OLD_ITABUNA_STORIES, OLD_VITORIA_STORIES]) {
-    await api.post(id, { status: 'PAUSED' });
+    await postStage('PAUSE_NON_CONVERTER', id, { status: 'PAUSED' });
     mutationStarted = true;
   }
 
   // New challenger budgets: exactly R$800 total.
-  await api.post(NEW_ILHEUS, { lifetime_budget: '30000' });
-  await api.post(NEW_VITORIA, { lifetime_budget: '30000' });
-  await api.post(NEW_ITACARE, { lifetime_budget: '20000' });
+  await postStage('SET_NEW_ILHEUS_BUDGET', NEW_ILHEUS, { lifetime_budget: '30000' });
+  await postStage('SET_NEW_VITORIA_BUDGET', NEW_VITORIA, { lifetime_budget: '30000' });
+  await postStage('SET_NEW_ITACARE_BUDGET', NEW_ITACARE, { lifetime_budget: '20000' });
 
   // Keep new Itabuna challenger paused and untouched.
-  await api.post(NEW_ITABUNA, { status: 'PAUSED' });
+  await postStage('KEEP_NEW_ITABUNA_PAUSED', NEW_ITABUNA, { status: 'PAUSED' });
 
   // Broad Itabuna gets exactly R$200 additional capacity over observed spent.
-  await api.post(OLD_ITABUNA_BROAD, { lifetime_budget: String(broadNewBudget) });
+  await postStage('SET_ITABUNA_BROAD_BUDGET', OLD_ITABUNA_BROAD, {
+    lifetime_budget: String(broadNewBudget),
+  });
 
   // Activate ads first while parent remains paused, then activate parent.
   for (const id of [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE]) {
     const ads = await readAds(id);
-    for (const ad of ads) await api.post(requiredScalar(ad.id, 'AD_ID'), { status: 'ACTIVE' });
-    await api.post(id, { status: 'ACTIVE' });
+    for (const ad of ads)
+      await postStage('ACTIVATE_NEW_AD', requiredScalar(ad.id, 'AD_ID'), { status: 'ACTIVE' });
+    await postStage('ACTIVATE_NEW_ADSET', id, { status: 'ACTIVE' });
   }
 
-  await api.post(OLD_ITABUNA_BROAD, { status: 'ACTIVE' });
+  await postStage('ACTIVATE_ITABUNA_BROAD', OLD_ITABUNA_BROAD, { status: 'ACTIVE' });
 
   const after = new Map<string, Snapshot>();
   for (const id of ids) after.set(id, await readAdSet(id));
@@ -298,4 +301,25 @@ function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(name + '_REQUIRED');
   return value;
+}
+
+
+async function postStage(
+  stage: string,
+  id: string,
+  body: Readonly<Record<string, string>>,
+): Promise<unknown> {
+  try {
+    return await api.post(id, body);
+  } catch (error) {
+    console.error(
+      'META_ADS_ITACARE_REBALANCE_STAGE_ERROR=' +
+        JSON.stringify({
+          stage,
+          id,
+          error: error instanceof Error ? error.message : 'UNKNOWN_ERROR',
+        }),
+    );
+    throw error;
+  }
 }
