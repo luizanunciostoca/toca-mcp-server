@@ -303,7 +303,6 @@ function requiredEnv(name: string): string {
   return value;
 }
 
-
 async function postStage(
   stage: string,
   id: string,
