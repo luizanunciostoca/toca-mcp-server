@@ -125,6 +125,15 @@ for (const id of [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE]) {
   );
 }
 
+console.log(
+  'META_ADS_ITACARE_REBALANCE_PREFLIGHT=' +
+    JSON.stringify({
+      adSets: Array.from(before.values()),
+      broadItabunaObservedSpentMinor: broadSpent,
+      broadItabunaPlannedLifetimeBudgetMinor: broadNewBudget,
+    }),
+);
+
 let mutationStarted = false;
 try {
   // Pause proven non-converters first.
