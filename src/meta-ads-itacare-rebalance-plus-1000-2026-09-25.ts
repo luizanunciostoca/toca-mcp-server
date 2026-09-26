@@ -41,7 +41,20 @@ if (requiredEnv('META_ADS_ITACARE_REBALANCE_APPROVAL') !== APPROVAL) {
   throw new Error('META_ADS_ITACARE_REBALANCE_APPROVAL_MISMATCH');
 }
 
-const config = loadConfig(process.env);
+let config;
+try {
+  config = loadConfig(process.env);
+} catch (error) {
+  const issues =
+    error && typeof error === 'object' && 'issues' in error && Array.isArray((error as { issues?: unknown }).issues)
+      ? (error as { issues: Array<{ path?: unknown; message?: unknown }> }).issues.map((issue) => ({
+          path: Array.isArray(issue.path) ? issue.path.map(String).join('.') : '',
+          message: String(issue.message ?? ''),
+        }))
+      : [];
+  console.error('META_ADS_ITACARE_REBALANCE_CONFIG_ERROR=' + JSON.stringify({ issues }));
+  throw error;
+}
 const api = createMetaPublicationApiClient(config);
 
 type Snapshot = {
