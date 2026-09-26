@@ -46,7 +46,10 @@ try {
   config = loadConfig(process.env);
 } catch (error) {
   const issues =
-    error && typeof error === 'object' && 'issues' in error && Array.isArray((error as { issues?: unknown }).issues)
+    error &&
+    typeof error === 'object' &&
+    'issues' in error &&
+    Array.isArray((error as { issues?: unknown }).issues)
       ? (error as { issues: Array<{ path?: unknown; message?: unknown }> }).issues.map((issue) => ({
           path: Array.isArray(issue.path) ? issue.path.map(String).join('.') : '',
           message: String(issue.message ?? ''),
