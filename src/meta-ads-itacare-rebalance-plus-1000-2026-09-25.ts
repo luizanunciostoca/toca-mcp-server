@@ -52,7 +52,7 @@ try {
     Array.isArray((error as { issues?: unknown }).issues)
       ? (error as { issues: Array<{ path?: unknown; message?: unknown }> }).issues.map((issue) => ({
           path: Array.isArray(issue.path) ? issue.path.map(String).join('.') : '',
-          message: String(issue.message ?? ''),
+          message: typeof issue.message === 'string' ? issue.message : '',
         }))
       : [];
   console.error('META_ADS_ITACARE_REBALANCE_CONFIG_ERROR=' + JSON.stringify({ issues }));
