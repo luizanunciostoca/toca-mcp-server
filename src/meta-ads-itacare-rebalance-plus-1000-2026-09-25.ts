@@ -182,8 +182,7 @@ try {
         adSets: Array.from(finalAdSets.values()),
         activeNewAds: finalAds.filter(
           (ad) =>
-            [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE].includes(ad.adSetId) &&
-            ad.status === 'ACTIVE',
+            [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE].includes(ad.adSetId) && ad.status === 'ACTIVE',
         ),
       }),
   );
@@ -213,11 +212,7 @@ async function setAdStatus(id: string, status: 'ACTIVE' | 'PAUSED'): Promise<voi
   mutatedAds.add(id);
 }
 
-async function pacedPost(
-  id: string,
-  values: Record<string, string>,
-  label: string,
-): Promise<void> {
+async function pacedPost(id: string, values: Record<string, string>, label: string): Promise<void> {
   await withRateLimitRetry(label, () => api.post(id, values));
   await sleep(650);
 }
@@ -227,8 +222,7 @@ async function readTargetAdSets(): Promise<Map<string, AdSetSnapshot>> {
     asRecord(
       await withRateLimitRetry('final-adsets-read', () =>
         api.get(CAMPAIGN_ID + '/adsets', {
-          fields:
-            'id,name,campaign_id,status,effective_status,lifetime_budget,budget_remaining',
+          fields: 'id,name,campaign_id,status,effective_status,lifetime_budget,budget_remaining',
           limit: '100',
         }),
       ),
@@ -253,15 +247,12 @@ async function readTargetAds(): Promise<AdSnapshot[]> {
       ),
     ).data,
   );
-  return rows.map(snapshotAd).filter((ad) =>
-    [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE].includes(ad.adSetId),
-  );
+  return rows
+    .map(snapshotAd)
+    .filter((ad) => [NEW_ILHEUS, NEW_VITORIA, NEW_ITACARE].includes(ad.adSetId));
 }
 
-function assertFinal(
-  adSets: Map<string, AdSetSnapshot>,
-  ads: AdSnapshot[],
-): void {
+function assertFinal(adSets: Map<string, AdSetSnapshot>, ads: AdSnapshot[]): void {
   const budgets: Readonly<Record<string, number>> = {
     ...NEW_BUDGETS,
     [OLD_ITABUNA_BROAD]: BROAD_ITABUNA_TARGET_BUDGET,
