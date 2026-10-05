@@ -14,6 +14,7 @@ failUnless(
 failUnless(Array.isArray(manifest.validations), 'CAPABILITY_EVIDENCE_VALIDATIONS_INVALID');
 
 const capabilityIds = new Set();
+const now = Date.now();
 for (const validation of manifest.validations) {
   failUnless(
     !capabilityIds.has(validation.capabilityId),
@@ -27,6 +28,22 @@ for (const validation of manifest.validations) {
   failUnless(
     validation.environment === 'production',
     `CAPABILITY_EVIDENCE_ENVIRONMENT_INVALID:${validation.capabilityId}`,
+  );
+  failUnless(
+    typeof validation.validatedAt === 'string' && Number.isFinite(Date.parse(validation.validatedAt)),
+    `CAPABILITY_EVIDENCE_VALIDATED_AT_INVALID:${validation.capabilityId}`,
+  );
+  failUnless(
+    typeof validation.expiresAt === 'string' && Number.isFinite(Date.parse(validation.expiresAt)),
+    `CAPABILITY_EVIDENCE_EXPIRES_AT_INVALID:${validation.capabilityId}`,
+  );
+  failUnless(
+    Date.parse(validation.expiresAt) > Date.parse(validation.validatedAt),
+    `CAPABILITY_EVIDENCE_EXPIRY_WINDOW_INVALID:${validation.capabilityId}`,
+  );
+  failUnless(
+    Date.parse(validation.expiresAt) > now,
+    `CAPABILITY_EVIDENCE_EXPIRED:${validation.capabilityId}`,
   );
   failUnless(
     validation.exactHeadSha === manifest.exactHeadSha,
