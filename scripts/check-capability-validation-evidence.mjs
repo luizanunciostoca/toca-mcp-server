@@ -30,11 +30,13 @@ for (const validation of manifest.validations) {
     `CAPABILITY_EVIDENCE_ENVIRONMENT_INVALID:${validation.capabilityId}`,
   );
   failUnless(
-    typeof validation.validatedAt === 'string' && Number.isFinite(Date.parse(validation.validatedAt)),
+    typeof validation.validatedAt === 'string' &&
+      Number.isFinite(Date.parse(validation.validatedAt)),
     `CAPABILITY_EVIDENCE_VALIDATED_AT_INVALID:${validation.capabilityId}`,
   );
   failUnless(
-    typeof validation.expiresAt === 'string' && Number.isFinite(Date.parse(validation.expiresAt)),
+    typeof validation.expiresAt === 'string' &&
+      Number.isFinite(Date.parse(validation.expiresAt)),
     `CAPABILITY_EVIDENCE_EXPIRES_AT_INVALID:${validation.capabilityId}`,
   );
   failUnless(
