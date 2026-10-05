@@ -16,12 +16,7 @@ export type CapabilityClosureState =
   | 'DEFERRED'
   | 'NOT_PROVEN';
 
-export type CapabilityEvidenceFreshness =
-  | 'CURRENT'
-  | 'EXPIRED'
-  | 'FUTURE'
-  | 'INVALID'
-  | 'NONE';
+export type CapabilityEvidenceFreshness = 'CURRENT' | 'EXPIRED' | 'FUTURE' | 'INVALID' | 'NONE';
 
 export interface LiveCapabilityMatrixRecord {
   readonly capability_id: string;
@@ -421,7 +416,8 @@ function semanticAssertion(
 function indexRuntimeTools(tools: readonly ToolDefinition[]): ReadonlyMap<string, ToolDefinition> {
   const map = new Map<string, ToolDefinition>();
   for (const tool of tools) {
-    if (map.has(tool.name)) throw new Error(`LIVE_CAPABILITY_MATRIX_DUPLICATE_RUNTIME_TOOL:${tool.name}`);
+    if (map.has(tool.name))
+      throw new Error(`LIVE_CAPABILITY_MATRIX_DUPLICATE_RUNTIME_TOOL:${tool.name}`);
     map.set(tool.name, tool);
   }
   return map;
@@ -434,7 +430,9 @@ function indexRawEvidence(
   const map = new Map<string, ProviderCapabilityValidationEvidence>();
   for (const evidence of values) {
     if (!definitionIds.has(evidence.capabilityId)) {
-      throw new Error(`LIVE_CAPABILITY_MATRIX_EVIDENCE_CAPABILITY_UNKNOWN:${evidence.capabilityId}`);
+      throw new Error(
+        `LIVE_CAPABILITY_MATRIX_EVIDENCE_CAPABILITY_UNKNOWN:${evidence.capabilityId}`,
+      );
     }
     if (map.has(evidence.capabilityId)) {
       throw new Error(`LIVE_CAPABILITY_MATRIX_DUPLICATE_EVIDENCE:${evidence.capabilityId}`);
@@ -463,7 +461,9 @@ function countStates(
 }
 
 function errorCode(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : 'UNKNOWN_EVIDENCE_VALIDATION_ERROR';
+  return error instanceof Error && error.message
+    ? error.message
+    : 'UNKNOWN_EVIDENCE_VALIDATION_ERROR';
 }
 
 function assertSha(value: string): void {

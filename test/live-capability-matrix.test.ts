@@ -147,7 +147,10 @@ describe('TOCA-MAX live capability matrix projection', () => {
     (_label, override, expectedError) => {
       const definition = productionDefinition();
       const runtimeTool = runtimeToolFor(definition, 'PRODUCTION_VALIDATED');
-      const evidence = { ...validEvidence(definition), ...override } as ProviderCapabilityValidationEvidence;
+      const evidence = {
+        ...validEvidence(definition),
+        ...override,
+      } as ProviderCapabilityValidationEvidence;
 
       const matrix = buildLiveCapabilityMatrix([definition], {
         exactHeadSha: SHA,
@@ -275,9 +278,7 @@ function runtimeToolFor(
   };
 }
 
-function validEvidence(
-  definition: CapabilityDefinition,
-): ProviderCapabilityValidationEvidence {
+function validEvidence(definition: CapabilityDefinition): ProviderCapabilityValidationEvidence {
   return {
     validationId: 'matrix-proof',
     capabilityId: definition.capability_id,
