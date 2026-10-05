@@ -38,6 +38,10 @@ for (const validation of manifest.validations) {
     `CAPABILITY_EVIDENCE_EXPIRES_AT_INVALID:${validation.capabilityId}`,
   );
   failUnless(
+    Date.parse(validation.validatedAt) <= now,
+    `CAPABILITY_EVIDENCE_FROM_FUTURE:${validation.capabilityId}`,
+  );
+  failUnless(
     Date.parse(validation.expiresAt) > Date.parse(validation.validatedAt),
     `CAPABILITY_EVIDENCE_EXPIRY_WINDOW_INVALID:${validation.capabilityId}`,
   );
