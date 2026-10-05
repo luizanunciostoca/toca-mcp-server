@@ -68,15 +68,16 @@ export function buildLiveCapabilityMatrix(
     (options.providerEvidence ?? []).map((evidence) => [evidence.capabilityId, evidence] as const),
   );
   const records = definitions
-    .map((definition) =>
-      projectCapability(definition, {
+    .map((definition) => {
+      const providerEvidence = evidenceByCapability.get(definition.capability_id);
+      return projectCapability(definition, {
         exactHeadSha: options.exactHeadSha,
         now,
         runtimeIdentity: options.runtimeIdentity ?? null,
         runtimeRegistered: runtimeNames.has(definition.capability_id),
-        providerEvidence: evidenceByCapability.get(definition.capability_id),
-      }),
-    )
+        ...(providerEvidence ? { providerEvidence } : {}),
+      });
+    })
     .sort((left, right) => left.capability_id.localeCompare(right.capability_id));
 
   const ids = new Set(records.map((record) => record.capability_id));
