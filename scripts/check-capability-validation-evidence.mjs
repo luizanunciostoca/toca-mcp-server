@@ -55,7 +55,10 @@ for (const validation of manifest.validations) {
     expiresAt > validatedAt,
     `CAPABILITY_EVIDENCE_EXPIRY_WINDOW_INVALID:${validation.capabilityId}`,
   );
-  failUnless(expiresAt > now, `CAPABILITY_EVIDENCE_EXPIRED:${validation.capabilityId}`);
+  failUnless(
+    expiresAt > now,
+    `CAPABILITY_EVIDENCE_EXPIRED:${validation.capabilityId}`,
+  );
   failUnless(
     validation.exactHeadSha === manifest.exactHeadSha,
     `CAPABILITY_EVIDENCE_HEAD_MISMATCH:${validation.capabilityId}`,
