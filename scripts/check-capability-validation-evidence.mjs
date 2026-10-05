@@ -1,17 +1,28 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from "node:fs";
 
-const manifest = JSON.parse(readFileSync('control/capability-validation-evidence.v1.json', 'utf8'));
-failUnless(manifest.schemaVersion === '1.0.0', 'CAPABILITY_EVIDENCE_SCHEMA_INVALID');
-failUnless(
-  manifest.manifestId === 'TOCA_CAPABILITY_VALIDATION_EVIDENCE_V1',
-  'CAPABILITY_EVIDENCE_MANIFEST_ID_INVALID',
+const manifest = JSON.parse(
+  readFileSync("control/capability-validation-evidence.v1.json", "utf8"),
 );
-failUnless(manifest.status === 'ACTIVE_CANONICAL', 'CAPABILITY_EVIDENCE_MANIFEST_NOT_CANONICAL');
+failUnless(
+  manifest.schemaVersion === "1.0.0",
+  "CAPABILITY_EVIDENCE_SCHEMA_INVALID",
+);
+failUnless(
+  manifest.manifestId === "TOCA_CAPABILITY_VALIDATION_EVIDENCE_V1",
+  "CAPABILITY_EVIDENCE_MANIFEST_ID_INVALID",
+);
+failUnless(
+  manifest.status === "ACTIVE_CANONICAL",
+  "CAPABILITY_EVIDENCE_MANIFEST_NOT_CANONICAL",
+);
 failUnless(
   /^[a-f0-9]{40}$/.test(manifest.exactHeadSha),
-  'CAPABILITY_EVIDENCE_MANIFEST_SHA_INVALID',
+  "CAPABILITY_EVIDENCE_MANIFEST_SHA_INVALID",
 );
-failUnless(Array.isArray(manifest.validations), 'CAPABILITY_EVIDENCE_VALIDATIONS_INVALID');
+failUnless(
+  Array.isArray(manifest.validations),
+  "CAPABILITY_EVIDENCE_VALIDATIONS_INVALID",
+);
 
 const capabilityIds = new Set();
 const now = Date.now();
@@ -22,15 +33,15 @@ for (const validation of manifest.validations) {
   );
   capabilityIds.add(validation.capabilityId);
   failUnless(
-    validation.status === 'PRODUCTION_VALIDATED',
+    validation.status === "PRODUCTION_VALIDATED",
     `CAPABILITY_EVIDENCE_STATUS_INVALID:${validation.capabilityId}`,
   );
   failUnless(
-    validation.environment === 'production',
+    validation.environment === "production",
     `CAPABILITY_EVIDENCE_ENVIRONMENT_INVALID:${validation.capabilityId}`,
   );
   failUnless(
-    typeof validation.validatedAt === 'string',
+    typeof validation.validatedAt === "string",
     `CAPABILITY_EVIDENCE_VALIDATED_AT_INVALID:${validation.capabilityId}`,
   );
   const validatedAt = Date.parse(validation.validatedAt);
@@ -39,7 +50,7 @@ for (const validation of manifest.validations) {
     `CAPABILITY_EVIDENCE_VALIDATED_AT_INVALID:${validation.capabilityId}`,
   );
   failUnless(
-    typeof validation.expiresAt === 'string',
+    typeof validation.expiresAt === "string",
     `CAPABILITY_EVIDENCE_EXPIRES_AT_INVALID:${validation.capabilityId}`,
   );
   const expiresAt = Date.parse(validation.expiresAt);
@@ -73,38 +84,52 @@ for (const validation of manifest.validations) {
   );
   failUnless(
     Array.isArray(validation.evidence) &&
-      validation.evidence.some((value) => String(value).startsWith('provider:')) &&
-      validation.evidence.some((value) => String(value).startsWith('readback:')) &&
-      validation.evidence.some((value) => String(value).startsWith('acceptance:')),
+      validation.evidence.some((value) =>
+        String(value).startsWith("provider:"),
+      ) &&
+      validation.evidence.some((value) =>
+        String(value).startsWith("readback:"),
+      ) &&
+      validation.evidence.some((value) =>
+        String(value).startsWith("acceptance:"),
+      ),
     `CAPABILITY_EVIDENCE_REQUIRED_CLASSES_MISSING:${validation.capabilityId}`,
   );
 }
 
-const registry = readFileSync('src/registry.ts', 'utf8');
+const registry = readFileSync("src/registry.ts", "utf8");
 for (const marker of [
-  'instagramPublicationValidationEvidence',
-  'indexProviderCapabilityEvidence',
-  'if (!evidence) return tool',
-]) {
-  failUnless(registry.includes(marker), `CAPABILITY_EVIDENCE_REGISTRY_GUARD_MISSING:${marker}`);
-}
-for (const [path, marker] of [
-  ['src/server.ts', 'loadCapabilityValidationEvidenceManifest'],
-  ['src/governance/capability-catalog.ts', 'loadCapabilityValidationEvidenceManifest'],
+  "instagramPublicationValidationEvidence",
+  "indexProviderCapabilityEvidence",
+  "if (!evidence) return tool",
 ]) {
   failUnless(
-    readFileSync(path, 'utf8').includes(marker),
+    registry.includes(marker),
+    `CAPABILITY_EVIDENCE_REGISTRY_GUARD_MISSING:${marker}`,
+  );
+}
+for (const [path, marker] of [
+  ["src/server.ts", "loadCapabilityValidationEvidenceManifest"],
+  [
+    "src/governance/capability-catalog.ts",
+    "loadCapabilityValidationEvidenceManifest",
+  ],
+]) {
+  failUnless(
+    readFileSync(path, "utf8").includes(marker),
     `CAPABILITY_EVIDENCE_MANIFEST_CONSUMER_MISSING:${path}`,
   );
 }
 failUnless(
   !registry.includes(
-    'options.instagramPublicationWritesEnabled === undefined &&\n      options.tocaManagedInstagramSchedulerEnabled === true',
+    "options.instagramPublicationWritesEnabled === undefined &&\n      options.tocaManagedInstagramSchedulerEnabled === true",
   ),
-  'CAPABILITY_EVIDENCE_SCHEDULER_FLAG_PROMOTION_FORBIDDEN',
+  "CAPABILITY_EVIDENCE_SCHEDULER_FLAG_PROMOTION_FORBIDDEN",
 );
 
-console.log(`CAPABILITY_VALIDATION_EVIDENCE_CHECK=PASS validations=${manifest.validations.length}`);
+console.log(
+  `CAPABILITY_VALIDATION_EVIDENCE_CHECK=PASS validations=${manifest.validations.length}`,
+);
 
 function failUnless(condition, code) {
   if (condition) return;
