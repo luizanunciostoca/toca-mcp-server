@@ -21,7 +21,9 @@ describe('TOCA-MAX live capability matrix projection', () => {
         (record) =>
           record.owner.length > 0 &&
           record.provider_identity.length > 0 &&
-          record.semantic_assertion.includes('closure never exceeds observed runtime/provider proof'),
+          record.semantic_assertion.includes(
+            'closure never exceeds observed runtime/provider proof',
+          ),
       ),
     ).toBe(true);
     expect(matrix.records.some((record) => record.closure_state === 'PRODUCTION_VERIFIED')).toBe(
@@ -38,14 +40,18 @@ describe('TOCA-MAX live capability matrix projection', () => {
     for (const prefix of ['google_ads.', 'whatsapp.', 'email.']) {
       const records = matrix.records.filter((record) => record.capability_id.startsWith(prefix));
       expect(records.length, prefix).toBeGreaterThan(0);
-      expect(records.every((record) => record.closure_state === 'DEFERRED'), prefix).toBe(true);
+      expect(
+        records.every((record) => record.closure_state === 'DEFERRED'),
+        prefix,
+      ).toBe(true);
       expect(
         records.every((record) => record.blocker === 'DEFERRED_FINAL_PROVIDER_PHASE'),
         prefix,
       ).toBe(true);
-      expect(records.every((record) => record.next_action === 'FINAL_PROVIDER_PHASE'), prefix).toBe(
-        true,
-      );
+      expect(
+        records.every((record) => record.next_action === 'FINAL_PROVIDER_PHASE'),
+        prefix,
+      ).toBe(true);
     }
   });
 

@@ -135,11 +135,7 @@ function projectCapability(
     evidence_exact_head_sha: currentEvidence?.exactHeadSha ?? null,
     evidence_freshness: freshness,
     semantic_assertion: semanticAssertion(definition, closureState),
-    readback: resolveReadback(
-      currentEvidence,
-      context.runtimeRegistered,
-      context.runtimeIdentity,
-    ),
+    readback: resolveReadback(currentEvidence, context.runtimeRegistered, context.runtimeIdentity),
     blocker,
     next_action: resolveNextAction(closureState, blocker),
     deferred_final_provider_phase: deferred,
@@ -216,10 +212,7 @@ function resolveBlocker(
   if (input.freshness === 'EXPIRED') return 'EXPIRED_PROVIDER_EVIDENCE';
   if (input.freshness === 'FUTURE') return 'FUTURE_PROVIDER_EVIDENCE';
   if (input.closureState === 'PRODUCTION_VERIFIED') return null;
-  if (
-    definition.lifecycle_status === 'PRODUCTION_VALIDATED' &&
-    input.freshness !== 'CURRENT'
-  ) {
+  if (definition.lifecycle_status === 'PRODUCTION_VALIDATED' && input.freshness !== 'CURRENT') {
     return 'ACTIVE_PRODUCTION_EVIDENCE_REQUIRED';
   }
   if (input.runtimeRegistered && !input.runtimeIdentity) return 'RUNTIME_IDENTITY_NOT_BOUND';
