@@ -1,0 +1,277 @@
+name: Staging DR Current Schema
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact current main SHA to validate
+        required: true
+        type: string
+      expected_max_migration:
+        description: Exact lexicographically final migration filename
+        required: true
+        type: string
+      authorization_issue:
+        description: Open owner-authored DR execution authorization issue number
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: staging-dr-current-schema
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-next-staging
+  PROJECT_NUMBER: '729069789107'
+  REGION: southamerica-east1
+  SOURCE_INSTANCE: toca-mcp-next-staging-db
+  CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+  EXPECTED_MAX_MIGRATION: ${{ inputs.expected_max_migration }}
+  AUTHORIZATION_ISSUE: ${{ inputs.authorization_issue }}
+  PRODUCTION_PROJECT_ID: toca-mcp-production
+  PRODUCTION_PROJECT_NUMBER: '990081828836'
+  INFRA_WIF: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  INFRA_ADMIN_SA: toca-mcp-infra-admin@toca-mcp-production.iam.gserviceaccount.com
+  DR_SA_ID: toca-next-dr-${{ github.run_id }}
+  DR_SA_EMAIL: toca-next-dr-${{ github.run_id }}@toca-mcp-next-staging.iam.gserviceaccount.com
+  DR_ROLE_ID: tocaNextDr${{ github.run_id }}
+  TARGET_INSTANCE: toca-next-lp-pitr-${{ github.run_id }}
+  BOOTSTRAP_SCRIPT: ops/staging-dr/bootstrap.sh
+  HARNESS_SCRIPT: ops/staging-dr/drill.sh
+  GCLOUD_SHIM: ops/staging-dr/gcloud-shim.sh
+  PSQL_SHIM: ops/staging-dr/psql-shim.sh
+
+jobs:
+  authorization:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate explicit DR authorization and exact main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_MAX_MIGRATION" =~ ^[0-9]{3}_[a-z0-9_]+\.sql$ ]]
+          [[ "$AUTHORIZATION_ISSUE" =~ ^[0-9]+$ ]]
+          test "$CANDIDATE_SHA" = "$GITHUB_SHA"
+
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
+          test "$(jq -r '.state' <<<"$ISSUE_JSON")" = open
+          test "$(jq -r '.pull_request // empty' <<<"$ISSUE_JSON")" = ""
+          test "$(jq -r '.user.login' <<<"$ISSUE_JSON")" = "$GITHUB_REPOSITORY_OWNER"
+          BODY="$(jq -r '.body // ""' <<<"$ISSUE_JSON")"
+          grep -Fxq 'DR_EXECUTION_AUTHORIZATION=ACTIVE' <<<"$BODY"
+          grep -Fxq "AUTHORIZED_CANDIDATE_SHA=$CANDIDATE_SHA" <<<"$BODY"
+          grep -Fxq "EXPECTED_MAX_MIGRATION=$EXPECTED_MAX_MIGRATION" <<<"$BODY"
+          grep -Fxq 'AUTHORIZED_ENVIRONMENT=toca-mcp-next-staging' <<<"$BODY"
+          grep -Fxq 'PRODUCTION_MUTATION_AUTHORIZED=false' <<<"$BODY"
+          grep -Fxq 'PROVIDER_MUTATION_AUTHORIZED=false' <<<"$BODY"
+          echo 'DR_EXECUTION_AUTHORIZATION=VERIFIED'
+
+  syntax-boundary:
+    needs: authorization
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Validate manual-only staging boundary and current schema inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          bash -n "$BOOTSTRAP_SCRIPT"
+          bash -n "$HARNESS_SCRIPT"
+          bash -n "$GCLOUD_SHIM"
+          bash -n "$PSQL_SHIM"
+          ! grep -Eq 'gcloud[[:space:]]+(run|secrets)|secretmanager\.googleapis\.com|graph\.facebook\.com|api\.sendgrid\.com|googleads\.googleapis\.com' "$BOOTSTRAP_SCRIPT" "$HARNESS_SCRIPT" "$GCLOUD_SHIM" "$PSQL_SHIM"
+          grep -Fq 'EXPECTED_MAX_MIGRATION' "$HARNESS_SCRIPT"
+          grep -Fq 'exactRepositoryMigrationSetRequired:true' "$HARNESS_SCRIPT"
+          grep -Fq 'finops_cost_events' "$HARNESS_SCRIPT"
+          grep -Fq 'finops_billing_snapshots' "$HARNESS_SCRIPT"
+          grep -Fq 'instagram_engagement_knowledge_documents' "$HARNESS_SCRIPT"
+          grep -Fq '! grep -Eq '\''^027_'\'' dr-v3-evidence/restored-migrations.txt' "$HARNESS_SCRIPT"
+          echo 'STAGING_DR_CURRENT_SCHEMA_BOUNDARY=PASS'
+
+  bootstrap:
+    needs: syntax-boundary
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      roleadmin_granted: ${{ steps.bootstrap.outputs.roleadmin_granted }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Bootstrap exact temporary DR identity and IAM proof
+        id: bootstrap
+        shell: bash
+        run: bash "$BOOTSTRAP_SCRIPT"
+
+  drill:
+    needs: bootstrap
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          path: candidate
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Install normalized gcloud and PostgreSQL shims
+        shell: bash
+        run: |
+          set -euo pipefail
+          REAL_GCLOUD="$(command -v gcloud)"
+          test -x "$REAL_GCLOUD"
+          mkdir -p /tmp/toca-dr-bin
+          cp "harness/$GCLOUD_SHIM" /tmp/toca-dr-bin/gcloud
+          cp "harness/$PSQL_SHIM" /tmp/toca-dr-bin/psql
+          chmod 0755 /tmp/toca-dr-bin/gcloud /tmp/toca-dr-bin/psql
+          echo "REAL_GCLOUD=$REAL_GCLOUD" >> "$GITHUB_ENV"
+          echo 'REAL_PSQL=/usr/bin/psql' >> "$GITHUB_ENV"
+          echo '/tmp/toca-dr-bin' >> "$GITHUB_PATH"
+      - name: Execute isolated PITR and validate current candidate schema
+        shell: bash
+        run: bash "harness/$HARNESS_SCRIPT" drill candidate
+      - name: Build sanitized evidence manifest
+        if: always()
+        shell: bash
+        run: bash "harness/$HARNESS_SCRIPT" manifest candidate
+      - name: Scrub temporary cloned-login credential
+        if: always()
+        shell: bash
+        run: rm -f /tmp/dr-v13-app-owner /tmp/dr-v13-app-db /tmp/dr-v13-app-owner-password
+      - name: Upload sanitized DR evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-dr-current-schema-${{ github.run_id }}
+          path: dr-v3-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  cleanup-target:
+    needs: [bootstrap, drill]
+    if: always() && needs.bootstrap.result == 'success'
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Install normalized cleanup shim
+        shell: bash
+        run: |
+          set -euo pipefail
+          REAL_GCLOUD="$(command -v gcloud)"
+          mkdir -p /tmp/toca-dr-bin
+          cp "$GCLOUD_SHIM" /tmp/toca-dr-bin/gcloud
+          chmod 0755 /tmp/toca-dr-bin/gcloud
+          echo "REAL_GCLOUD=$REAL_GCLOUD" >> "$GITHUB_ENV"
+          echo '/tmp/toca-dr-bin' >> "$GITHUB_PATH"
+      - name: Delete only temporary target
+        shell: bash
+        run: bash "$HARNESS_SCRIPT" cleanup-target
+
+  cleanup-iam:
+    needs: [bootstrap, drill, cleanup-target]
+    if: always()
+    runs-on: ubuntu-latest
+    environment: infrastructure-admin
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ROLEADMIN_GRANTED: ${{ needs.bootstrap.outputs.roleadmin_granted }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.INFRA_WIF }}
+          service_account: ${{ env.INFRA_ADMIN_SA }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Install normalized fallback cleanup shim
+        shell: bash
+        run: |
+          set -euo pipefail
+          REAL_GCLOUD="$(command -v gcloud)"
+          mkdir -p /tmp/toca-dr-bin
+          cp "$GCLOUD_SHIM" /tmp/toca-dr-bin/gcloud
+          chmod 0755 /tmp/toca-dr-bin/gcloud
+          echo "REAL_GCLOUD=$REAL_GCLOUD" >> "$GITHUB_ENV"
+          echo '/tmp/toca-dr-bin' >> "$GITHUB_PATH"
+      - name: Fallback cleanup and remove temporary IAM
+        shell: bash
+        run: bash "$HARNESS_SCRIPT" cleanup-iam
+
+  final-gate:
+    needs: [authorization, syntax-boundary, bootstrap, drill, cleanup-target, cleanup-iam]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require full DR lifecycle success
+        env:
+          AUTH: ${{ needs.authorization.result }}
+          A: ${{ needs.syntax-boundary.result }}
+          B: ${{ needs.bootstrap.result }}
+          C: ${{ needs.drill.result }}
+          D: ${{ needs.cleanup-target.result }}
+          E: ${{ needs.cleanup-iam.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$AUTH" = success
+          test "$A" = success
+          test "$B" = success
+          test "$C" = success
+          test "$D" = success
+          test "$E" = success
+          echo 'STAGING_DR_CURRENT_SCHEMA=PASS'
