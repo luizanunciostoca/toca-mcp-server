@@ -99,4 +99,99 @@ describe('TOCA-MAX R01-R32 acceptance projection', () => {
       next_action: 'FINAL_PROVIDER_PHASE',
     });
   });
+
+  it('rejects duplicate capability records before route projection', () => {
+    const capabilities = buildLiveCapabilityMatrix(CAPABILITY_CATALOG, {
+      exactHeadSha: SHA,
+      now: NOW,
+    });
+    const duplicate = capabilities.records[0];
+    expect(duplicate).toBeDefined();
+    if (!duplicate) return;
+
+    expect(() =>
+      buildRouteAcceptanceMatrix(ROUTE_CATALOG, {
+        ...capabilities,
+        records: [...capabilities.records, duplicate],
+        total: capabilities.total + 1,
+      }),
+    ).toThrow('ROUTE_ACCEPTANCE_DUPLICATE_CAPABILITY_RECORD');
+  });
+
+  it('gives BLOCKED precedence when one non-deferred capability is blocked', () => {
+    const capabilities = buildLiveCapabilityMatrix(CAPABILITY_CATALOG, {
+      exactHeadSha: SHA,
+      now: NOW,
+    });
+    const route = ROUTE_CATALOG.find((candidate) => candidate.routeId === 'R21');
+    expect(route).toBeDefined();
+    if (!route) return;
+
+    const routeIds = new Set(route.capabilityIds);
+    const blockedId = route.capabilityIds[0];
+    expect(blockedId).toBeDefined();
+    if (!blockedId) return;
+
+    const projected = {
+      ...capabilities,
+      records: capabilities.records.map((record) => {
+        if (!routeIds.has(record.capability_id)) return record;
+        if (record.capability_id === blockedId) {
+          return {
+            ...record,
+            closure_state: 'BLOCKED' as const,
+            blocker: 'TEST_BLOCKER',
+            next_action: 'RECONCILE_BLOCKER',
+          };
+        }
+        return {
+          ...record,
+          closure_state: 'PRODUCTION_VERIFIED' as const,
+          blocker: null,
+          next_action: 'NONE',
+        };
+      }),
+    };
+
+    const acceptance = buildRouteAcceptanceMatrix([route], projected);
+    expect(acceptance.records[0]).toMatchObject({
+      proof_state: 'BLOCKED',
+      blocked_non_deferred_count: 1,
+      next_action: 'RECONCILE_BLOCKED_NON_DEFERRED_CAPABILITIES',
+    });
+  });
+
+  it('marks a route production verified only when every capability is production verified', () => {
+    const capabilities = buildLiveCapabilityMatrix(CAPABILITY_CATALOG, {
+      exactHeadSha: SHA,
+      now: NOW,
+    });
+    const route = ROUTE_CATALOG.find((candidate) => candidate.routeId === 'R21');
+    expect(route).toBeDefined();
+    if (!route) return;
+
+    const routeIds = new Set(route.capabilityIds);
+    const projected = {
+      ...capabilities,
+      records: capabilities.records.map((record) =>
+        routeIds.has(record.capability_id)
+          ? {
+              ...record,
+              closure_state: 'PRODUCTION_VERIFIED' as const,
+              blocker: null,
+              next_action: 'NONE',
+            }
+          : record,
+      ),
+    };
+
+    const acceptance = buildRouteAcceptanceMatrix([route], projected);
+    expect(acceptance.records[0]).toMatchObject({
+      proof_state: 'PRODUCTION_VERIFIED',
+      deferred_final_provider_count: 0,
+      unresolved_non_deferred_capability_ids: [],
+      next_action: 'NONE',
+    });
+  });
+
 });
