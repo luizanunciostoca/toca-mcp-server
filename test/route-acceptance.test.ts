@@ -59,9 +59,7 @@ describe('TOCA-MAX R01-R32 acceptance projection', () => {
     expect(() =>
       buildRouteAcceptanceMatrix(ROUTE_CATALOG, {
         ...capabilities,
-        records: capabilities.records.filter(
-          (record) => record.capability_id !== firstCapability,
-        ),
+        records: capabilities.records.filter((record) => record.capability_id !== firstCapability),
         total: capabilities.total - 1,
       }),
     ).toThrow(`ROUTE_ACCEPTANCE_CAPABILITY_MISSING:R01:${firstCapability}`);
@@ -73,9 +71,7 @@ describe('TOCA-MAX R01-R32 acceptance projection', () => {
       now: NOW,
     });
     const route = ROUTE_CATALOG.find((candidate) =>
-      candidate.capabilityIds.some((capabilityId) =>
-        capabilityId.startsWith('google_business.'),
-      ),
+      candidate.capabilityIds.some((capabilityId) => capabilityId.startsWith('google_business.')),
     );
     expect(route).toBeDefined();
     if (!route) return;
