@@ -1,15 +1,9 @@
-import type {
-  CapabilityClosureState,
-  LiveCapabilityMatrix,
-} from './live-capability-matrix.js';
+import type { CapabilityClosureState, LiveCapabilityMatrix } from './live-capability-matrix.js';
 import type { RouteDefinition, RouteId } from './types.js';
 
 export type RouteStructuralState = 'PASS';
 export type RouteProofState =
-  | 'PRODUCTION_VERIFIED'
-  | 'DEFERRED_FINAL_PROVIDER_PHASE'
-  | 'BLOCKED'
-  | 'NOT_PROVEN';
+  'PRODUCTION_VERIFIED' | 'DEFERRED_FINAL_PROVIDER_PHASE' | 'BLOCKED' | 'NOT_PROVEN';
 
 export interface RouteAcceptanceRecord {
   readonly route_id: RouteId;
@@ -64,9 +58,7 @@ export function buildRouteAcceptanceMatrix(
     const routeCapabilities = route.capabilityIds.map((capabilityId) => {
       const record = byCapability.get(capabilityId);
       if (!record) {
-        throw new Error(
-          `ROUTE_ACCEPTANCE_CAPABILITY_MISSING:${route.routeId}:${capabilityId}`,
-        );
+        throw new Error(`ROUTE_ACCEPTANCE_CAPABILITY_MISSING:${route.routeId}:${capabilityId}`);
       }
       if (record.exact_head_sha !== capabilities.exact_head_sha) {
         throw new Error(
@@ -76,9 +68,7 @@ export function buildRouteAcceptanceMatrix(
       return record;
     });
 
-    const deferred = routeCapabilities.filter(
-      (record) => record.deferred_final_provider_phase,
-    );
+    const deferred = routeCapabilities.filter((record) => record.deferred_final_provider_phase);
     for (const record of deferred) {
       if (
         record.closure_state !== 'DEFERRED' ||
@@ -90,9 +80,7 @@ export function buildRouteAcceptanceMatrix(
       }
     }
 
-    const nonDeferred = routeCapabilities.filter(
-      (record) => !record.deferred_final_provider_phase,
-    );
+    const nonDeferred = routeCapabilities.filter((record) => !record.deferred_final_provider_phase);
     const blocked = nonDeferred.filter((record) => record.closure_state === 'BLOCKED');
     const productionVerified = nonDeferred.filter(
       (record) => record.closure_state === 'PRODUCTION_VERIFIED',
@@ -118,9 +106,7 @@ export function buildRouteAcceptanceMatrix(
       non_deferred_production_verified_count: productionVerified.length,
       blocked_non_deferred_count: blocked.length,
       counts_by_closure_state: countClosureStates(routeCapabilities),
-      final_provider_capability_ids: deferred
-        .map((record) => record.capability_id)
-        .sort(),
+      final_provider_capability_ids: deferred.map((record) => record.capability_id).sort(),
       unresolved_non_deferred_capability_ids: unresolved
         .map((record) => record.capability_id)
         .sort(),
