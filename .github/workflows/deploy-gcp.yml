@@ -1441,7 +1441,8 @@ jobs:
             if [[ "${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-false}" != true ]] && \
               gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(metadata.name)' >/dev/null 2>&1; then
               gcloud run services delete "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
-              ! gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(metadata.name)' >/dev/null 2>&1
+              bash scripts/verify-cloud-run-service-absence.sh \
+                "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$GCP_PROJECT_ID" "$GCP_REGION"
               echo 'WEBHOOK_BOOTSTRAP_CLEANUP=DELETED_UNPROMOTED_SERVICE' >> "$GITHUB_STEP_SUMMARY"
             fi
             echo 'AUTOMATIC_ROLLBACK=SKIPPED_NO_PROMOTION' >> "$GITHUB_STEP_SUMMARY"
