@@ -22,12 +22,18 @@ describe('current-schema staging DR harness', () => {
   it('binds execution to exact main, exact repository migration set and staging only', () => {
     expect(workflow).toContain('test "$CANDIDATE_SHA" = "$GITHUB_SHA"');
     expect(workflow).toContain('expected_max_migration:');
-    expect(bootstrap).toContain("[[ \"$PROJECT_ID\" == 'toca-mcp-next-staging' ]]");
-    expect(bootstrap).toContain("[[ \"$SOURCE_INSTANCE\" == 'toca-mcp-next-staging-db' ]]");
+    expect(bootstrap).toContain('[[ "$PROJECT_ID" == \'toca-mcp-next-staging\' ]]');
+    expect(bootstrap).toContain('[[ "$SOURCE_INSTANCE" == \'toca-mcp-next-staging-db\' ]]');
     expect(bootstrap).toContain('[[ "$PROJECT_ID" != "$PRODUCTION_PROJECT_ID" ]]');
-    expect(drill).toContain('diff -u /tmp/repo-migrations.txt dr-v3-evidence/restored-migrations.txt');
-    expect(drill).toContain('[[ "$(tail -n1 /tmp/repo-migrations.txt)" == "$EXPECTED_MAX_MIGRATION" ]]');
-    expect(drill).toContain('[[ "$(tail -n1 dr-v3-evidence/restored-migrations.txt)" == "$EXPECTED_MAX_MIGRATION" ]]');
+    expect(drill).toContain(
+      'diff -u /tmp/repo-migrations.txt dr-v3-evidence/restored-migrations.txt',
+    );
+    expect(drill).toContain(
+      '[[ "$(tail -n1 /tmp/repo-migrations.txt)" == "$EXPECTED_MAX_MIGRATION" ]]',
+    );
+    expect(drill).toContain(
+      '[[ "$(tail -n1 dr-v3-evidence/restored-migrations.txt)" == "$EXPECTED_MAX_MIGRATION" ]]',
+    );
     expect(drill).toContain("! grep -Eq '^027_' dr-v3-evidence/restored-migrations.txt");
   });
 
@@ -67,8 +73,8 @@ describe('current-schema staging DR harness', () => {
   it('keeps temporary-target and IAM cleanup mandatory', () => {
     expect(workflow).toContain('cleanup-target:');
     expect(workflow).toContain('cleanup-iam:');
-    expect(workflow).toContain("test \"$D\" = success");
-    expect(workflow).toContain("test \"$E\" = success");
+    expect(workflow).toContain('test "$D" = success');
+    expect(workflow).toContain('test "$E" = success');
     expect(drill).toContain('[[ "$TARGET_INSTANCE" != "$SOURCE_INSTANCE" ]]');
   });
 
