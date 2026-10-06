@@ -43,6 +43,11 @@ export function buildRouteAcceptanceMatrix(
     throw new Error('ROUTE_ACCEPTANCE_DUPLICATE_ROUTE');
   }
 
+  const capabilityIds = capabilities.records.map((record) => record.capability_id);
+  if (new Set(capabilityIds).size !== capabilities.records.length) {
+    throw new Error('ROUTE_ACCEPTANCE_DUPLICATE_CAPABILITY_RECORD');
+  }
+
   const byCapability = new Map(
     capabilities.records.map((record) => [record.capability_id, record] as const),
   );
