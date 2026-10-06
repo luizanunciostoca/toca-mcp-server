@@ -79,7 +79,7 @@ interface EvidenceAssessment {
   readonly validationError: string | null;
 }
 
-const DEFERRED_FINAL_PREFIXES = ['google_ads.', 'whatsapp.', 'email.'] as const;
+const DEFERRED_FINAL_PREFIXES = ['google_ads.', 'google_business.', 'whatsapp.', 'email.'] as const;
 const RUNTIME_INELIGIBLE_STATUSES: ReadonlySet<CapabilityStatus> = new Set([
   'PLANNED',
   'SPECIFIED',

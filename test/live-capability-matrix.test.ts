@@ -32,13 +32,13 @@ describe('TOCA-MAX live capability matrix projection', () => {
     );
   });
 
-  it('defers Google Ads, WhatsApp and SendGrid/email provider closure to the final phase', () => {
+  it('defers Google Business, Google Ads, WhatsApp and SendGrid/email provider closure to the final phase', () => {
     const matrix = buildLiveCapabilityMatrix(CAPABILITY_CATALOG, {
       exactHeadSha: SHA,
       now: NOW,
     });
 
-    for (const prefix of ['google_ads.', 'whatsapp.', 'email.']) {
+    for (const prefix of ['google_business.', 'google_ads.', 'whatsapp.', 'email.']) {
       const records = matrix.records.filter((record) => record.capability_id.startsWith(prefix));
       expect(records.length, prefix).toBeGreaterThan(0);
       expect(
@@ -245,6 +245,7 @@ function requireBaseDefinition(): CapabilityDefinition {
   const definition = CAPABILITY_CATALOG.find(
     (candidate) =>
       !candidate.capability_id.startsWith('google_ads.') &&
+      !candidate.capability_id.startsWith('google_business.') &&
       !candidate.capability_id.startsWith('whatsapp.') &&
       !candidate.capability_id.startsWith('email.') &&
       candidate.risk_class === 'READ',
