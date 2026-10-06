@@ -46,21 +46,23 @@ function runVerifier(mode: 'absent' | 'present' | 'error') {
   const stub = join(dir, 'gcloud');
   writeFileSync(
     stub,
-    `#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${MODE:-}" == error ]]; then
-  echo "simulated readback failure" >&2
-  exit 17
-fi
-[[ "$*" == *"run services list"* ]]
-[[ "$*" == *"--project toca-project"* ]]
-[[ "$*" == *"--region southamerica-east1"* ]]
-if [[ "${MODE:-}" == present ]]; then
-  printf '%s\\n' toca-webhook
-else
-  printf '%s\\n' another-service
-fi
-`,
+    [
+      '#!/usr/bin/env bash',
+      'set -euo pipefail',
+      'if [[ "${MODE:-}" == error ]]; then',
+      '  echo "simulated readback failure" >&2',
+      '  exit 17',
+      'fi',
+      '[[ "$*" == *"run services list"* ]]',
+      '[[ "$*" == *"--project toca-project"* ]]',
+      '[[ "$*" == *"--region southamerica-east1"* ]]',
+      'if [[ "${MODE:-}" == present ]]; then',
+      "  printf '%s\\n' toca-webhook",
+      'else',
+      "  printf '%s\\n' another-service",
+      'fi',
+      '',
+    ].join('\n'),
   );
   chmodSync(stub, 0o755);
   return spawnSync('bash', [verifier, 'toca-webhook', 'toca-project', 'southamerica-east1'], {
