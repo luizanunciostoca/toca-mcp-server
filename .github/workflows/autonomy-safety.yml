@@ -5,16 +5,21 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
 
 permissions:
   contents: read
+  issues: read
+  actions: read
 
 concurrency:
-  group: autonomy-safety-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: autonomy-safety-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   autonomy-safety:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -81,3 +86,27 @@ jobs:
           test/autopilot-fault-injection.test.ts
           test/capability-validation-evidence.test.ts
           test/instagram-core-publication-runtime.test.ts
+
+  control-plane-drift-watch:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CANDIDATE_SHA: ${{ github.sha }}
+    steps:
+      - name: Checkout exact main candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+
+      - name: Verify exact main candidate SHA
+        run: test "$(git rev-parse HEAD)" = "${CANDIDATE_SHA}"
+
+      - name: Validate provider-backed capability evidence freshness
+        run: node scripts/check-capability-validation-evidence.mjs
+
+      - name: Detect Control Plane drift
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-control-plane-drift.mjs
