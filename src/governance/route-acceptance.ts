@@ -1,4 +1,7 @@
-import type { CapabilityClosureState, LiveCapabilityMatrix } from './live-capability-matrix.js';
+import type {
+  CapabilityClosureState,
+  LiveCapabilityMatrix,
+} from './live-capability-matrix.js';
 import type { RouteDefinition, RouteId } from './types.js';
 
 export type RouteStructuralState = 'PASS';
@@ -61,7 +64,9 @@ export function buildRouteAcceptanceMatrix(
     const routeCapabilities = route.capabilityIds.map((capabilityId) => {
       const record = byCapability.get(capabilityId);
       if (!record) {
-        throw new Error(`ROUTE_ACCEPTANCE_CAPABILITY_MISSING:${route.routeId}:${capabilityId}`);
+        throw new Error(
+          `ROUTE_ACCEPTANCE_CAPABILITY_MISSING:${route.routeId}:${capabilityId}`,
+        );
       }
       if (record.exact_head_sha !== capabilities.exact_head_sha) {
         throw new Error(
