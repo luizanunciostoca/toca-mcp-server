@@ -78,9 +78,7 @@ describe('GCP rollback and mutation kill-switch readback', () => {
     expect(rollback).toContain('verify_closed_webhook');
     expect(rollback).toContain('WEBHOOK_AUTOMATIC_ROLLBACK_MODE=ABSENT_CLOSED');
     expect(rollback).toContain('AUTOMATIC_ROLLBACK_READBACK=PASS');
-    expect(rollback).toContain(
-      'bash scripts/verify-cloud-run-service-absence.sh',
-    );
+    expect(rollback).toContain('bash scripts/verify-cloud-run-service-absence.sh');
     expect(rollback).not.toContain(
       '! gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"',
     );
