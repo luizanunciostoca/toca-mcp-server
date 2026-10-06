@@ -193,5 +193,4 @@ describe('TOCA-MAX R01-R32 acceptance projection', () => {
       next_action: 'NONE',
     });
   });
-
 });
