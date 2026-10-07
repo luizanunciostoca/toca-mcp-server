@@ -188,6 +188,7 @@ jobs:
           grep -Fxq 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$BODY"
           gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
             -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
+          echo 'AUTHORIZATION_CONSUMED=true' >> "$GITHUB_ENV"
           echo 'RESTORE_AUTHORIZATION_CONSUMED=true'
 
       - name: Restore only the required DRS-safe callback surface
@@ -329,7 +330,7 @@ jobs:
           echo 'WEBHOOK_CALLBACK_RESTORE_ROLLBACK=PASS'
 
       - name: Publish failure and rollback status
-        if: always() && env.MUTATION_ATTEMPTED == 'true' && (failure() || cancelled())
+        if: always() && env.AUTHORIZATION_CONSUMED == 'true' && (failure() || cancelled())
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
