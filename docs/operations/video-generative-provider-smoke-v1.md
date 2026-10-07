@@ -40,6 +40,16 @@ PROVIDER_OUTPUT_SECONDS=8
 PROVIDER_SAMPLE_COUNT=1
 PROVIDER_RESOLUTION=720p
 PROVIDER_AUDIO_GENERATION=false
+PRODUCTION_ARTIFACT_REGISTRY_WRITE_AUTHORIZED=true
+PRODUCTION_CLOUD_RUN_JOB_MUTATION_AUTHORIZED=true
+PRODUCTION_GCS_REVIEW_ARTIFACT_WRITE_AUTHORIZED=true
+GOOGLE_DRIVE_READ_AUTHORIZED=true
+GOOGLE_SHEETS_READ_AUTHORIZED=true
+GOOGLE_SHEETS_CANDIDATE_WRITE_AUTHORIZED=true
+IAM_CREDENTIAL_SIGNING_AUTHORIZED=true
+PRODUCTION_SERVICE_DEPLOYMENT_AUTHORIZED=false
+PRODUCTION_TRAFFIC_MUTATION_AUTHORIZED=false
+PRODUCTION_DATABASE_MUTATION_AUTHORIZED=false
 FINANCIAL_CEILING=USD:<explicit positive owner-approved amount>
 PUBLICATION_AUTHORIZED=false
 SCHEDULING_AUTHORIZED=false
@@ -82,7 +92,7 @@ VERTEX_VEO_MODEL=veo-3.1-generate-001
 
 The Veo request is cost-shaped and proof-shaped to exactly one 8-second, 9:16, 720p sample with `generateAudio=false`. The workflow records the owner-approved financial ceiling in sanitized evidence; because cloud billing is provider-authoritative, the ceiling is a governance bound over this fixed request rather than a real-time billing cutoff.
 
-The production target is pinned to the canonical project, runtime/deployer identities and publication-asset bucket. The ephemeral Cloud Run Job is deleted after execution and an independent absence check must pass. The generated MP4 remains a review candidate only.
+The production target is pinned to the canonical project, runtime/deployer identities and publication-asset bucket. Authorized persistent side effects are limited to the immutable Artifact Registry image, the GCS review candidate/artifact lineage, and the exact `CONTENT_ITEMS` candidate writeback required to mark `GENERATED_REVIEW_REQUIRED`. Drive/Sheets reads and IAM Credentials signing are explicitly authorized support operations. Production services, traffic and databases are not mutated. The ephemeral Cloud Run Job is deleted after execution and an independent absence check must pass. The generated MP4 remains a review candidate only.
 
 
 If service-account signing, Workspace sharing, Vertex authorization, model availability, quota or GCS access is not actually present, execution fails closed and the blocker is reported rather than bypassed.
