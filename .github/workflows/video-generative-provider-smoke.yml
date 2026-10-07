@@ -95,6 +95,16 @@ jobs:
           require_key_value_once PROVIDER_SAMPLE_COUNT 1
           require_key_value_once PROVIDER_RESOLUTION 720p
           require_key_value_once PROVIDER_AUDIO_GENERATION false
+          require_key_value_once PRODUCTION_ARTIFACT_REGISTRY_WRITE_AUTHORIZED true
+          require_key_value_once PRODUCTION_CLOUD_RUN_JOB_MUTATION_AUTHORIZED true
+          require_key_value_once PRODUCTION_GCS_REVIEW_ARTIFACT_WRITE_AUTHORIZED true
+          require_key_value_once GOOGLE_DRIVE_READ_AUTHORIZED true
+          require_key_value_once GOOGLE_SHEETS_READ_AUTHORIZED true
+          require_key_value_once GOOGLE_SHEETS_CANDIDATE_WRITE_AUTHORIZED true
+          require_key_value_once IAM_CREDENTIAL_SIGNING_AUTHORIZED true
+          require_key_value_once PRODUCTION_SERVICE_DEPLOYMENT_AUTHORIZED false
+          require_key_value_once PRODUCTION_TRAFFIC_MUTATION_AUTHORIZED false
+          require_key_value_once PRODUCTION_DATABASE_MUTATION_AUTHORIZED false
           require_key_value_once PUBLICATION_AUTHORIZED false
           require_key_value_once SCHEDULING_AUTHORIZED false
           require_key_value_once MARKETING_READY_AUTHORIZED false
@@ -198,7 +208,7 @@ jobs:
             --arg runtimeServiceAccount "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --arg bucket "$BUCKET" \
             --arg financialCeiling "$VIDEO_PROVIDER_FINANCIAL_CEILING" \
-            '{schemaVersion:2,provider:$provider,providerModel:$providerModel,providerLocation:$providerLocation,runtimeServiceAccount:$runtimeServiceAccount,workspaceAuthMode:"GCP_SERVICE_IDENTITY_SIGNED_JWT",cloudAuthMode:"METADATA_SERVICE",assetBucket:$bucket,financialCeiling:$financialCeiling,productionProviderProofAuthorized:true,providerCallAuthorized:true,outputSeconds:8,sampleCount:1,resolution:"720p",generateAudio:false,publicationAuthorized:false,schedulingAuthorized:false,marketingReadyAuthorized:false,paidMediaAuthorized:false,longLivedProviderSecretsUsed:false,serviceAccountPrivateKeyUsed:false,secretEnumerationUsed:false}' \
+            '{schemaVersion:2,provider:$provider,providerModel:$providerModel,providerLocation:$providerLocation,runtimeServiceAccount:$runtimeServiceAccount,workspaceAuthMode:"GCP_SERVICE_IDENTITY_SIGNED_JWT",cloudAuthMode:"METADATA_SERVICE",assetBucket:$bucket,financialCeiling:$financialCeiling,productionProviderProofAuthorized:true,providerCallAuthorized:true,productionArtifactRegistryWriteAuthorized:true,productionCloudRunJobMutationAuthorized:true,productionGcsReviewArtifactWriteAuthorized:true,googleDriveReadAuthorized:true,googleSheetsReadAuthorized:true,googleSheetsCandidateWriteAuthorized:true,iamCredentialSigningAuthorized:true,productionServiceDeploymentAuthorized:false,productionTrafficMutationAuthorized:false,productionDatabaseMutationAuthorized:false,outputSeconds:8,sampleCount:1,resolution:"720p",generateAudio:false,publicationAuthorized:false,schedulingAuthorized:false,marketingReadyAuthorized:false,paidMediaAuthorized:false,longLivedProviderSecretsUsed:false,serviceAccountPrivateKeyUsed:false,secretEnumerationUsed:false}' \
             > video-generative-evidence/runtime-bindings.json
 
       - name: Build and push exact immutable smoke image
