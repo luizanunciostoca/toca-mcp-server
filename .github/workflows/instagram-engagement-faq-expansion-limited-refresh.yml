@@ -11,7 +11,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: instagram-engagement-faq-expansion-limited-refresh
+  group: instagram-engagement-webhook-callback-control
   cancel-in-progress: false
 
 env:

@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: instagram-engagement-webhook-callback-restore
+  group: instagram-engagement-webhook-callback-control
   cancel-in-progress: false
 
 env:

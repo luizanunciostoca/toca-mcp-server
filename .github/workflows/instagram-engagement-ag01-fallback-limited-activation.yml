@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: instagram-engagement-ag01-fallback-limited-activation
+  group: instagram-engagement-webhook-callback-control
   cancel-in-progress: false
 
 env:
