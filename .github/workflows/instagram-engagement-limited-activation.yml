@@ -29,6 +29,7 @@ env:
   SCHEDULER_JOB_NAME: toca-managed-instagram-tick
   INSTAGRAM_ACCOUNT_ID: '17841402033495654'
   INSTAGRAM_PAGE_ID: '306103746115875'
+  META_APP_ID: '2281930145887404'
   CANONICAL_FAQ_SPREADSHEET_ID: 1M0HSs7QJpFCJvvnrZxJRaaXY8scv5R3okCG_OyFLiEU
   TOCA_TENANT_ID: toca
   TOCA_WORKSPACE_ID: toca
@@ -124,6 +125,8 @@ jobs:
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Verify healthy Instagram webhook ingress before LIMITED mutation
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
         shell: bash
         run: |
           set -euo pipefail
@@ -349,6 +352,8 @@ jobs:
           echo 'INSTAGRAM_ENGAGEMENT_LIMITED_RUNTIME_READBACK=PASS'
 
       - name: Reverify healthy Instagram webhook ingress before publishing LIMITED state
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
         shell: bash
         run: |
           set -euo pipefail
