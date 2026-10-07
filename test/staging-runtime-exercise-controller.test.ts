@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const workflow = readFileSync('.github/workflows/staging-acceptance-command.yml', 'utf8');
+const deployWorkflow = readFileSync('.github/workflows/deploy-gcp.yml', 'utf8');
 
 function recoverySection(): string {
   const start = workflow.indexOf('  recovery-exercise:');
@@ -112,6 +113,7 @@ describe('staging runtime exercise controller', () => {
       "startsWith(github.event.comment.body, '/toca-staging-kill-switch-diagnose ')",
     );
     expect(section).toContain('test "$CONTROLLER_SHA" = "$MAIN_SHA"');
+    expect(section).toContain('test "$CONTROLLER_SHA" = "$GITHUB_SHA"');
     expect(section).toContain('test "$DIAGNOSTIC_SHA" = "$BRANCH_SHA"');
     expect(section).toContain('test "$current_branch_sha" = "$DIAGNOSTIC_SHA"');
     expect(section).toContain('operation:"kill_switch"');
@@ -120,5 +122,25 @@ describe('staging runtime exercise controller', () => {
     expect(section).toContain('rollback_webhook_revision:$candidate');
     expect(section).not.toContain('gcloud run');
     expect(section).not.toContain('environment:"production"');
+
+    expect(deployWorkflow).toContain(
+      "if: inputs.operation == 'kill_switch' && inputs.rollout == 'canary'",
+    );
+    expect(deployWorkflow).toContain(
+      "if: inputs.operation == 'kill_switch' && inputs.rollout != 'canary'",
+    );
+    const readOnlyStart = deployWorkflow.indexOf(
+      '- name: Read-only kill-switch revision equivalence diagnostic',
+    );
+    const mutatingStart = deployWorkflow.indexOf(
+      '- name: Activate emergency mutation kill switch',
+    );
+    expect(readOnlyStart).toBeGreaterThan(-1);
+    expect(mutatingStart).toBeGreaterThan(readOnlyStart);
+    const diagnosticBlock = deployWorkflow.slice(readOnlyStart, mutatingStart);
+    expect(diagnosticBlock).toContain('gcloud run revisions describe');
+    expect(diagnosticBlock).toContain('gcloud run services describe');
+    expect(diagnosticBlock).not.toContain('gcloud run services update ');
+    expect(diagnosticBlock).not.toContain('gcloud run services update-traffic');
   });
 });
