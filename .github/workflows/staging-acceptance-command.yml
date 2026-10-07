@@ -181,6 +181,7 @@ jobs:
 
           MAIN_SHA="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
           test "$CONTROLLER_SHA" = "$MAIN_SHA"
+          test "$CONTROLLER_SHA" = "$GITHUB_SHA"
           BRANCH_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/diag/toca-max-kill-switch-spec-diff-20261007" --jq '.object.sha')"
           test "$DIAGNOSTIC_SHA" = "$BRANCH_SHA"
 
