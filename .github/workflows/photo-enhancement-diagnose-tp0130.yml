@@ -1,0 +1,61 @@
+name: Diagnose TP-0130 Enhancement
+
+on:
+  push:
+    branches:
+      - feat/design-photo-enhance-mcp
+    paths:
+      - .github/workflows/photo-enhancement-diagnose-tp0130.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  JOB_NAME: toca-enhance-tp0130
+  EXECUTION_NAME: toca-enhance-tp0130-vbw24
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+
+      - name: Capture execution state
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs executions describe "$EXECUTION_NAME" \
+            --project "$PROJECT_ID" --region "$REGION" --format=json \
+            > tp0130-execution.json
+          jq '{name:.metadata.name,conditions:.status.conditions,failedCount:.status.failedCount,succeededCount:.status.succeededCount,completionTime:.status.completionTime,logUri:.status.logUri}' tp0130-execution.json
+
+      - name: Capture container logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\"" \
+            --project "$PROJECT_ID" --freshness=60m --limit=300 --order=asc --format=json \
+            > tp0130-logs.json
+          jq -r '.[] | [.timestamp, (.severity // ""), (.textPayload // .jsonPayload.message // .jsonPayload.error // "")] | @tsv' tp0130-logs.json | tail -80
+
+      - name: Upload diagnostic evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: diagnose-tp0130-enhancement
+          path: |
+            tp0130-execution.json
+            tp0130-logs.json
+          if-no-files-found: error
+          retention-days: 7
