@@ -24,6 +24,8 @@ env:
   CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
   DATABASE_SECRET_ID: toca-database-url
   TOKEN_SECRET_ID: toca-meta-oauth-token
+  WEBHOOK_SERVICE_NAME: toca-webhook-next-production
+  META_APP_SECRET_ID: toca-meta-app-secret
   DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
   SCHEDULER_JOB_NAME: toca-managed-instagram-tick
   INSTAGRAM_ACCOUNT_ID: '17841402033495654'
@@ -99,6 +101,12 @@ jobs:
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify healthy Instagram webhook ingress before LIMITED mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/verify-instagram-engagement-webhook-ingress.sh
 
       - name: Verify immutable image and capture dual-channel LIMITED prestate
         id: prestate
@@ -391,6 +399,12 @@ jobs:
           POST_SCHEDULER_FINGERPRINT="$(printf '%s' "$SCHEDULER_JSON" | jq -c '{state,schedule,timeZone,httpTarget}' | sha256sum | awk '{print $1}')"
           test "$POST_SCHEDULER_FINGERPRINT" = "$PRE_SCHEDULER_FINGERPRINT"
           echo 'FAQ_EXPANSION_LIMITED_RUNTIME_READBACK=PASS'
+
+      - name: Reverify healthy Instagram webhook ingress before publishing LIMITED state
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/verify-instagram-engagement-webhook-ingress.sh
 
       - name: Remove backup tables after successful activation
         if: success()
