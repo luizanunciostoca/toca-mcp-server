@@ -57,7 +57,18 @@ describe('GCP rollback and mutation kill-switch readback', () => {
       expect(block).toContain('candidate="${service}-${suffix}"');
       expect(block).toContain('--revision-suffix "$suffix"');
       expect(block).toContain('--no-traffic');
-      expect(block).toContain('--update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected"');
+      expect(block).toContain('previous_json="$(gcloud run revisions describe "$previous"');
+      expect(block).toContain('previous_image="$(printf');
+      expect(block).toContain('previous_release_sha_count="$(printf');
+      expect(block).toContain('previous_release_sha="$(printf');
+      expect(block).toContain('test -n "$previous_image"');
+      expect(block).toContain('[[ "$previous_image" =~ @sha256:[0-9a-f]{64}$ ]]');
+      expect(block).toContain('test "$previous_release_sha_count" = 1');
+      expect(block).toContain('[[ "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]');
+      expect(block).toContain('--image "$previous_image"');
+      expect(block).toContain(
+        '--update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected,TOCA_RELEASE_SHA=$previous_release_sha"',
+      );
       expect(block).toContain('test "$candidate_spec" = "$previous_spec"');
       expect(block).toContain('(.metadata.name == $candidate)');
       expect(block).toContain('.name == "TOCA_PLATFORM_KILL_SWITCH"');
@@ -83,13 +94,19 @@ describe('GCP rollback and mutation kill-switch readback', () => {
         `verify_serving_kill_switch "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_CANDIDATE_REVISION" ${expected}`,
       );
 
+      const previousRead = block.indexOf(
+        'previous_json="$(gcloud run revisions describe "$previous"',
+      );
+      const serviceUpdate = block.indexOf('gcloud run services update "$service"');
       const stageMcp = block.indexOf('stage_candidate "$GCP_CLOUD_RUN_MCP_SERVICE" mcp');
       const stageWebhook = block.indexOf(
         'stage_candidate "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" webhook',
       );
       const promoteMcp = block.indexOf('--to-revisions "${MCP_CANDIDATE_REVISION}=100"');
       const promoteWebhook = block.indexOf('--to-revisions "${WEBHOOK_CANDIDATE_REVISION}=100"');
-      expect(stageMcp).toBeGreaterThan(-1);
+      expect(previousRead).toBeGreaterThan(-1);
+      expect(serviceUpdate).toBeGreaterThan(previousRead);
+      expect(stageMcp).toBeGreaterThan(serviceUpdate);
       expect(stageWebhook).toBeGreaterThan(stageMcp);
       expect(promoteMcp).toBeGreaterThan(stageWebhook);
       expect(promoteWebhook).toBeGreaterThan(promoteMcp);
