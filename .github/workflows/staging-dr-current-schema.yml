@@ -66,12 +66,38 @@ jobs:
           test "$(jq -r '.pull_request // empty' <<<"$ISSUE_JSON")" = ""
           test "$(jq -r '.user.login' <<<"$ISSUE_JSON")" = "$GITHUB_REPOSITORY_OWNER"
           BODY="$(jq -r '.body // ""' <<<"$ISSUE_JSON")"
-          grep -Fxq 'DR_EXECUTION_AUTHORIZATION=ACTIVE' <<<"$BODY"
-          grep -Fxq "AUTHORIZED_CANDIDATE_SHA=$CANDIDATE_SHA" <<<"$BODY"
-          grep -Fxq "EXPECTED_MAX_MIGRATION=$EXPECTED_MAX_MIGRATION" <<<"$BODY"
-          grep -Fxq 'AUTHORIZED_ENVIRONMENT=toca-mcp-next-staging' <<<"$BODY"
-          grep -Fxq 'PRODUCTION_MUTATION_AUTHORIZED=false' <<<"$BODY"
-          grep -Fxq 'PROVIDER_MUTATION_AUTHORIZED=false' <<<"$BODY"
+
+          require_exact_line_once() {
+            local expected="$1"
+            local count
+            count="$(grep -Fxc -- "$expected" <<<"$BODY" || true)"
+            test "$count" -eq 1
+          }
+          require_exact_line_absent() {
+            local unexpected="$1"
+            local count
+            count="$(grep -Fxc -- "$unexpected" <<<"$BODY" || true)"
+            test "$count" -eq 0
+          }
+
+          require_exact_line_once 'DR_EXECUTION_AUTHORIZATION=ACTIVE'
+          require_exact_line_once 'AUTHORIZATION_STATE=ACTIVE'
+          require_exact_line_absent 'DR_EXECUTION_AUTHORIZATION=PENDING'
+          require_exact_line_absent 'AUTHORIZATION_STATE=PENDING_HUMAN_APPROVAL'
+          require_exact_line_once "AUTHORIZED_CANDIDATE_SHA=$CANDIDATE_SHA"
+          require_exact_line_once "EXPECTED_MAX_MIGRATION=$EXPECTED_MAX_MIGRATION"
+          require_exact_line_once 'AUTHORIZED_ENVIRONMENT=toca-mcp-next-staging'
+          require_exact_line_once 'PRODUCTION_MUTATION_AUTHORIZED=false'
+          require_exact_line_once 'PROVIDER_MUTATION_AUTHORIZED=false'
+          require_exact_line_absent 'FINANCIAL_CEILING=PENDING_OWNER_APPROVAL'
+
+          test "$(grep -c '^FINANCIAL_CEILING=' <<<"$BODY" || true)" -eq 1
+          FINANCIAL_LINE="$(grep '^FINANCIAL_CEILING=' <<<"$BODY")"
+          FINANCIAL_CEILING="${FINANCIAL_LINE#FINANCIAL_CEILING=}"
+          [[ "$FINANCIAL_CEILING" =~ ^(USD|BRL):([0-9]+([.][0-9]{1,2})?)$ ]]
+          FINANCIAL_AMOUNT="${BASH_REMATCH[2]}"
+          awk -v amount="$FINANCIAL_AMOUNT" 'BEGIN { exit !(amount > 0) }'
+
           echo 'DR_EXECUTION_AUTHORIZATION=VERIFIED'
 
   syntax-boundary:
