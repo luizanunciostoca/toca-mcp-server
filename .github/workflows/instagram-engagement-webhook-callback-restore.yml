@@ -23,6 +23,7 @@ env:
   WEBHOOK_SERVICE_NAME: toca-webhook-next-production
   META_APP_SECRET_ID: toca-meta-app-secret
   META_TOKEN_SECRET_ID: toca-meta-oauth-token
+  TOKEN_SECRET_ID: toca-meta-oauth-token
   META_APP_ID: '2281930145887404'
   INSTAGRAM_PAGE_ID: '306103746115875'
   INSTAGRAM_ACCOUNT_ID: '17841402033495654'
