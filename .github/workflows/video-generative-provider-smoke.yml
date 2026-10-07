@@ -11,7 +11,7 @@ on:
 permissions:
   contents: read
   id-token: write
-  issues: read
+  issues: write
 
 concurrency:
   group: video-generative-provider-smoke
@@ -43,7 +43,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Validate owner authorization and exact main SHA
+      - name: Validate owner authorization exact main and bounded provider proof
         env:
           GH_TOKEN: ${{ github.token }}
           AUTHORIZATION_REF: ${{ inputs.authorization_ref }}
@@ -52,21 +52,113 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = 'refs/heads/main'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
           PREFIX="https://github.com/${GITHUB_REPOSITORY}/issues/"
           [[ "$AUTHORIZATION_REF" == "$PREFIX"* ]]
           ISSUE_NUMBER="${AUTHORIZATION_REF#${PREFIX}}"
           [[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]]
-          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" > /tmp/video-auth.json
-          jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" --arg sha "$GITHUB_SHA" '
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          printf '%s' "$ISSUE_JSON" > /tmp/video-auth.json
+          jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
             (.state == "open") and
             (.user.login == $owner) and
-            (.title == "PROVIDER AUTHORIZATION — Video Generative Smoke TP-GEN-0001") and
-            ((.body // "") | contains("AUTHORIZED_CANDIDATE_SHA=" + $sha)) and
-            ((.body // "") | contains("AUTHORIZATION_STATE=ACTIVE")) and
-            ((.body // "") | contains("VIDEO_CONTENT_ITEM_ID=VID-TP-20260904-DUAS-PISTAS-GEN-001")) and
-            ((.body // "") | contains("VIDEO_GENERATIVE_SMOKE=AUTHORIZED")) and
-            ((.body // "") | contains("PUBLICATION_AUTHORIZED=false"))
+            (.title == "PROVIDER AUTHORIZATION — Video Generative Smoke TP-GEN-0001")
           ' /tmp/video-auth.json >/dev/null
+          BODY="$(jq -r '.body // ""' /tmp/video-auth.json)"
+
+          read_key_once() {
+            local key="$1" count actual
+            count="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {count++} END {print count+0}' <<<"$BODY")"
+            test "$count" -eq 1
+            actual="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {print substr($0,length(prefix)+1)}' <<<"$BODY")"
+            test -n "$actual"
+            printf '%s' "$actual"
+          }
+          require_key_value_once() {
+            local key="$1" expected="$2" actual
+            actual="$(read_key_once "$key")"
+            test "$actual" = "$expected"
+          }
+
+          require_key_value_once AUTHORIZED_CANDIDATE_SHA "$GITHUB_SHA"
+          require_key_value_once AUTHORIZATION_STATE ACTIVE
+          require_key_value_once VIDEO_CONTENT_ITEM_ID VID-TP-20260904-DUAS-PISTAS-GEN-001
+          require_key_value_once VIDEO_GENERATIVE_SMOKE AUTHORIZED
+          require_key_value_once PROVIDER_CALL_AUTHORIZED true
+          require_key_value_once PRODUCTION_PROVIDER_PROOF_AUTHORIZED true
+          require_key_value_once PROVIDER GOOGLE_VERTEX_VEO
+          require_key_value_once MODEL veo-3.1-generate-001
+          require_key_value_once PROVIDER_LOCATION us-central1
+          require_key_value_once PROVIDER_OUTPUT_SECONDS 8
+          require_key_value_once PROVIDER_SAMPLE_COUNT 1
+          require_key_value_once PROVIDER_RESOLUTION 720p
+          require_key_value_once PROVIDER_AUDIO_GENERATION false
+          require_key_value_once PRODUCTION_ARTIFACT_REGISTRY_WRITE_AUTHORIZED true
+          require_key_value_once PRODUCTION_CLOUD_RUN_JOB_MUTATION_AUTHORIZED true
+          require_key_value_once PRODUCTION_GCS_REVIEW_ARTIFACT_WRITE_AUTHORIZED true
+          require_key_value_once GOOGLE_DRIVE_READ_AUTHORIZED true
+          require_key_value_once GOOGLE_SHEETS_READ_AUTHORIZED true
+          require_key_value_once GOOGLE_SHEETS_CANDIDATE_WRITE_AUTHORIZED true
+          require_key_value_once IAM_CREDENTIAL_SIGNING_AUTHORIZED true
+          require_key_value_once PRODUCTION_SERVICE_DEPLOYMENT_AUTHORIZED false
+          require_key_value_once PRODUCTION_TRAFFIC_MUTATION_AUTHORIZED false
+          require_key_value_once PRODUCTION_DATABASE_MUTATION_AUTHORIZED false
+          require_key_value_once PUBLICATION_AUTHORIZED false
+          require_key_value_once SCHEDULING_AUTHORIZED false
+          require_key_value_once MARKETING_READY_AUTHORIZED false
+          require_key_value_once PAID_MEDIA_AUTHORIZED false
+
+          FINANCIAL_CEILING="$(read_key_once FINANCIAL_CEILING)"
+          [[ "$FINANCIAL_CEILING" =~ ^USD:([0-9]+([.][0-9]{1,2})?)$ ]]
+          FINANCIAL_AMOUNT="${BASH_REMATCH[1]}"
+          awk -v amount="$FINANCIAL_AMOUNT" 'BEGIN { exit !(amount > 0) }'
+
+          CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
+          require_control_value_once() {
+            local key="$1" expected="$2" count actual
+            count="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {count++} END {print count+0}' <<<"$CONTROL_BODY")"
+            test "$count" -eq 1
+            actual="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {print substr($0,length(prefix)+1)}' <<<"$CONTROL_BODY")"
+            test "$actual" = "$expected"
+          }
+          require_control_value_once MAIN_STABILITY PASS
+          require_control_value_once EVALUATED_MAIN_SHA "$GITHUB_SHA"
+          require_control_value_once MERGE_RESERVATION NONE
+
+          echo "AUTHORIZATION_ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
+          echo "VIDEO_PROVIDER_FINANCIAL_CEILING=$FINANCIAL_CEILING" >> "$GITHUB_ENV"
+          echo 'VIDEO_GENERATIVE_PROVIDER_AUTHORIZATION=VERIFIED'
+
+      - name: Consume one-shot authorization before production or provider mutation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          LIVE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}")"
+          test "$(jq -r '.state' <<<"$LIVE_JSON")" = open
+          BODY="$(jq -r '.body // ""' <<<"$LIVE_JSON")"
+          test "$(grep -Fxc 'AUTHORIZATION_STATE=ACTIVE' <<<"$BODY" || true)" -eq 1
+          test "$(grep -Fxc 'VIDEO_GENERATIVE_SMOKE=AUTHORIZED' <<<"$BODY" || true)" -eq 1
+          test "$(grep -Fxc "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA" <<<"$BODY" || true)" -eq 1
+          CONSUMED_BODY="$(awk '
+            $0=="AUTHORIZATION_STATE=ACTIVE" {$0="AUTHORIZATION_STATE=CONSUMED_EXECUTION_STARTED"}
+            $0=="VIDEO_GENERATIVE_SMOKE=AUTHORIZED" {$0="VIDEO_GENERATIVE_SMOKE=CONSUMED"}
+            {print}
+          ' <<<"$BODY")"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}" \
+            -f body="$CONSUMED_BODY" -f state=closed >/tmp/video-auth-consumed.json
+          jq -e '.state == "closed"' /tmp/video-auth-consumed.json >/dev/null
+          READBACK="$(jq -r '.body // ""' /tmp/video-auth-consumed.json)"
+          test "$(grep -Fxc 'AUTHORIZATION_STATE=CONSUMED_EXECUTION_STARTED' <<<"$READBACK" || true)" -eq 1
+          test "$(grep -Fxc 'VIDEO_GENERATIVE_SMOKE=CONSUMED' <<<"$READBACK" || true)" -eq 1
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}/comments" \
+            -f body="VIDEO_PROVIDER_AUTHORIZATION_CONSUMED run_id=${GITHUB_RUN_ID} candidate_sha=${GITHUB_SHA} financial_ceiling=${VIDEO_PROVIDER_FINANCIAL_CEILING} publication=false scheduling=false paid_media=false" >/dev/null
+          echo 'VIDEO_GENERATIVE_PROVIDER_AUTHORIZATION=CONSUMED'
 
       - name: Authenticate deployer to Google Cloud
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
@@ -95,6 +187,12 @@ jobs:
           require_binding "$GCP_RUNTIME_SERVICE_ACCOUNT" runtime_service_account
           require_binding "$VERTEX_VEO_LOCATION" vertex_veo_location
           require_binding "$VERTEX_VEO_MODEL" vertex_veo_model
+          require_binding "$VIDEO_PROVIDER_FINANCIAL_CEILING" financial_ceiling
+          test "$GCP_PROJECT_ID" = 'toca-mcp-production'
+          test "$GCP_REGION" = 'southamerica-east1'
+          test "$GCP_DEPLOY_SERVICE_ACCOUNT" = 'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com'
+          test "$GCP_RUNTIME_SERVICE_ACCOUNT" = 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com'
+          test "$BUCKET" = 'toca-mcp-publication-assets'
           test "$VIDEO_SCENE_CONTINUATION_PROVIDER" = 'GOOGLE_VERTEX_VEO'
           test "$VIDEO_GOOGLE_AUTH_MODE" = 'GCP_SERVICE_IDENTITY'
           test "$VERTEX_VEO_LOCATION" = 'us-central1'
@@ -109,7 +207,8 @@ jobs:
             --arg providerLocation "$VERTEX_VEO_LOCATION" \
             --arg runtimeServiceAccount "$GCP_RUNTIME_SERVICE_ACCOUNT" \
             --arg bucket "$BUCKET" \
-            '{schemaVersion:1,provider:$provider,providerModel:$providerModel,providerLocation:$providerLocation,runtimeServiceAccount:$runtimeServiceAccount,workspaceAuthMode:"GCP_SERVICE_IDENTITY_SIGNED_JWT",cloudAuthMode:"METADATA_SERVICE",assetBucket:$bucket,longLivedProviderSecretsUsed:false,serviceAccountPrivateKeyUsed:false,secretEnumerationUsed:false}' \
+            --arg financialCeiling "$VIDEO_PROVIDER_FINANCIAL_CEILING" \
+            '{schemaVersion:2,provider:$provider,providerModel:$providerModel,providerLocation:$providerLocation,runtimeServiceAccount:$runtimeServiceAccount,workspaceAuthMode:"GCP_SERVICE_IDENTITY_SIGNED_JWT",cloudAuthMode:"METADATA_SERVICE",assetBucket:$bucket,financialCeiling:$financialCeiling,productionProviderProofAuthorized:true,providerCallAuthorized:true,productionArtifactRegistryWriteAuthorized:true,productionCloudRunJobMutationAuthorized:true,productionGcsReviewArtifactWriteAuthorized:true,googleDriveReadAuthorized:true,googleSheetsReadAuthorized:true,googleSheetsCandidateWriteAuthorized:true,iamCredentialSigningAuthorized:true,productionServiceDeploymentAuthorized:false,productionTrafficMutationAuthorized:false,productionDatabaseMutationAuthorized:false,outputSeconds:8,sampleCount:1,resolution:"720p",generateAudio:false,publicationAuthorized:false,schedulingAuthorized:false,marketingReadyAuthorized:false,paidMediaAuthorized:false,longLivedProviderSecretsUsed:false,serviceAccountPrivateKeyUsed:false,secretEnumerationUsed:false}' \
             > video-generative-evidence/runtime-bindings.json
 
       - name: Build and push exact immutable smoke image
@@ -117,7 +216,7 @@ jobs:
         run: |
           set -euo pipefail
           gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
-          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:video-gen-smoke-${GITHUB_SHA}"
+          IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:video-gen-smoke-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           JOB_NAME="toca-video-gen-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           docker build --pull -t "$IMAGE" .
           docker push "$IMAGE"
@@ -270,6 +369,16 @@ jobs:
 
           cleanup
           trap - EXIT
+
+      - name: Verify ephemeral Cloud Run job cleanup
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${JOB_NAME:-}" ]; then
+            ! gcloud run jobs describe "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null 2>&1
+          fi
+          echo 'VIDEO_GENERATIVE_EPHEMERAL_JOB_ABSENT=PASS'
 
       - name: Upload exact candidate and sanitized evidence
         if: always()
