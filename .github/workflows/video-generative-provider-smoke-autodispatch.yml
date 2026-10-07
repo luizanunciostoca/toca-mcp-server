@@ -50,22 +50,59 @@ jobs:
             (.title == "PROVIDER AUTHORIZATION — Video Generative Smoke TP-GEN-0001")
           ' >/dev/null
 
-          required_lines=(
-            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
-            "AUTHORIZATION_STATE=ACTIVE"
-            "VIDEO_CONTENT_ITEM_ID=VID-TP-20260904-DUAS-PISTAS-GEN-001"
-            "VIDEO_GENERATIVE_SMOKE=AUTHORIZED"
-            "PUBLICATION_AUTHORIZED=false"
-            "AUTO_DISPATCH_AUTHORIZED=true"
-          )
-          for required in "${required_lines[@]}"; do
-            grep -Fxq "$required" <<< "$BODY" || {
-              echo "Missing exact authorization field: $required" >&2
-              exit 1
-            }
-          done
+          read_key_once() {
+            local key="$1" count actual
+            count="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {count++} END {print count+0}' <<<"$BODY")"
+            test "$count" -eq 1
+            actual="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {print substr($0,length(prefix)+1)}' <<<"$BODY")"
+            test -n "$actual"
+            printf '%s' "$actual"
+          }
+          require_key_value_once() {
+            local key="$1" expected="$2" actual
+            actual="$(read_key_once "$key")"
+            test "$actual" = "$expected"
+          }
+
+          require_key_value_once AUTHORIZED_CANDIDATE_SHA "$GITHUB_SHA"
+          require_key_value_once AUTHORIZATION_STATE ACTIVE
+          require_key_value_once VIDEO_CONTENT_ITEM_ID VID-TP-20260904-DUAS-PISTAS-GEN-001
+          require_key_value_once VIDEO_GENERATIVE_SMOKE AUTHORIZED
+          require_key_value_once PROVIDER_CALL_AUTHORIZED true
+          require_key_value_once PRODUCTION_PROVIDER_PROOF_AUTHORIZED true
+          require_key_value_once PROVIDER GOOGLE_VERTEX_VEO
+          require_key_value_once MODEL veo-3.1-generate-001
+          require_key_value_once PROVIDER_LOCATION us-central1
+          require_key_value_once PROVIDER_OUTPUT_SECONDS 8
+          require_key_value_once PROVIDER_SAMPLE_COUNT 1
+          require_key_value_once PROVIDER_RESOLUTION 720p
+          require_key_value_once PROVIDER_AUDIO_GENERATION false
+          require_key_value_once PUBLICATION_AUTHORIZED false
+          require_key_value_once SCHEDULING_AUTHORIZED false
+          require_key_value_once MARKETING_READY_AUTHORIZED false
+          require_key_value_once PAID_MEDIA_AUTHORIZED false
+          require_key_value_once AUTO_DISPATCH_AUTHORIZED true
+
+          FINANCIAL_CEILING="$(read_key_once FINANCIAL_CEILING)"
+          [[ "$FINANCIAL_CEILING" =~ ^USD:([0-9]+([.][0-9]{1,2})?)$ ]]
+          FINANCIAL_AMOUNT="${BASH_REMATCH[1]}"
+          awk -v amount="$FINANCIAL_AMOUNT" 'BEGIN { exit !(amount > 0) }'
+
+          CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
+          require_control_value_once() {
+            local key="$1" expected="$2" count actual
+            count="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {count++} END {print count+0}' <<<"$CONTROL_BODY")"
+            test "$count" -eq 1
+            actual="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {print substr($0,length(prefix)+1)}' <<<"$CONTROL_BODY")"
+            test "$actual" = "$expected"
+          }
+          require_control_value_once MAIN_STABILITY PASS
+          require_control_value_once EVALUATED_MAIN_SHA "$GITHUB_SHA"
+          require_control_value_once MERGE_RESERVATION NONE
+
           test -n "$AUTHORIZATION_REF"
           echo "AUTHORIZATION_REF=$AUTHORIZATION_REF" >> "$GITHUB_ENV"
+          echo "VIDEO_PROVIDER_FINANCIAL_CEILING=$FINANCIAL_CEILING" >> "$GITHUB_ENV"
 
       - name: Dispatch exact governed provider smoke
         env:
