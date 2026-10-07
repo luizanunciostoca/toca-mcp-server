@@ -69,6 +69,10 @@ describe('GCP rollback and mutation kill-switch readback', () => {
       expect(block).toContain('--to-revisions "${MCP_CANDIDATE_REVISION}=100"');
       expect(block).toContain('--to-revisions "${WEBHOOK_CANDIDATE_REVISION}=100"');
       expect(block).toContain('rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"');
+      expect(block).toContain('PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL');
+      expect(block).not.toContain(
+        'rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION" || true',
+      );
       expect(block).toContain(`verify_serving_kill_switch "$GCP_CLOUD_RUN_MCP_SERVICE" "$MCP_CANDIDATE_REVISION" ${expected}`);
       expect(block).toContain(`verify_serving_kill_switch "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_CANDIDATE_REVISION" ${expected}`);
 
