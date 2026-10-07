@@ -100,7 +100,9 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).toContain('awk -v prefix="${key}="');
     expect(workflow).toContain('test "$count" -eq 1');
     expect(workflow).toContain('test "$actual" = "$expected"');
-    expect(workflow).toContain('EXPECTED_BEFORE_MAX_MIGRATION="$(read_key_once EXPECTED_BEFORE_MAX_MIGRATION)"');
+    expect(workflow).toContain(
+      'EXPECTED_BEFORE_MAX_MIGRATION="$(read_key_once EXPECTED_BEFORE_MAX_MIGRATION)"',
+    );
     expect(workflow).toContain('test "$BEFORE_MAX" = "$EXPECTED_BEFORE_MAX_MIGRATION"');
     expect(workflow).toContain(
       'diff -u staging-schema-sync-evidence/expected-before-prefix.txt staging-schema-sync-evidence/before-migrations.txt',
