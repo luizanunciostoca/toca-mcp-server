@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: ${{ startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram AG-01 grounded fallback LIMITED activation AUTO') && 'instagram-engagement-webhook-callback-control' || format('instagram-ag01-limited-activation-{0}', github.run_id) }}
+  group: ${{ github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram AG-01 grounded fallback LIMITED activation AUTO') && 'instagram-engagement-webhook-callback-control' || format('instagram-ag01-limited-activation-{0}', github.run_id) }}
   cancel-in-progress: false
 
 env:
