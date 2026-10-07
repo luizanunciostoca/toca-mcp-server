@@ -115,7 +115,7 @@ describe('Instagram webhook callback governance', () => {
     expect(readonlyWorkflow).not.toContain('gcloud run services update "$WEBHOOK_SERVICE_NAME"');
   });
 
-  it('consumes authorization before mutation and scopes the repair tightly', () => {
+  it('consumes authorization before mutation or verified no-op and scopes the repair tightly', () => {
     for (const marker of [
       'MUTATION_SCOPE=INGRESS_DEFAULT_URL_INVOKER_IAM_CHECK_ONLY',
       'SERVICE_MUTATION_AUTHORIZED=true',
@@ -129,6 +129,11 @@ describe('Instagram webhook callback governance', () => {
       'PROVIDER_WRITES_AUTHORIZED=false',
       'NEW_PAID_RESOURCES_AUTHORIZED=false',
       'GENERAL_AUTONOMY_AUTHORIZED=false',
+      'CALLBACK_CLASSIFICATION=(PUBLIC_CALLBACK_READY|BLOCKED_',
+      'mutation_required=$MUTATION_REQUIRED',
+      'MUTATION_REQUIRED: ${{ steps.prestate.outputs.mutation_required }}',
+      'WEBHOOK_CALLBACK_RESTORE_MUTATION=SKIPPED_ALREADY_READY',
+      'SERVICE_MUTATION=$SERVICE_MUTATION',
     ]) {
       expect(restoreWorkflow).toContain(marker);
     }
@@ -144,6 +149,19 @@ describe('Instagram webhook callback governance', () => {
     expect(restoreWorkflow).not.toContain('gcloud run services update-traffic');
     expect(restoreWorkflow).not.toContain('gcloud run deploy');
     expect(restoreWorkflow).not.toContain('--member=allUsers');
+  });
+
+  it('treats already-ready callback posture as a verified zero-mutation success path', () => {
+    expect(restoreWorkflow).toContain('MUTATION_REQUIRED=false');
+    expect(restoreWorkflow).toContain('if [[ "$MUTATION_REQUIRED" == false ]]');
+    expect(restoreWorkflow).toContain("echo 'mutation_completed=false' >> \"$GITHUB_OUTPUT\"");
+    expectOrdered(restoreWorkflow, [
+      '      - name: Capture exact service-level prestate',
+      '      - name: Consume single-use authorization before mutation',
+      '      - name: Restore only the required DRS-safe callback surface',
+      '      - name: Read back runtime, DB schema, challenge and Meta subscriptions',
+      '      - name: Publish successful repair evidence',
+    ]);
   });
 
   it('rolls back failure or cancellation and makes attempted authorization non-reusable', () => {
