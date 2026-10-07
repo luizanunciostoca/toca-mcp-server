@@ -19,6 +19,7 @@ env:
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
   WEBHOOK_SERVICE_NAME: toca-webhook-next-production
   META_APP_SECRET_ID: toca-meta-app-secret
   META_TOKEN_SECRET_ID: toca-meta-oauth-token
@@ -214,6 +215,7 @@ jobs:
           EXPECTED_IMAGE: ${{ steps.prestate.outputs.pre_image }}
           PRE_TRAFFIC_SHA: ${{ steps.prestate.outputs.pre_traffic_sha }}
           PRE_IAM_SHA: ${{ steps.prestate.outputs.pre_iam_sha }}
+          RUNTIME_IMAGE: ${{ steps.prestate.outputs.pre_image }}
         shell: bash
         run: |
           set -euo pipefail
@@ -229,147 +231,7 @@ jobs:
           test "$POST_TRAFFIC_SHA" = "$PRE_TRAFFIC_SHA"
           test "$POST_IAM_SHA" = "$PRE_IAM_SHA"
 
-          bash scripts/verify-instagram-webhook-callback-surface.sh
-
-          WEBHOOK_URL="$(printf '%s' "$SERVICE_JSON" | jq -r '.status.url // empty')"
-          test -n "$WEBHOOK_URL"
-
-          set +x
-          APP_SECRET="$(gcloud secrets versions access latest --secret "$META_APP_SECRET_ID" --project "$GCP_PROJECT_ID")"
-          ROOT_TOKEN="$(gcloud secrets versions access latest --secret "$META_TOKEN_SECRET_ID" --project "$GCP_PROJECT_ID")"
-          test -n "$APP_SECRET"
-          test -n "$ROOT_TOKEN"
-          echo "::add-mask::$APP_SECRET"
-          echo "::add-mask::$ROOT_TOKEN"
-
-          META_APP_SECRET_VALUE="$APP_SECRET" \
-          META_ROOT_TOKEN_VALUE="$ROOT_TOKEN" \
-          WEBHOOK_URL_VALUE="$WEBHOOK_URL" \
-          META_APP_ID_VALUE="$META_APP_ID" \
-          INSTAGRAM_PAGE_ID_VALUE="$INSTAGRAM_PAGE_ID" \
-          META_GRAPH_BASE_URL_VALUE="$META_GRAPH_BASE_URL" \
-          META_GRAPH_API_VERSION_VALUE="$META_GRAPH_API_VERSION" \
-          node --input-type=module <<'NODE'
-          import { createHmac, randomBytes } from 'node:crypto';
-
-          const required = (name) => {
-            const value = process.env[name]?.trim();
-            if (!value) throw new Error(`${name}_REQUIRED`);
-            return value;
-          };
-          const appSecret = required('META_APP_SECRET_VALUE');
-          const rootToken = required('META_ROOT_TOKEN_VALUE');
-          const webhookUrl = required('WEBHOOK_URL_VALUE').replace(/\/$/u, '');
-          const appId = required('META_APP_ID_VALUE');
-          const pageId = required('INSTAGRAM_PAGE_ID_VALUE');
-          const graphBase = required('META_GRAPH_BASE_URL_VALUE').replace(/\/$/u, '');
-          const apiVersion = required('META_GRAPH_API_VERSION_VALUE');
-
-          async function readJson(url) {
-            const response = await fetch(url, {
-              method: 'GET',
-              signal: AbortSignal.timeout(15_000),
-            });
-            if (!response.ok) throw new Error(`META_GET_FAILED_${response.status}`);
-            return response.json();
-          }
-          const asArray = (value) => (Array.isArray(value) ? value : []);
-          const asRecord = (value) =>
-            value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-          const scalar = (value) =>
-            typeof value === 'string' || typeof value === 'number' ? String(value) : '';
-          const fields = (value) => {
-            const result = new Set();
-            if (typeof value === 'string') {
-              for (const part of value.split(',')) if (part.trim()) result.add(part.trim());
-              return result;
-            }
-            for (const item of asArray(value)) {
-              if (typeof item === 'string' && item.trim()) result.add(item.trim());
-              else {
-                const name = scalar(asRecord(item).name).trim();
-                if (name) result.add(name);
-              }
-            }
-            return result;
-          };
-
-          let pageToken = '';
-          const accountsUrl = new URL(`${graphBase}/${apiVersion}/me/accounts`);
-          accountsUrl.searchParams.set('fields', 'id,access_token');
-          accountsUrl.searchParams.set('limit', '100');
-          accountsUrl.searchParams.set('access_token', rootToken);
-          const accounts = await readJson(accountsUrl);
-          const account = asArray(asRecord(accounts).data)
-            .map(asRecord)
-            .find((item) => scalar(item.id) === pageId && scalar(item.access_token));
-          pageToken = scalar(account?.access_token);
-          if (!pageToken) {
-            const pageUrl = new URL(`${graphBase}/${apiVersion}/${pageId}`);
-            pageUrl.searchParams.set('fields', 'id');
-            pageUrl.searchParams.set('access_token', rootToken);
-            const page = asRecord(await readJson(pageUrl));
-            if (scalar(page.id) !== pageId) throw new Error('META_PAGE_ID_MISMATCH');
-            pageToken = rootToken;
-          }
-
-          const appAccessToken = `${appId}|${appSecret}`;
-          const appUrl = new URL(`${graphBase}/${apiVersion}/${appId}/subscriptions`);
-          appUrl.searchParams.set('access_token', appAccessToken);
-          const appPayload = asRecord(await readJson(appUrl));
-          const instagramSubscription = asArray(appPayload.data)
-            .map(asRecord)
-            .find((entry) => scalar(entry.object) === 'instagram');
-          if (!instagramSubscription) throw new Error('META_APP_SUBSCRIPTION_MISSING');
-          const expectedCallback = `${webhookUrl}/webhooks/meta`.replace(/\/$/u, '');
-          const observedCallback = scalar(instagramSubscription.callback_url).replace(/\/$/u, '');
-          if (observedCallback !== expectedCallback) throw new Error('META_CALLBACK_URL_MISMATCH');
-          const appFields = fields(instagramSubscription.fields);
-          if (!appFields.has('comments') || !appFields.has('messages')) {
-            throw new Error('META_APP_FIELDS_MISSING');
-          }
-
-          const pageAppsUrl = new URL(`${graphBase}/${apiVersion}/${pageId}/subscribed_apps`);
-          pageAppsUrl.searchParams.set('fields', 'id,subscribed_fields');
-          pageAppsUrl.searchParams.set('access_token', pageToken);
-          const pageApps = asRecord(await readJson(pageAppsUrl));
-          const pageApp = asArray(pageApps.data)
-            .map(asRecord)
-            .find((entry) => scalar(entry.id) === appId);
-          if (!pageApp) throw new Error('META_PAGE_SUBSCRIPTION_MISSING');
-          if (!fields(pageApp.subscribed_fields).has('messages')) {
-            throw new Error('META_PAGE_MESSAGES_FIELD_MISSING');
-          }
-
-          const verifyToken = createHmac('sha256', appSecret)
-            .update('TOCA_META_WEBHOOK_VERIFY_TOKEN_V1', 'utf8')
-            .digest('hex');
-          const challenge = `restore-${randomBytes(12).toString('hex')}`;
-          const challengeUrl = new URL(`${webhookUrl}/webhooks/meta`);
-          challengeUrl.searchParams.set('hub.mode', 'subscribe');
-          challengeUrl.searchParams.set('hub.verify_token', verifyToken);
-          challengeUrl.searchParams.set('hub.challenge', challenge);
-          const challengeResponse = await fetch(challengeUrl, {
-            method: 'GET',
-            signal: AbortSignal.timeout(15_000),
-          });
-          const challengeBody = await challengeResponse.text();
-          if (!challengeResponse.ok || challengeBody !== challenge) {
-            throw new Error('META_CALLBACK_CHALLENGE_FAILED');
-          }
-
-          console.log('PROVIDER_GET_ONLY_READBACK=PASS');
-          console.log('APP_CALLBACK_URL_MATCH=true');
-          console.log('APP_COMMENTS_FIELD_PRESENT=true');
-          console.log('APP_MESSAGES_FIELD_PRESENT=true');
-          console.log('PAGE_APP_SUBSCRIPTION_PRESENT=true');
-          console.log('PAGE_MESSAGES_FIELD_PRESENT=true');
-          console.log('CALLBACK_CHALLENGE_PASS=true');
-          console.log('PROVIDER_METHODS=GET_ONLY');
-          console.log('PROVIDER_WRITES=false');
-          console.log('SECRETS_PRINTED=false');
-          NODE
-          unset APP_SECRET ROOT_TOKEN
+          bash scripts/verify-instagram-engagement-webhook-ingress.sh
 
           echo "serving_revision=$CURRENT_REVISION" >> "$GITHUB_OUTPUT"
           echo "image=$CURRENT_IMAGE" >> "$GITHUB_OUTPUT"
