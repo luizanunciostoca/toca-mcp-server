@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const verifier = readFileSync('scripts/verify-instagram-engagement-webhook-ingress.sh', 'utf8');
+const verifier = readFileSync(
+  'scripts/verify-instagram-engagement-webhook-ingress.sh',
+  'utf8',
+);
 const workflows = [
   {
     path: '.github/workflows/instagram-engagement-limited-activation.yml',
@@ -55,7 +58,9 @@ describe('Instagram engagement webhook ingress promotion gate', () => {
 
   it('fails closed before any LIMITED mutation when webhook ingress is unhealthy', () => {
     for (const workflow of workflows) {
-      expect(workflow.source).toContain('WEBHOOK_SERVICE_NAME: toca-webhook-next-production');
+      expect(workflow.source).toContain(
+        'WEBHOOK_SERVICE_NAME: toca-webhook-next-production',
+      );
       expect(workflow.source).toContain('META_APP_SECRET_ID: toca-meta-app-secret');
 
       const gate = workflow.source.indexOf(
@@ -93,9 +98,7 @@ describe('Instagram engagement webhook ingress promotion gate', () => {
       expect(workflow.source).not.toContain(
         'gcloud run services update-traffic "$WEBHOOK_SERVICE_NAME"',
       );
-      expect(workflow.source).not.toContain(
-        'gcloud run deploy "$WEBHOOK_SERVICE_NAME"',
-      );
+      expect(workflow.source).not.toContain('gcloud run deploy "$WEBHOOK_SERVICE_NAME"');
     }
   });
 });
