@@ -12,12 +12,8 @@ describe('current-schema staging DR harness', () => {
     expect(workflow).not.toContain('branches:');
     expect(workflow).not.toContain('schedule:');
     expect(workflow).toContain('authorization_issue:');
-    expect(workflow).toContain(
-      "require_exact_line_once 'DR_EXECUTION_AUTHORIZATION=ACTIVE'",
-    );
-    expect(workflow).toContain(
-      "require_exact_line_once 'AUTHORIZATION_STATE=ACTIVE'",
-    );
+    expect(workflow).toContain("require_exact_line_once 'DR_EXECUTION_AUTHORIZATION=ACTIVE'");
+    expect(workflow).toContain("require_exact_line_once 'AUTHORIZATION_STATE=ACTIVE'");
     expect(workflow).toContain(
       "require_exact_line_absent 'DR_EXECUTION_AUTHORIZATION=PENDING'",
     );
@@ -29,9 +25,7 @@ describe('current-schema staging DR harness', () => {
     );
     expect(workflow).toContain("grep -c '^FINANCIAL_CEILING='");
     expect(workflow).toContain('^(USD|BRL):([0-9]+([.][0-9]{1,2})?)');
-    expect(workflow).not.toContain(
-      "grep -Fxq 'DR_EXECUTION_AUTHORIZATION=ACTIVE'",
-    );
+    expect(workflow).not.toContain("grep -Fxq 'DR_EXECUTION_AUTHORIZATION=ACTIVE'");
     expect(workflow).toContain('AUTHORIZED_CANDIDATE_SHA=$CANDIDATE_SHA');
     expect(workflow).toContain('AUTHORIZED_ENVIRONMENT=toca-mcp-next-staging');
     expect(workflow).toContain('PRODUCTION_MUTATION_AUTHORIZED=false');
