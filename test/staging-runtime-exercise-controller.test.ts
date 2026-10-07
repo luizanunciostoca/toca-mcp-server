@@ -98,4 +98,27 @@ describe('staging runtime exercise controller', () => {
     expect(section).toContain('dispatch_wait staging-runtime-observability.yml');
     expect(section).not.toContain('gcloud run');
   });
+
+  it('keeps the kill-switch candidate diagnostic owner-only, exact-SHA and read-only', () => {
+    const start = workflow.indexOf('  kill-switch-diagnostic:');
+    const end = workflow.indexOf('  recovery-exercise:', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const section = workflow.slice(start, end);
+
+    expect(section).toContain("github.actor == 'luizanunciostoca'");
+    expect(section).toContain('github.event.issue.number == 151');
+    expect(section).toContain(
+      "startsWith(github.event.comment.body, '/toca-staging-kill-switch-diagnose ')",
+    );
+    expect(section).toContain('test "$CONTROLLER_SHA" = "$MAIN_SHA"');
+    expect(section).toContain('test "$DIAGNOSTIC_SHA" = "$BRANCH_SHA"');
+    expect(section).toContain('test "$current_branch_sha" = "$DIAGNOSTIC_SHA"');
+    expect(section).toContain('operation:"kill_switch"');
+    expect(section).toContain('rollout:"canary"');
+    expect(section).toContain('rollback_mcp_revision:$baseline');
+    expect(section).toContain('rollback_webhook_revision:$candidate');
+    expect(section).not.toContain('gcloud run');
+    expect(section).not.toContain('environment:"production"');
+  });
 });
