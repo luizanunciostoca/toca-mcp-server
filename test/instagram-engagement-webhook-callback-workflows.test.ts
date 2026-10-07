@@ -8,24 +8,62 @@ const readonlyWorkflow = read(
 );
 const restoreWorkflow = read('.github/workflows/instagram-engagement-webhook-callback-restore.yml');
 const verifier = read('scripts/verify-instagram-engagement-webhook-ingress.sh');
+const deploy = read('.github/workflows/deploy-gcp.yml');
 
-const callbackWriters = [
-  '.github/workflows/instagram-engagement-final-shadow-proof.yml',
+const issueScoped = [
+  [
+    '.github/workflows/instagram-engagement-webhook-callback-readonly.yml',
+    'PRODUCTION AUTHORIZATION — Instagram webhook callback READONLY AUTO',
+    'instagram-webhook-callback-readonly',
+  ],
+  [
+    '.github/workflows/instagram-engagement-webhook-callback-restore.yml',
+    'PRODUCTION AUTHORIZATION — Instagram webhook callback restore AUTO',
+    'instagram-webhook-callback-restore',
+  ],
+  [
+    '.github/workflows/instagram-engagement-limited-activation.yml',
+    'PRODUCTION AUTHORIZATION — Instagram engagement LIMITED activation AUTO',
+    'instagram-limited-activation',
+  ],
+  [
+    '.github/workflows/instagram-engagement-comment-limited-promotion.yml',
+    'PRODUCTION AUTHORIZATION — Instagram engagement COMMENT LIMITED promotion AUTO',
+    'instagram-comment-limited-promotion',
+  ],
+  [
+    '.github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml',
+    'PRODUCTION AUTHORIZATION — Instagram FAQ expansion LIMITED refresh AUTO',
+    'instagram-faq-limited-refresh',
+  ],
+  [
+    '.github/workflows/instagram-engagement-ag01-fallback-limited-activation.yml',
+    'PRODUCTION AUTHORIZATION — Instagram AG-01 grounded fallback LIMITED activation AUTO',
+    'instagram-ag01-limited-activation',
+  ],
+  [
+    '.github/workflows/instagram-engagement-final-shadow-proof.yml',
+    'PRODUCTION AUTHORIZATION — Instagram final shadow proof AUTO',
+    'instagram-final-shadow-proof',
+  ],
+  [
+    '.github/workflows/instagram-engagement-corrected-shadow-proof-retry.yml',
+    'PRODUCTION AUTHORIZATION — Instagram corrected shadow proof retry AUTO',
+    'instagram-corrected-shadow-proof-retry',
+  ],
+  [
+    '.github/workflows/instagram-engagement-corrected-runtime-shadow.yml',
+    'PRODUCTION AUTHORIZATION — Instagram corrected runtime shadow AUTO',
+    'instagram-corrected-runtime-shadow',
+  ],
+] as const;
+
+const dispatchWriters = [
   '.github/workflows/instagram-engagement-shadow-production.yml',
-  '.github/workflows/instagram-engagement-corrected-shadow-proof-retry.yml',
   '.github/workflows/instagram-engagement-shadow-proof-recovery.yml',
-  '.github/workflows/instagram-engagement-corrected-runtime-shadow.yml',
   '.github/workflows/instagram-engagement-shadow-candidate-recovery.yml',
   '.github/workflows/instagram-engagement-shadow-unique-candidate-recovery.yml',
-  '.github/workflows/instagram-engagement-limited-activation.yml',
-  '.github/workflows/instagram-engagement-comment-limited-promotion.yml',
-  '.github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml',
-  '.github/workflows/instagram-engagement-ag01-fallback-limited-activation.yml',
-  '.github/workflows/instagram-engagement-webhook-callback-readonly.yml',
-  '.github/workflows/instagram-engagement-webhook-callback-restore.yml',
 ].map(read);
-
-const deploy = read('.github/workflows/deploy-gcp.yml');
 
 function expectOrdered(source: string, markers: readonly string[]): void {
   let prior = -1;
@@ -37,8 +75,23 @@ function expectOrdered(source: string, markers: readonly string[]): void {
 }
 
 describe('Instagram webhook callback governance', () => {
-  it('serializes every callback writer and production deploy in one mutex', () => {
-    for (const workflow of callbackWriters) {
+  it('shares the callback mutex only for matching issue-triggered controllers', () => {
+    for (const [path, titlePrefix, fallback] of issueScoped) {
+      const workflow = read(path);
+      expect(workflow).toContain(
+        `startsWith(github.event.issue.title, '${titlePrefix}')`,
+      );
+      expect(workflow).toContain("'instagram-engagement-webhook-callback-control'");
+      expect(workflow).toContain(`format('${fallback}-{0}', github.run_id)`);
+      expect(workflow).toContain('cancel-in-progress: false');
+      expect(workflow).not.toContain(
+        'group: instagram-engagement-webhook-callback-control\n',
+      );
+    }
+  });
+
+  it('keeps explicit callback writers and production deploy serialized', () => {
+    for (const workflow of dispatchWriters) {
       expect(workflow).toContain('group: instagram-engagement-webhook-callback-control');
       expect(workflow).toContain('cancel-in-progress: false');
     }
@@ -46,6 +99,7 @@ describe('Instagram webhook callback governance', () => {
     expect(deploy).toContain(
       "inputs.environment == 'production' && 'instagram-engagement-webhook-callback-control'",
     );
+    expect(deploy).toContain("format('deploy-gcp-next-{0}', inputs.environment)");
     expect(deploy).toContain('cancel-in-progress: false');
   });
 
