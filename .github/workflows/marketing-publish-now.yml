@@ -51,6 +51,8 @@ env:
   REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
   REQUIRED_CTA: 'Ingressos limitados! garanta o seu pelo link na bio.'
   MARKETING_AUTOPILOT_POLICY_PATH: control/marketing-autopilot-scheduler-policy.json
+  HEARTBEAT_WORKFLOW_NAME: GitHub Native Instagram Publisher
+  HEARTBEAT_WORKFLOW_PATH: .github/workflows/github-native-instagram-publisher.yml
 
 jobs:
   publish-now:
@@ -112,13 +114,14 @@ jobs:
             --arg repository "$GITHUB_REPOSITORY" \
             --arg sha "$GITHUB_SHA" '
               .name == "Marketing Autopilot Publication" and
-              .event == "schedule" and
+              (.event == "schedule" or .event == "workflow_run") and
               .head_branch == "main" and
               .head_sha == $sha and
               .repository.full_name == $repository and
               ((.status == "queued" or .status == "in_progress") or
                (.status == "completed" and .conclusion == "success"))
             ' /tmp/source-run.json >/dev/null
+          source_event="$(jq -r .event /tmp/source-run.json)"
           created_at="$(jq -r .created_at /tmp/source-run.json)"
           created_epoch="$(date -d "$created_at" +%s)"
           now_epoch="$(date +%s)"
@@ -137,18 +140,48 @@ jobs:
           jq -e \
             --arg sourceRunId "$SOURCE_RUN_ID" \
             --arg sourceSha "$GITHUB_SHA" \
+            --arg sourceEvent "$source_event" \
             --arg contentItemId "$CONTENT_ITEM_ID" \
             --arg scheduledAt "$SCHEDULED_AT" '
               .schemaVersion == 1 and
               .sourceRunId == $sourceRunId and
               .sourceSha == $sourceSha and
               .event == "schedule" and
+              .sourceEvent == $sourceEvent and
               .contentItemId == $contentItemId and
               .scheduledAt == $scheduledAt and
               .priorAttemptState == "NONE" and
               (.registrySnapshotSha256 | test("^[a-f0-9]{64}$")) and
-              (.authorizedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+              (.authorizedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+              ((.sourceEvent == "schedule" and .triggerKind == "PRIMARY_SCHEDULE" and .upstreamRunId == "") or
+               (.sourceEvent == "workflow_run" and .triggerKind == "REDUNDANT_SCHEDULE_HEARTBEAT" and (.upstreamRunId | test("^[0-9]+$"))))
             ' "$authorization" >/dev/null
+
+          if [ "$source_event" = workflow_run ]; then
+            upstream_run_id="$(jq -r .upstreamRunId "$authorization")"
+            printf '%s' "$upstream_run_id" | grep -Eq '^[0-9]+$'
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${upstream_run_id}" > /tmp/upstream-run.json
+            jq -e \
+              --arg repository "$GITHUB_REPOSITORY" \
+              --arg name "$HEARTBEAT_WORKFLOW_NAME" \
+              --arg path "$HEARTBEAT_WORKFLOW_PATH" '
+                .name == $name and
+                .path == $path and
+                .event == "schedule" and
+                .head_branch == "main" and
+                .run_attempt == 1 and
+                .status == "completed" and
+                .conclusion == "success" and
+                .repository.full_name == $repository
+              ' /tmp/upstream-run.json >/dev/null
+            upstream_updated_at="$(jq -r .updated_at /tmp/upstream-run.json)"
+            upstream_epoch="$(date -d "$upstream_updated_at" +%s)"
+            upstream_age=$((now_epoch - upstream_epoch))
+            test "$upstream_age" -ge -120
+            test "$upstream_age" -le 900
+            echo "MARKETING_AUTOPILOT_HEARTBEAT_PROVENANCE=VERIFIED upstream_run_id=$upstream_run_id"
+          fi
+
           authorized_at="$(jq -r .authorizedAt "$authorization")"
           authorized_epoch="$(date -d "$authorized_at" +%s)"
           authorization_age=$((now_epoch - authorized_epoch))
@@ -164,7 +197,7 @@ jobs:
           snapshot="$(jq -r .registrySnapshotSha256 "$authorization")"
           echo "AUTHORIZED_REGISTRY_SNAPSHOT_SHA256=$snapshot" >> "$GITHUB_ENV"
           echo "AUTHORIZED_SCHEDULER_RUN_ID=$SOURCE_RUN_ID" >> "$GITHUB_ENV"
-          echo "MARKETING_AUTOPILOT_SOURCE_RUN_PROVENANCE=VERIFIED run_id=$SOURCE_RUN_ID"
+          echo "MARKETING_AUTOPILOT_SOURCE_RUN_PROVENANCE=VERIFIED run_id=$SOURCE_RUN_ID event=$source_event"
 
       - name: Verify deterministic brand binding before cloud auth
         if: steps.invocation.outputs.action == 'PUBLISH_NOW' && steps.invocation.outputs.source == 'PROTECTED_COMMAND_FILE'
