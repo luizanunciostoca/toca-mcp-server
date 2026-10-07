@@ -16,22 +16,48 @@ It is a provider-smoke/review operation only. It does not publish, schedule, act
 
 ## Authorization
 
-The only chat-triggerable path is an owner-authored GitHub issue whose title is exactly:
+The provider smoke is a **production-scoped internal provider proof**, not a publication action. It creates only one ephemeral Cloud Run Job plus the exact review artifact required by the proof. Production publication, scheduling, MARKETING_READY promotion and paid-media activation remain forbidden.
+
+The only accepted authorization issue title is exactly:
 
 `PROVIDER AUTHORIZATION — Video Generative Smoke TP-GEN-0001`
 
-The issue body must bind the exact current `main` SHA and include:
+Before any production authentication, image push, Cloud Run Job creation or Veo call, the workflow requires the issue to be open, owner-authored and bound to the live exact `main`. Every authorization key must occur **exactly once**; duplicate/conflicting values fail closed.
+
+The active issue body must contain exactly one value for each key:
 
 ```text
 AUTHORIZED_CANDIDATE_SHA=<exact main SHA>
 AUTHORIZATION_STATE=ACTIVE
 VIDEO_CONTENT_ITEM_ID=VID-TP-20260904-DUAS-PISTAS-GEN-001
 VIDEO_GENERATIVE_SMOKE=AUTHORIZED
+PROVIDER_CALL_AUTHORIZED=true
+PRODUCTION_PROVIDER_PROOF_AUTHORIZED=true
+PROVIDER=GOOGLE_VERTEX_VEO
+MODEL=veo-3.1-generate-001
+PROVIDER_LOCATION=us-central1
+PROVIDER_OUTPUT_SECONDS=8
+PROVIDER_SAMPLE_COUNT=1
+PROVIDER_RESOLUTION=720p
+PROVIDER_AUDIO_GENERATION=false
+FINANCIAL_CEILING=USD:<explicit positive owner-approved amount>
 PUBLICATION_AUTHORIZED=false
+SCHEDULING_AUTHORIZED=false
+MARKETING_READY_AUTHORIZED=false
+PAID_MEDIA_AUTHORIZED=false
+```
+
+The issue-triggered autodispatch path additionally requires:
+
+```text
 AUTO_DISPATCH_AUTHORIZED=true
 ```
 
-The issue event controller verifies repository owner, open issue state, exact `main` SHA, exact content item and the closed publication boundary before dispatching the canonical smoke workflow.
+Both dispatch and execution require Control Plane #640 to contain unique exact values `MAIN_STABILITY=PASS`, `EVALUATED_MAIN_SHA=<exact main SHA>` and `MERGE_RESERVATION=NONE`.
+
+The canonical source binding is `TP-GEN-0001` / SHA-256 `e16d4bc9dba27eb60a826d9be6fd3dade2f1e2e48445e1155a421cf52ca7d85b`. Current Creative Truth authority must still resolve legitimate source rights and an approved generative exception at runtime; GitHub authorization cannot fabricate or override rights/likeness evidence.
+
+The workflow **consumes and closes the authorization issue before the first production/provider mutation**. A failed later build/provider call still consumes the one-shot authority. Re-execution requires a fresh owner authorization.
 
 ## Runtime identity
 
@@ -46,11 +72,18 @@ The canonical asset bucket is `INSTAGRAM_PUBLICATION_ASSET_BUCKET` when configur
 The smoke uses:
 
 ```text
+GCP_PROJECT_ID=toca-mcp-production
+GCP_REGION=southamerica-east1
 VIDEO_SCENE_CONTINUATION_PROVIDER=GOOGLE_VERTEX_VEO
 VIDEO_GOOGLE_AUTH_MODE=GCP_SERVICE_IDENTITY
 VERTEX_VEO_LOCATION=us-central1
 VERTEX_VEO_MODEL=veo-3.1-generate-001
 ```
+
+The Veo request is cost-shaped and proof-shaped to exactly one 8-second, 9:16, 720p sample with `generateAudio=false`. The workflow records the owner-approved financial ceiling in sanitized evidence; because cloud billing is provider-authoritative, the ceiling is a governance bound over this fixed request rather than a real-time billing cutoff.
+
+The production target is pinned to the canonical project, runtime/deployer identities and publication-asset bucket. The ephemeral Cloud Run Job is deleted after execution and an independent absence check must pass. The generated MP4 remains a review candidate only.
+
 
 If service-account signing, Workspace sharing, Vertex authorization, model availability, quota or GCS access is not actually present, execution fails closed and the blocker is reported rather than bypassed.
 
