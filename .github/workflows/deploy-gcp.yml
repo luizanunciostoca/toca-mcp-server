@@ -1372,9 +1372,19 @@ jobs:
         run: |
           set -euo pipefail
 
+          verify_revision_kill_switch_value() {
+            local service="$1" revision="$2" expected="$3"
+            local revision_json
+            revision_json="$(gcloud run revisions describe "$revision" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            printf '%s' "$revision_json" | jq -e --arg expected "$expected" '
+              .spec.containers[0] as $container |
+              ([$container.env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH") | .value] | last) == $expected
+            ' >/dev/null
+          }
+
           verify_kill_switch_value() {
             local service="$1" expected="$2"
-            local service_json revision revision_json
+            local service_json revision
             service_json="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
             revision="$(printf '%s' "$service_json" | jq -r '
               . as $service |
@@ -1386,16 +1396,39 @@ jobs:
               ] | unique | if length == 1 then .[0] else empty end
             ')"
             test -n "$revision"
-            revision_json="$(gcloud run revisions describe "$revision" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-            printf '%s' "$revision_json" | jq -e --arg expected "$expected" '
-              .spec.containers[0] as $container |
-              ([$container.env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH") | .value] | last) == $expected
-            ' >/dev/null
+            verify_revision_kill_switch_value "$service" "$revision" "$expected"
+          }
+
+          apply_kill_switch_value() {
+            local service="$1" expected="$2"
+            local before_json before_latest revision after_json
+            before_json="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            before_latest="$(printf '%s' "$before_json" | jq -r '.status.latestReadyRevisionName // empty')"
+            test -n "$before_latest"
+
+            gcloud run services update "$service" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected" \
+              --quiet
+
+            after_json="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            revision="$(printf '%s' "$after_json" | jq -r '.status.latestReadyRevisionName // empty')"
+            test -n "$revision"
+            test "$revision" != "$before_latest"
+
+            verify_revision_kill_switch_value "$service" "$revision" "$expected"
+            gcloud run services update-traffic "$service" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --to-revisions "${revision}=100" \
+              --quiet
+            verify_kill_switch_value "$service" "$expected"
+            echo "PLATFORM_KILL_SWITCH_REVISION_PROMOTED service=$service revision=$revision value=$expected" >> "$GITHUB_STEP_SUMMARY"
           }
 
           for service in "$GCP_CLOUD_RUN_MCP_SERVICE" "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"; do
-            gcloud run services update "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --update-env-vars TOCA_PLATFORM_KILL_SWITCH=true
-            verify_kill_switch_value "$service" true
+            apply_kill_switch_value "$service" true
           done
           echo 'PLATFORM_KILL_SWITCH_READBACK=true' >> "$GITHUB_STEP_SUMMARY"
 
@@ -1404,9 +1437,19 @@ jobs:
         run: |
           set -euo pipefail
 
+          verify_revision_kill_switch_value() {
+            local service="$1" revision="$2" expected="$3"
+            local revision_json
+            revision_json="$(gcloud run revisions describe "$revision" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            printf '%s' "$revision_json" | jq -e --arg expected "$expected" '
+              .spec.containers[0] as $container |
+              ([$container.env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH") | .value] | last) == $expected
+            ' >/dev/null
+          }
+
           verify_kill_switch_value() {
             local service="$1" expected="$2"
-            local service_json revision revision_json
+            local service_json revision
             service_json="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
             revision="$(printf '%s' "$service_json" | jq -r '
               . as $service |
@@ -1418,16 +1461,39 @@ jobs:
               ] | unique | if length == 1 then .[0] else empty end
             ')"
             test -n "$revision"
-            revision_json="$(gcloud run revisions describe "$revision" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-            printf '%s' "$revision_json" | jq -e --arg expected "$expected" '
-              .spec.containers[0] as $container |
-              ([$container.env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH") | .value] | last) == $expected
-            ' >/dev/null
+            verify_revision_kill_switch_value "$service" "$revision" "$expected"
+          }
+
+          apply_kill_switch_value() {
+            local service="$1" expected="$2"
+            local before_json before_latest revision after_json
+            before_json="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            before_latest="$(printf '%s' "$before_json" | jq -r '.status.latestReadyRevisionName // empty')"
+            test -n "$before_latest"
+
+            gcloud run services update "$service" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected" \
+              --quiet
+
+            after_json="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            revision="$(printf '%s' "$after_json" | jq -r '.status.latestReadyRevisionName // empty')"
+            test -n "$revision"
+            test "$revision" != "$before_latest"
+
+            verify_revision_kill_switch_value "$service" "$revision" "$expected"
+            gcloud run services update-traffic "$service" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --to-revisions "${revision}=100" \
+              --quiet
+            verify_kill_switch_value "$service" "$expected"
+            echo "PLATFORM_KILL_SWITCH_REVISION_PROMOTED service=$service revision=$revision value=$expected" >> "$GITHUB_STEP_SUMMARY"
           }
 
           for service in "$GCP_CLOUD_RUN_MCP_SERVICE" "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"; do
-            gcloud run services update "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --update-env-vars TOCA_PLATFORM_KILL_SWITCH=false
-            verify_kill_switch_value "$service" false
+            apply_kill_switch_value "$service" false
           done
           echo 'PLATFORM_KILL_SWITCH_READBACK=false' >> "$GITHUB_STEP_SUMMARY"
 
