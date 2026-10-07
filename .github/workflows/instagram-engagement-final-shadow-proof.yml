@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: ${{ startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram final shadow proof AUTO') && 'instagram-engagement-webhook-callback-control' || format('instagram-final-shadow-proof-{0}', github.run_id) }}
+  group: ${{ github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram final shadow proof AUTO') && 'instagram-engagement-webhook-callback-control' || format('instagram-final-shadow-proof-{0}', github.run_id) }}
   cancel-in-progress: false
 
 env:
