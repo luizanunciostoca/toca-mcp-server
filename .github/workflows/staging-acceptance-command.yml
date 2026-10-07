@@ -150,6 +150,104 @@ jobs:
           BODY="$(printf '## STAGING_ACCEPTANCE_COMMAND — CANONICAL_CHAIN_PASS\n\nCANDIDATE_SHA=%s\nDEPLOY_RUN=%s\nRUNTIME_CAPACITY_RUN=%s\nRELIABILITY_ALERTS_RUN=%s\nSYNTHETIC_RUN=%s\nIMAGE_INDEX_DIGEST=%s\nPRODUCTION_TOUCHED=NO\nREAL_PROVIDERS_TOUCHED=NO\nNEXT=INCIDENT_DELIVERY_READBACK_AND_STAGING_ONLY_DR' "$CANDIDATE_SHA" "$DEPLOY_RUN" "$RUNTIME_RUN" "$ALERTS_RUN" "$SYNTHETIC_RUN" "$IMAGE_DIGEST")"
           gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="$BODY" >/dev/null
 
+  kill-switch-diagnostic:
+    if: >-
+      github.repository == 'luizanunciostoca/toca-mcp-server' &&
+      github.actor == 'luizanunciostoca' &&
+      github.event.issue.number == 151 &&
+      startsWith(github.event.comment.body, '/toca-staging-kill-switch-diagnose ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate exact read-only diagnostic command
+        id: diagnostic_gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_ACTOR" = "$ALLOWED_ACTOR"
+          test "${{ github.event.issue.number }}" = "$EVIDENCE_ISSUE"
+
+          read -r COMMAND CONTROLLER_SHA DIAGNOSTIC_SHA BASELINE_REVISION CANDIDATE_REVISION EXTRA <<<"$COMMENT_BODY"
+          test "$COMMAND" = '/toca-staging-kill-switch-diagnose'
+          test -z "${EXTRA:-}"
+          [[ "$CONTROLLER_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$DIAGNOSTIC_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASELINE_REVISION" =~ ^toca-mcp-next-staging-[a-z0-9-]+$ ]]
+          [[ "$CANDIDATE_REVISION" =~ ^toca-mcp-next-staging-[a-z0-9-]+$ ]]
+
+          MAIN_SHA="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
+          test "$CONTROLLER_SHA" = "$MAIN_SHA"
+          BRANCH_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/diag/toca-max-kill-switch-spec-diff-20261007" --jq '.object.sha')"
+          test "$DIAGNOSTIC_SHA" = "$BRANCH_SHA"
+
+          {
+            echo "controller_sha=$CONTROLLER_SHA"
+            echo "diagnostic_sha=$DIAGNOSTIC_SHA"
+            echo "baseline_revision=$BASELINE_REVISION"
+            echo "candidate_revision=$CANDIDATE_REVISION"
+          } >> "$GITHUB_OUTPUT"
+
+          gh api "repos/$GITHUB_REPOSITORY/issues/$EVIDENCE_ISSUE/comments" \
+            -f body="STAGING_KILL_SWITCH_DIAGNOSTIC=ACCEPTED controller=$CONTROLLER_SHA diagnostic=$DIAGNOSTIC_SHA baseline=$BASELINE_REVISION candidate=$CANDIDATE_REVISION controller_run=$GITHUB_RUN_ID" \
+            >/dev/null
+
+      - name: Dispatch exact read-only diagnostic branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTROLLER_SHA: ${{ steps.diagnostic_gate.outputs.controller_sha }}
+          DIAGNOSTIC_SHA: ${{ steps.diagnostic_gate.outputs.diagnostic_sha }}
+          BASELINE_REVISION: ${{ steps.diagnostic_gate.outputs.baseline_revision }}
+          CANDIDATE_REVISION: ${{ steps.diagnostic_gate.outputs.candidate_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          payload="$(jq -cn \
+            --arg ref 'diag/toca-max-kill-switch-spec-diff-20261007' \
+            --arg baseline "$BASELINE_REVISION" \
+            --arg candidate "$CANDIDATE_REVISION" \
+            '{ref:$ref,inputs:{environment:"staging",operation:"kill_switch",rollout:"canary",rollback_mcp_revision:$baseline,rollback_webhook_revision:$candidate}}')"
+          printf '%s' "$payload" | gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/deploy-gcp.yml/dispatches" \
+            --input - >/dev/null
+
+          run_id=''
+          for attempt in $(seq 1 45); do
+            data="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy-gcp.yml/runs?event=workflow_dispatch&branch=diag/toca-max-kill-switch-spec-diff-20261007&per_page=30")"
+            run_id="$(jq -r --arg sha "$DIAGNOSTIC_SHA" --arg start "$start" \
+              '[.workflow_runs[] | select(.head_sha == $sha and .created_at >= $start)] | sort_by(.created_at) | last | .id // empty' \
+              <<<"$data")"
+            [[ -n "$run_id" ]] && break
+            sleep 4
+          done
+          test -n "$run_id"
+
+          current_branch_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/diag/toca-max-kill-switch-spec-diff-20261007" --jq '.object.sha')"
+          test "$current_branch_sha" = "$DIAGNOSTIC_SHA"
+
+          gh api "repos/$GITHUB_REPOSITORY/issues/$EVIDENCE_ISSUE/comments" \
+            -f body="STAGING_KILL_SWITCH_DIAGNOSTIC_RUN=$run_id status=started diagnostic=$DIAGNOSTIC_SHA" \
+            >/dev/null
+
+          for attempt in $(seq 1 90); do
+            data="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
+            status="$(jq -r '.status' <<<"$data")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"$data")"
+            if [[ "$status" == completed ]]; then
+              gh api "repos/$GITHUB_REPOSITORY/issues/$EVIDENCE_ISSUE/comments" \
+                -f body="STAGING_KILL_SWITCH_DIAGNOSTIC_RUN=$run_id status=$conclusion diagnostic=$DIAGNOSTIC_SHA" \
+                >/dev/null
+              test "$conclusion" = success
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
   recovery-exercise:
     if: >-
       github.repository == 'luizanunciostoca/toca-mcp-server' &&
