@@ -107,7 +107,249 @@ jobs:
           ')"
           test -n "$PRESTATE_REPORT"
           grep -Fxq "CONTROLLER_SHA=$GITHUB_SHA" <<< "$PRESTATE_REPORT"
-          grep -Eq '^CALLBACK_CLASSIFICATION=BLOCKED_(INGRESS_RESTRICTED|DEFAULT_URL_DISABLED|INVOKER_IAM_CHECK_ENABLED|STATUS_URL_MISSING)$' <<< "$PRESTATE_REPORT"
+          grep -Eq '^CALLBACK_CLASSIFICATION=(PUBLIC_CALLBACK_READY|BLOCKED_(INGRESS_RESTRICTED|DEFAULT_URL_DISABLED|INVOKER_IAM_CHECK_ENABLED|STATUS_URL_MISSING))
+
+          echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "prestate_issue=$PRESTATE_ISSUE" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate governed deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Capture exact service-level prestate
+        id: prestate
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          IAM_JSON="$(gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          if printf '%s' "$IAM_JSON" | jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' >/dev/null; then
+            echo 'Legacy allUsers invoker is outside the authorized repair scope' >&2
+            exit 1
+          fi
+
+          SERVING_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | unique | if length == 1 then .[0] else empty end')"
+          test -n "$SERVING_REVISION"
+          REVISION_JSON="$(gcloud run revisions describe "$SERVING_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          printf '%s' "$REVISION_JSON" | jq -e --arg runtime "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+            .spec.containers[0] as $c |
+            def envValue($name): ([($c.env // [])[] | select(.name == $name) | .value] | last // null);
+            (([.status.conditions[]? | select(.type == "Ready") | .status] | last) == "True") and
+            (.spec.serviceAccountName == $runtime) and
+            (envValue("TOCA_SERVICE_ROLE") == "webhook") and
+            (envValue("MCP_ENABLED") == "false") and
+            (envValue("META_WEBHOOK_ENABLED") == "true") and
+            (envValue("META_WEBHOOK_PERSISTENCE_ENABLED") == "true") and
+            (envValue("INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") == "true") and
+            ((envValue("INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") // "false") == "false")
+          ' >/dev/null
+
+          PRE_IMAGE="$(printf '%s' "$REVISION_JSON" | jq -r '.spec.containers[0].image // empty')"
+          PRE_INGRESS="$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"')"
+          PRE_DEFAULT_URL_DISABLED="$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"')"
+          PRE_INVOKER_IAM_DISABLED="$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"')"
+          PRE_TRAFFIC_SHA="$(printf '%s' "$SERVICE_JSON" | jq -cS '.status.traffic // []' | sha256sum | awk '{print $1}')"
+          PRE_IAM_SHA="$(printf '%s' "$IAM_JSON" | jq -cS . | sha256sum | awk '{print $1}')"
+
+          test -n "$PRE_IMAGE"
+          MUTATION_REQUIRED=true
+          if [[ "$PRE_INGRESS" == all && "$PRE_DEFAULT_URL_DISABLED" == false && "$PRE_INVOKER_IAM_DISABLED" == true ]]; then
+            MUTATION_REQUIRED=false
+          fi
+
+          {
+            echo "serving_revision=$SERVING_REVISION"
+            echo "pre_image=$PRE_IMAGE"
+            echo "pre_ingress=$PRE_INGRESS"
+            echo "pre_default_url_disabled=$PRE_DEFAULT_URL_DISABLED"
+            echo "pre_invoker_iam_disabled=$PRE_INVOKER_IAM_DISABLED"
+            echo "pre_traffic_sha=$PRE_TRAFFIC_SHA"
+            echo "pre_iam_sha=$PRE_IAM_SHA"
+            echo "mutation_required=$MUTATION_REQUIRED"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Consume single-use authorization before mutation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
+          test "$(printf '%s' "$ISSUE_JSON" | jq -r '.state')" = open
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY"
+          BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
+          grep -Fxq 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$BODY"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
+            -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
+          echo 'RESTORE_AUTHORIZATION_CONSUMED=true'
+
+      - name: Restore only the required DRS-safe callback surface
+        id: mutate
+        env:
+          PRE_INGRESS: ${{ steps.prestate.outputs.pre_ingress }}
+          PRE_DEFAULT_URL_DISABLED: ${{ steps.prestate.outputs.pre_default_url_disabled }}
+          PRE_INVOKER_IAM_DISABLED: ${{ steps.prestate.outputs.pre_invoker_iam_disabled }}
+          MUTATION_REQUIRED: ${{ steps.prestate.outputs.mutation_required }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$MUTATION_REQUIRED" == false ]]; then
+            echo 'mutation_completed=false' >> "$GITHUB_OUTPUT"
+            echo 'WEBHOOK_CALLBACK_RESTORE_MUTATION=SKIPPED_ALREADY_READY'
+            exit 0
+          fi
+
+          FLAGS=()
+          if [[ "$PRE_INGRESS" != all ]]; then FLAGS+=(--ingress=all); fi
+          if [[ "$PRE_DEFAULT_URL_DISABLED" == true ]]; then FLAGS+=(--default-url); fi
+          if [[ "$PRE_INVOKER_IAM_DISABLED" != true ]]; then FLAGS+=(--no-invoker-iam-check); fi
+          test "${#FLAGS[@]}" -gt 0
+          echo 'MUTATION_ATTEMPTED=true' >> "$GITHUB_ENV"
+          gcloud run services update "$WEBHOOK_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            "${FLAGS[@]}" --quiet
+          echo 'mutation_completed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Read back runtime, DB schema, challenge and Meta subscriptions
+        id: poststate
+        env:
+          EXPECTED_REVISION: ${{ steps.prestate.outputs.serving_revision }}
+          EXPECTED_IMAGE: ${{ steps.prestate.outputs.pre_image }}
+          PRE_TRAFFIC_SHA: ${{ steps.prestate.outputs.pre_traffic_sha }}
+          PRE_IAM_SHA: ${{ steps.prestate.outputs.pre_iam_sha }}
+          RUNTIME_IMAGE: ${{ steps.prestate.outputs.pre_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          IAM_JSON="$(gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          CURRENT_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | unique | if length == 1 then .[0] else empty end')"
+          test "$CURRENT_REVISION" = "$EXPECTED_REVISION"
+          REVISION_JSON="$(gcloud run revisions describe "$CURRENT_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          CURRENT_IMAGE="$(printf '%s' "$REVISION_JSON" | jq -r '.spec.containers[0].image // empty')"
+          test "$CURRENT_IMAGE" = "$EXPECTED_IMAGE"
+          POST_TRAFFIC_SHA="$(printf '%s' "$SERVICE_JSON" | jq -cS '.status.traffic // []' | sha256sum | awk '{print $1}')"
+          POST_IAM_SHA="$(printf '%s' "$IAM_JSON" | jq -cS . | sha256sum | awk '{print $1}')"
+          test "$POST_TRAFFIC_SHA" = "$PRE_TRAFFIC_SHA"
+          test "$POST_IAM_SHA" = "$PRE_IAM_SHA"
+
+          bash scripts/verify-instagram-engagement-webhook-ingress.sh
+
+          echo "serving_revision=$CURRENT_REVISION" >> "$GITHUB_OUTPUT"
+          echo "image=$CURRENT_IMAGE" >> "$GITHUB_OUTPUT"
+          echo 'health_status=200' >> "$GITHUB_OUTPUT"
+          echo 'ready_status=200' >> "$GITHUB_OUTPUT"
+          echo 'invalid_challenge_status=403' >> "$GITHUB_OUTPUT"
+          echo 'provider_get_readback=PASS' >> "$GITHUB_OUTPUT"
+          echo 'callback_challenge_pass=true' >> "$GITHUB_OUTPUT"
+
+      - name: Publish successful repair evidence
+        id: report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+          SERVING_REVISION: ${{ steps.poststate.outputs.serving_revision }}
+          IMAGE: ${{ steps.poststate.outputs.image }}
+          HEALTH_STATUS: ${{ steps.poststate.outputs.health_status }}
+          READY_STATUS: ${{ steps.poststate.outputs.ready_status }}
+          INVALID_CHALLENGE_STATUS: ${{ steps.poststate.outputs.invalid_challenge_status }}
+          PROVIDER_GET_READBACK: ${{ steps.poststate.outputs.provider_get_readback }}
+          CALLBACK_CHALLENGE_PASS: ${{ steps.poststate.outputs.callback_challenge_pass }}
+          SERVICE_MUTATION: ${{ steps.mutate.outputs.mutation_completed }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf -v REPORT '%s\n' \
+            'WEBHOOK_CALLBACK_RESTORE_STATUS=PASS' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            "SERVING_REVISION=$SERVING_REVISION" \
+            "IMAGE=$IMAGE" \
+            'INGRESS=all' \
+            'DEFAULT_URL_DISABLED=false' \
+            'INVOKER_IAM_DISABLED=true' \
+            'LEGACY_ALLUSERS_INVOKER=false' \
+            "HEALTH_HTTP_STATUS=$HEALTH_STATUS" \
+            "READY_HTTP_STATUS=$READY_STATUS" \
+            "INVALID_CHALLENGE_HTTP_STATUS=$INVALID_CHALLENGE_STATUS" \
+            "PROVIDER_GET_ONLY_READBACK=$PROVIDER_GET_READBACK" \
+            "CALLBACK_CHALLENGE_PASS=$CALLBACK_CHALLENGE_PASS" \
+            'DATABASE_SCHEMA_READINESS=PASS' \
+            "SERVICE_MUTATION=$SERVICE_MUTATION" \
+            'IMAGE_MUTATION=false' \
+            'TRAFFIC_MUTATION=false' \
+            'REVISION_DEPLOY=false' \
+            'DATABASE_MUTATIONS=false' \
+            'PROVIDER_METHODS=GET_ONLY' \
+            'PROVIDER_WRITES=false' \
+            'NEW_PAID_RESOURCES=false' \
+            'EXTERNAL_REPLY_WRITES=false' \
+            'GENERAL_AUTONOMY=false'
+          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT" >/dev/null
+
+      - name: Roll back exact service-level prestate on failure or cancellation
+        if: (failure() || cancelled()) && env.MUTATION_ATTEMPTED == 'true'
+        env:
+          PRE_INGRESS: ${{ steps.prestate.outputs.pre_ingress }}
+          PRE_DEFAULT_URL_DISABLED: ${{ steps.prestate.outputs.pre_default_url_disabled }}
+          PRE_INVOKER_IAM_DISABLED: ${{ steps.prestate.outputs.pre_invoker_iam_disabled }}
+          EXPECTED_REVISION: ${{ steps.prestate.outputs.serving_revision }}
+          EXPECTED_IMAGE: ${{ steps.prestate.outputs.pre_image }}
+          PRE_TRAFFIC_SHA: ${{ steps.prestate.outputs.pre_traffic_sha }}
+          PRE_IAM_SHA: ${{ steps.prestate.outputs.pre_iam_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          FLAGS=("--ingress=$PRE_INGRESS")
+          if [[ "$PRE_DEFAULT_URL_DISABLED" == true ]]; then FLAGS+=(--no-default-url); else FLAGS+=(--default-url); fi
+          if [[ "$PRE_INVOKER_IAM_DISABLED" == true ]]; then FLAGS+=(--no-invoker-iam-check); else FLAGS+=(--invoker-iam-check); fi
+          gcloud run services update "$WEBHOOK_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            "${FLAGS[@]}" --quiet
+
+          SERVICE_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          IAM_JSON="$(gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          CURRENT_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | unique | if length == 1 then .[0] else empty end')"
+          test "$CURRENT_REVISION" = "$EXPECTED_REVISION"
+          REVISION_JSON="$(gcloud run revisions describe "$CURRENT_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          test "$(printf '%s' "$REVISION_JSON" | jq -r '.spec.containers[0].image // empty')" = "$EXPECTED_IMAGE"
+          test "$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"')" = "$PRE_INGRESS"
+          test "$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"')" = "$PRE_DEFAULT_URL_DISABLED"
+          test "$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"')" = "$PRE_INVOKER_IAM_DISABLED"
+          POST_TRAFFIC_SHA="$(printf '%s' "$SERVICE_JSON" | jq -cS '.status.traffic // []' | sha256sum | awk '{print $1}')"
+          POST_IAM_SHA="$(printf '%s' "$IAM_JSON" | jq -cS . | sha256sum | awk '{print $1}')"
+          test "$POST_TRAFFIC_SHA" = "$PRE_TRAFFIC_SHA"
+          test "$POST_IAM_SHA" = "$PRE_IAM_SHA"
+          echo 'WEBHOOK_CALLBACK_RESTORE_ROLLBACK=PASS'
+
+      - name: Publish failure and rollback status
+        if: always() && env.MUTATION_ATTEMPTED == 'true' && (failure() || cancelled())
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf -v REPORT '%s\n' \
+            'WEBHOOK_CALLBACK_RESTORE_STATUS=FAIL' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' \
+            'ROLLBACK_REQUIRED=true' \
+            'PROVIDER_WRITES=false' \
+            'DATABASE_MUTATIONS=false' \
+            'TRAFFIC_MUTATION=false' \
+            'REVISION_DEPLOY=false' \
+            'NEW_PAID_RESOURCES=false' \
+            'GENERAL_AUTONOMY=false'
+          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT" >/dev/null
+ <<< "$PRESTATE_REPORT"
 
           echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
           echo "prestate_issue=$PRESTATE_ISSUE" >> "$GITHUB_OUTPUT"
