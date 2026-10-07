@@ -107,7 +107,7 @@ jobs:
           ')"
           test -n "$PRESTATE_REPORT"
           grep -Fxq "CONTROLLER_SHA=$GITHUB_SHA" <<< "$PRESTATE_REPORT"
-          grep -Eq '^CALLBACK_CLASSIFICATION=BLOCKED_(INGRESS_RESTRICTED|DEFAULT_URL_DISABLED|INVOKER_IAM_CHECK_ENABLED|STATUS_URL_MISSING)$' <<< "$PRESTATE_REPORT"
+          grep -Eq '^CALLBACK_CLASSIFICATION=(PUBLIC_CALLBACK_READY|BLOCKED_(INGRESS_RESTRICTED|DEFAULT_URL_DISABLED|INVOKER_IAM_CHECK_ENABLED|STATUS_URL_MISSING))$' <<< "$PRESTATE_REPORT"
 
           echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
           echo "prestate_issue=$PRESTATE_ISSUE" >> "$GITHUB_OUTPUT"
@@ -157,9 +157,9 @@ jobs:
           PRE_IAM_SHA="$(printf '%s' "$IAM_JSON" | jq -cS . | sha256sum | awk '{print $1}')"
 
           test -n "$PRE_IMAGE"
+          MUTATION_REQUIRED=true
           if [[ "$PRE_INGRESS" == all && "$PRE_DEFAULT_URL_DISABLED" == false && "$PRE_INVOKER_IAM_DISABLED" == true ]]; then
-            echo 'Current callback surface is already public DRS-safe; repair authorization is stale' >&2
-            exit 1
+            MUTATION_REQUIRED=false
           fi
 
           {
@@ -170,6 +170,7 @@ jobs:
             echo "pre_invoker_iam_disabled=$PRE_INVOKER_IAM_DISABLED"
             echo "pre_traffic_sha=$PRE_TRAFFIC_SHA"
             echo "pre_iam_sha=$PRE_IAM_SHA"
+            echo "mutation_required=$MUTATION_REQUIRED"
           } >> "$GITHUB_OUTPUT"
 
       - name: Consume single-use authorization before mutation
@@ -187,6 +188,7 @@ jobs:
           grep -Fxq 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$BODY"
           gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
             -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
+          echo 'AUTHORIZATION_CONSUMED=true' >> "$GITHUB_ENV"
           echo 'RESTORE_AUTHORIZATION_CONSUMED=true'
 
       - name: Restore only the required DRS-safe callback surface
@@ -195,9 +197,16 @@ jobs:
           PRE_INGRESS: ${{ steps.prestate.outputs.pre_ingress }}
           PRE_DEFAULT_URL_DISABLED: ${{ steps.prestate.outputs.pre_default_url_disabled }}
           PRE_INVOKER_IAM_DISABLED: ${{ steps.prestate.outputs.pre_invoker_iam_disabled }}
+          MUTATION_REQUIRED: ${{ steps.prestate.outputs.mutation_required }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$MUTATION_REQUIRED" == false ]]; then
+            echo 'mutation_completed=false' >> "$GITHUB_OUTPUT"
+            echo 'WEBHOOK_CALLBACK_RESTORE_MUTATION=SKIPPED_ALREADY_READY'
+            exit 0
+          fi
+
           FLAGS=()
           if [[ "$PRE_INGRESS" != all ]]; then FLAGS+=(--ingress=all); fi
           if [[ "$PRE_DEFAULT_URL_DISABLED" == true ]]; then FLAGS+=(--default-url); fi
@@ -254,6 +263,7 @@ jobs:
           INVALID_CHALLENGE_STATUS: ${{ steps.poststate.outputs.invalid_challenge_status }}
           PROVIDER_GET_READBACK: ${{ steps.poststate.outputs.provider_get_readback }}
           CALLBACK_CHALLENGE_PASS: ${{ steps.poststate.outputs.callback_challenge_pass }}
+          SERVICE_MUTATION: ${{ steps.mutate.outputs.mutation_completed }}
         shell: bash
         run: |
           set -euo pipefail
@@ -272,6 +282,7 @@ jobs:
             "PROVIDER_GET_ONLY_READBACK=$PROVIDER_GET_READBACK" \
             "CALLBACK_CHALLENGE_PASS=$CALLBACK_CHALLENGE_PASS" \
             'DATABASE_SCHEMA_READINESS=PASS' \
+            "SERVICE_MUTATION=$SERVICE_MUTATION" \
             'IMAGE_MUTATION=false' \
             'TRAFFIC_MUTATION=false' \
             'REVISION_DEPLOY=false' \
@@ -319,7 +330,7 @@ jobs:
           echo 'WEBHOOK_CALLBACK_RESTORE_ROLLBACK=PASS'
 
       - name: Publish failure and rollback status
-        if: always() && env.MUTATION_ATTEMPTED == 'true' && (failure() || cancelled())
+        if: always() && env.AUTHORIZATION_CONSUMED == 'true' && (failure() || cancelled())
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
