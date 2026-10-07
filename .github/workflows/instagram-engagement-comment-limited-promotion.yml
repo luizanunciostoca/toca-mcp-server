@@ -11,7 +11,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: instagram-engagement-webhook-callback-control
+  group: ${{ github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram engagement COMMENT LIMITED promotion AUTO') && 'instagram-engagement-webhook-callback-control' || format('instagram-comment-limited-promotion-{0}', github.run_id) }}
   cancel-in-progress: false
 
 env:
