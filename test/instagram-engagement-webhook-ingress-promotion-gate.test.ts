@@ -28,25 +28,34 @@ function expectOrdered(source: string, markers: readonly string[]): void {
 }
 
 describe('Instagram engagement webhook ingress promotion gate', () => {
-  it('proves the DRS-safe public webhook challenge without writes', () => {
+  it('proves the complete read-only ingress path before declaring LIMITED healthy', () => {
     const markers = [
       'gcloud run services describe "$WEBHOOK_SERVICE_NAME"',
       'run.googleapis.com/default-url-disabled',
       'run.googleapis.com/invoker-iam-disabled',
-      'roles/run.invoker',
-      'allUsers',
-      'TOCA_SERVICE_ROLE',
+      'INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED',
       'META_WEBHOOK_ENABLED',
       'META_WEBHOOK_PERSISTENCE_ENABLED',
-      'INSTAGRAM_ENGAGEMENT_WRITES_ENABLED',
-      'gcloud secrets versions access latest',
-      'TOCA_META_WEBHOOK_VERIFY_TOKEN_V1',
-      "method: 'GET'",
+      'DATABASE_URL',
+      'gcloud run jobs deploy "$JOB"',
+      'dist/src/ops/instagram-engagement-ingestion-health-readonly.js',
+      'DATABASE_READ_PASS=true',
+      'PROVIDER_READ_PASS=true',
+      'APP_INSTAGRAM_SUBSCRIPTION_PRESENT=true',
+      'APP_CALLBACK_URL_MATCH=true',
+      'APP_COMMENTS_FIELD_PRESENT=true',
+      'APP_MESSAGES_FIELD_PRESENT=true',
+      'PAGE_APP_SUBSCRIPTION_PRESENT=true',
+      'PAGE_MESSAGES_FIELD_PRESENT=true',
       'CALLBACK_CHALLENGE_PASS=true',
+      'PROVIDER_METHODS=GET_ONLY',
       'PROVIDER_WRITES=false',
       'DATABASE_MUTATIONS=false',
-      'TRAFFIC_MUTATIONS=false',
-      'RAW_SECRET_LOGGED=false',
+      'EXTERNAL_REPLY_WRITES=false',
+      'SECRETS_PRINTED=false',
+      'ENGAGEMENT_RUNTIME_ENABLED=true',
+      'PROVIDER_SUBSCRIPTIONS_VERIFIED=true',
+      'PERSISTENCE_READINESS_VERIFIED=true',
     ];
 
     for (const marker of markers) {
@@ -55,15 +64,28 @@ describe('Instagram engagement webhook ingress promotion gate', () => {
 
     expect(verifier).not.toContain('gcloud run services update ');
     expect(verifier).not.toContain('gcloud run deploy ');
-    expect(verifier).not.toContain("method: 'POST'");
+    expect(verifier).not.toContain('/subscriptions" -X POST');
+    expect(verifier).not.toContain('/subscribed_apps" -X POST');
+  });
+
+  it('binds each gate to the exact authorized runtime and provider identity', () => {
+    for (const workflow of workflows) {
+      expect(workflow).toContain('WEBHOOK_SERVICE_NAME: toca-webhook-next-production');
+      expect(workflow).toContain("META_APP_ID: '2281930145887404'");
+      expect(workflow).toContain('META_APP_SECRET_ID: toca-meta-app-secret');
+      expect(workflow).toContain('TOKEN_SECRET_ID: toca-meta-oauth-token');
+
+      const runtimeBindings = workflow.match(
+        /RUNTIME_IMAGE: \$\{\{ steps\.auth\.outputs\.runtime_image \}\}/g,
+      );
+      expect(runtimeBindings?.length).toBeGreaterThanOrEqual(2);
+    }
   });
 
   it('fails closed before any LIMITED mutation', () => {
     const gate = '      - name: Verify healthy Instagram webhook ingress before LIMITED mutation';
 
     for (const workflow of workflows) {
-      expect(workflow).toContain('WEBHOOK_SERVICE_NAME: toca-webhook-next-production');
-      expect(workflow).toContain('META_APP_SECRET_ID: toca-meta-app-secret');
       expect(workflow.indexOf(gate)).toBeGreaterThan(-1);
 
       const calls = workflow.match(
@@ -77,7 +99,7 @@ describe('Instagram engagement webhook ingress promotion gate', () => {
     expectOrdered(faq, [gate, '      - name: Backup current shared FAQ and knowledge state']);
   });
 
-  it('rechecks ingress before publishing LIMITED PASS', () => {
+  it('rechecks ingress after runtime readback and before publishing LIMITED PASS', () => {
     const finalGate =
       '      - name: Reverify healthy Instagram webhook ingress before publishing LIMITED state';
 
