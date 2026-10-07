@@ -149,3 +149,194 @@ jobs:
 
           BODY="$(printf '## STAGING_ACCEPTANCE_COMMAND — CANONICAL_CHAIN_PASS\n\nCANDIDATE_SHA=%s\nDEPLOY_RUN=%s\nRUNTIME_CAPACITY_RUN=%s\nRELIABILITY_ALERTS_RUN=%s\nSYNTHETIC_RUN=%s\nIMAGE_INDEX_DIGEST=%s\nPRODUCTION_TOUCHED=NO\nREAL_PROVIDERS_TOUCHED=NO\nNEXT=INCIDENT_DELIVERY_READBACK_AND_STAGING_ONLY_DR' "$CANDIDATE_SHA" "$DEPLOY_RUN" "$RUNTIME_RUN" "$ALERTS_RUN" "$SYNTHETIC_RUN" "$IMAGE_DIGEST")"
           gh api "repos/${GITHUB_REPOSITORY}/issues/${EVIDENCE_ISSUE}/comments" -f body="$BODY" >/dev/null
+
+  recovery-exercise:
+    if: >-
+      github.repository == 'luizanunciostoca/toca-mcp-server' &&
+      github.actor == 'luizanunciostoca' &&
+      github.event.issue.number == 151 &&
+      startsWith(github.event.comment.body, '/toca-staging-recovery ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Validate exact authorization and immutable prestate
+        id: recovery_gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'luizanunciostoca/toca-mcp-server'
+          test "$GITHUB_ACTOR" = "$ALLOWED_ACTOR"
+          test "${{ github.event.issue.number }}" = "$EVIDENCE_ISSUE"
+
+          read -r COMMAND CONTROLLER_SHA AUTH_COMMENT_ID PRESTATE_COMMENT_ID EXTRA <<<"$COMMENT_BODY"
+          test "$COMMAND" = '/toca-staging-recovery'
+          test -z "${EXTRA:-}"
+          [[ "$CONTROLLER_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$AUTH_COMMENT_ID" =~ ^[0-9]+$ ]]
+          [[ "$PRESTATE_COMMENT_ID" =~ ^[0-9]+$ ]]
+
+          MAIN_SHA="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
+          test "$CONTROLLER_SHA" = "$MAIN_SHA"
+
+          AUTH_JSON="$(gh api "repos/$GITHUB_REPOSITORY/issues/comments/$AUTH_COMMENT_ID")"
+          test "$(jq -r '.user.login' <<<"$AUTH_JSON")" = "$GITHUB_REPOSITORY_OWNER"
+          test "$(jq -r '.issue_url' <<<"$AUTH_JSON")" = "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/639"
+          AUTH_BODY="$(jq -r '.body // ""' <<<"$AUTH_JSON")"
+          grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<<"$AUTH_BODY"
+          grep -Fxq "AUTHORIZED_CANDIDATE_SHA=$CONTROLLER_SHA" <<<"$AUTH_BODY"
+          grep -Fxq 'AUTHORIZED_ENVIRONMENT=toca-mcp-next-staging' <<<"$AUTH_BODY"
+          grep -Fxq 'AUTHORIZED_REGION=southamerica-east1' <<<"$AUTH_BODY"
+          grep -Fxq 'AUTHORIZED_SERVICES=toca-mcp-next-staging,toca-webhook-next-staging' <<<"$AUTH_BODY"
+          grep -Fxq 'AUTHORIZED_SEQUENCE=LIVE_BEFORE_STATE -> KILL_SWITCH_ON -> READBACK -> KILL_SWITCH_OFF -> READBACK -> EXPLICIT_ROLLBACK_TO_CAPTURED_PRESTATE_REVISIONS -> FINAL_READBACK' <<<"$AUTH_BODY"
+          grep -Fxq 'PRODUCTION_MUTATION_AUTHORIZED=false' <<<"$AUTH_BODY"
+          grep -Fxq 'PROVIDER_MUTATION_AUTHORIZED=false' <<<"$AUTH_BODY"
+          grep -Fxq 'DATABASE_MUTATION_AUTHORIZED=false' <<<"$AUTH_BODY"
+          grep -Fxq 'REAL_MONEY_AUTHORIZED=false' <<<"$AUTH_BODY"
+          grep -Fxq 'NEW_PAID_RESOURCE_ALLOCATION_AUTHORIZED=false' <<<"$AUTH_BODY"
+          grep -Fxq 'SECRETS_DISCLOSURE_AUTHORIZED=false' <<<"$AUTH_BODY"
+          grep -Fxq 'ROLLBACK_REQUIRED=true' <<<"$AUTH_BODY"
+          grep -Fxq 'READBACK_REQUIRED_AFTER_EACH_MUTATION=true' <<<"$AUTH_BODY"
+
+          PRESTATE_JSON="$(gh api "repos/$GITHUB_REPOSITORY/issues/comments/$PRESTATE_COMMENT_ID")"
+          test "$(jq -r '.user.login' <<<"$PRESTATE_JSON")" = "$GITHUB_REPOSITORY_OWNER"
+          test "$(jq -r '.issue_url' <<<"$PRESTATE_JSON")" = "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/641"
+          PRESTATE_BODY="$(jq -r '.body // ""' <<<"$PRESTATE_JSON")"
+          grep -Fq 'TOCA-MAX STAGING ROLLBACK/KILL-SWITCH PRESTATE — AUTHORIZED EXERCISE' <<<"$PRESTATE_BODY"
+          grep -Fq 'project/region: toca-mcp-next-staging / southamerica-east1' <<<"$PRESTATE_BODY"
+          grep -Fq 'providers/production/database/cloud-run mutation during prestate read = false' <<<"$PRESTATE_BODY"
+
+          RUNTIME_SHA="$(grep -F 'runtime release SHA:' <<<"$PRESTATE_BODY" | head -n1 | grep -oE '[0-9a-f]{40}')"
+          IMAGE_DIGEST="$(grep -F 'image index digest:' <<<"$PRESTATE_BODY" | head -n1 | grep -oE 'sha256:[0-9a-f]{64}')"
+          MCP_REVISION="$(grep -F 'MCP: toca-mcp-next-staging @' <<<"$PRESTATE_BODY" | head -n1 | grep -oE 'toca-mcp-next-staging-mcp-[a-z0-9-]+')"
+          WEBHOOK_REVISION="$(grep -F 'Webhook: toca-webhook-next-staging @' <<<"$PRESTATE_BODY" | head -n1 | grep -oE 'toca-webhook-next-staging-webhook-[a-z0-9-]+')"
+          PRESTATE_URL="$(jq -r '.html_url' <<<"$PRESTATE_JSON")"
+
+          [[ "$RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$MCP_REVISION" =~ ^toca-mcp-next-staging-mcp-[a-z0-9-]+$ ]]
+          [[ "$WEBHOOK_REVISION" =~ ^toca-webhook-next-staging-webhook-[a-z0-9-]+$ ]]
+          [[ "$PRESTATE_URL" == https://github.com/$GITHUB_REPOSITORY/issues/641* ]]
+
+          {
+            echo "controller_sha=$CONTROLLER_SHA"
+            echo "runtime_sha=$RUNTIME_SHA"
+            echo "image_digest=$IMAGE_DIGEST"
+            echo "mcp_revision=$MCP_REVISION"
+            echo "webhook_revision=$WEBHOOK_REVISION"
+            echo "prestate_url=$PRESTATE_URL"
+          } >> "$GITHUB_OUTPUT"
+
+          gh api "repos/$GITHUB_REPOSITORY/issues/$EVIDENCE_ISSUE/comments" \
+            -f body="STAGING_RUNTIME_EXERCISE=ACCEPTED controller=$CONTROLLER_SHA runtime=$RUNTIME_SHA auth_comment=$AUTH_COMMENT_ID prestate_comment=$PRESTATE_COMMENT_ID controller_run=$GITHUB_RUN_ID" \
+            >/dev/null
+
+      - name: Checkout exact controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.recovery_gate.outputs.controller_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Run governed staging rollback and kill-switch exercise
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTROLLER_SHA: ${{ steps.recovery_gate.outputs.controller_sha }}
+          RUNTIME_SHA: ${{ steps.recovery_gate.outputs.runtime_sha }}
+          IMAGE_DIGEST: ${{ steps.recovery_gate.outputs.image_digest }}
+          MCP_REVISION: ${{ steps.recovery_gate.outputs.mcp_revision }}
+          WEBHOOK_REVISION: ${{ steps.recovery_gate.outputs.webhook_revision }}
+          PRESTATE_URL: ${{ steps.recovery_gate.outputs.prestate_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CONTROLLER_SHA"
+
+          RUNTIME_POLICY_SHA="$(sha256sum infra/observability/staging-runtime-observability-policy.json | awk '{print $1}')"
+          [[ "$RUNTIME_POLICY_SHA" =~ ^[0-9a-f]{64}$ ]]
+
+          dispatch_wait() {
+            local workflow="$1"
+            local payload="$2"
+            local label="$3"
+            local start run_id data status conclusion
+            start="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '%s' "$payload" | gh api --method POST \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/dispatches" \
+              --input - >/dev/null
+
+            run_id=''
+            for attempt in $(seq 1 45); do
+              data="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=workflow_dispatch&branch=main&per_page=30")"
+              run_id="$(jq -r --arg sha "$CONTROLLER_SHA" --arg start "$start" \
+                '[.workflow_runs[] | select(.head_sha == $sha and .created_at >= $start)] | sort_by(.created_at) | last | .id // empty' \
+                <<<"$data")"
+              [[ -n "$run_id" ]] && break
+              sleep 4
+            done
+            test -n "$run_id"
+
+            gh api "repos/$GITHUB_REPOSITORY/issues/$EVIDENCE_ISSUE/comments" \
+              -f body="STAGING_RUNTIME_EXERCISE_$label=$run_id status=started controller=$CONTROLLER_SHA" \
+              >/dev/null
+
+            for attempt in $(seq 1 240); do
+              data="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
+              status="$(jq -r '.status' <<<"$data")"
+              conclusion="$(jq -r '.conclusion // ""' <<<"$data")"
+              if [[ "$status" == completed ]]; then
+                gh api "repos/$GITHUB_REPOSITORY/issues/$EVIDENCE_ISSUE/comments" \
+                  -f body="STAGING_RUNTIME_EXERCISE_$label=$run_id status=$conclusion controller=$CONTROLLER_SHA" \
+                  >/dev/null
+                if [[ "$conclusion" != success ]]; then
+                  echo "Child workflow $workflow failed with conclusion=$conclusion run_id=$run_id" >&2
+                  return 1
+                fi
+                printf '%s\n' "$run_id"
+                return 0
+              fi
+              sleep 10
+            done
+            return 1
+          }
+
+          OBS_PAYLOAD="$(jq -cn \
+            --arg policy "$RUNTIME_POLICY_SHA" \
+            --arg runtime "$RUNTIME_SHA" \
+            --arg digest "$IMAGE_DIGEST" \
+            '{ref:"main",inputs:{expected_policy_sha256:$policy,expected_candidate_sha:$runtime,expected_image_digest:$digest,run_capacity:"false"}}')"
+          PRESTATE_RUN="$(dispatch_wait staging-runtime-observability.yml "$OBS_PAYLOAD" PRESTATE_READBACK)"
+
+          KILL_PAYLOAD='{"ref":"main","inputs":{"environment":"staging","operation":"kill_switch","rollout":"candidate"}}'
+          CLEAR_PAYLOAD='{"ref":"main","inputs":{"environment":"staging","operation":"clear_kill_switch","rollout":"candidate"}}'
+          ROLLBACK_PAYLOAD="$(jq -cn \
+            --arg mcp "$MCP_REVISION" \
+            --arg webhook "$WEBHOOK_REVISION" \
+            --arg compatibility "$PRESTATE_URL" \
+            '{ref:"main",inputs:{environment:"staging",operation:"rollback",rollout:"candidate",rollback_mcp_revision:$mcp,rollback_webhook_revision:$webhook,rollback_compatibility_ref:$compatibility}}')"
+
+          KILL_RUN=''
+          CLEAR_RUN=''
+          ROLLBACK_RUN=''
+
+          if ! KILL_RUN="$(dispatch_wait deploy-gcp.yml "$KILL_PAYLOAD" KILL_SWITCH_ON)"; then
+            ROLLBACK_RUN="$(dispatch_wait deploy-gcp.yml "$ROLLBACK_PAYLOAD" COMPENSATING_ROLLBACK_AFTER_KILL_FAILURE)" || true
+            test -n "$ROLLBACK_RUN"
+            exit 1
+          fi
+
+          if ! CLEAR_RUN="$(dispatch_wait deploy-gcp.yml "$CLEAR_PAYLOAD" KILL_SWITCH_OFF)"; then
+            ROLLBACK_RUN="$(dispatch_wait deploy-gcp.yml "$ROLLBACK_PAYLOAD" COMPENSATING_ROLLBACK_AFTER_CLEAR_FAILURE)" || true
+            test -n "$ROLLBACK_RUN"
+            exit 1
+          fi
+
+          ROLLBACK_RUN="$(dispatch_wait deploy-gcp.yml "$ROLLBACK_PAYLOAD" EXPLICIT_ROLLBACK)"
+          FINAL_RUN="$(dispatch_wait staging-runtime-observability.yml "$OBS_PAYLOAD" FINAL_READBACK)"
+
+          BODY="$(printf '## STAGING_RUNTIME_EXERCISE — PASS\n\nCONTROLLER_SHA=%s\nRUNTIME_SHA=%s\nPRESTATE_READBACK_RUN=%s\nKILL_SWITCH_RUN=%s\nCLEAR_KILL_SWITCH_RUN=%s\nROLLBACK_RUN=%s\nFINAL_READBACK_RUN=%s\nROLLBACK_MCP_REVISION=%s\nROLLBACK_WEBHOOK_REVISION=%s\nPRODUCTION_TOUCHED=NO\nREAL_PROVIDERS_TOUCHED=NO\nDATABASE_MUTATION=NO\nFINAL_STATE=PRESTATE_RESTORED' \
+            "$CONTROLLER_SHA" "$RUNTIME_SHA" "$PRESTATE_RUN" "$KILL_RUN" "$CLEAR_RUN" "$ROLLBACK_RUN" "$FINAL_RUN" "$MCP_REVISION" "$WEBHOOK_REVISION")"
+          gh api "repos/$GITHUB_REPOSITORY/issues/$EVIDENCE_ISSUE/comments" -f body="$BODY" >/dev/null
+
