@@ -105,6 +105,8 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).toContain('require_key_value_once PROVIDER_MUTATION_AUTHORIZED false');
     expect(workflow).toContain('require_key_value_once TRAFFIC_MUTATION_AUTHORIZED false');
     expect(workflow).toContain('require_key_value_once CLOUD_RUN_MUTATION_AUTHORIZED false');
+    expect(workflow).toContain('require_key_value_once DATABASE_SECRET_READ_AUTHORIZED true');
+    expect(workflow).toContain('require_key_value_once SECRETS_DISCLOSURE_AUTHORIZED false');
     expect(workflow).toContain(
       'require_key_value_once FINANCIAL_CEILING NO_NEW_PAID_RESOURCE_ALLOCATION',
     );
@@ -121,6 +123,8 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(schemaSyncBlock).toContain('providerMutation:false');
     expect(schemaSyncBlock).toContain('trafficMutation:false');
     expect(schemaSyncBlock).toContain('cloudRunMutation:false');
+    expect(schemaSyncBlock).toContain('databaseSecretRead:true');
+    expect(schemaSyncBlock).toContain('secretPayloadDisclosed:false');
     expect(schemaSyncBlock).not.toContain('gcloud run deploy');
     expect(schemaSyncBlock).not.toContain('gcloud run services update-traffic');
     expect(schemaSyncBlock).not.toContain('graph.facebook.com');
