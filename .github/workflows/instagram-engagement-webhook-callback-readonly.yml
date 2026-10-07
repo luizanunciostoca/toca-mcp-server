@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: instagram-engagement-webhook-callback-control
+  group: ${{ startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram webhook callback READONLY AUTO') && 'instagram-engagement-webhook-callback-control' || format('instagram-webhook-callback-readonly-{0}', github.run_id) }}
   cancel-in-progress: false
 
 env:
