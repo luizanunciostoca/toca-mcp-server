@@ -68,16 +68,24 @@ describe('GCP rollback and mutation kill-switch readback', () => {
       expect(block).toContain('stage_candidate "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" webhook');
       expect(block).toContain('--to-revisions "${MCP_CANDIDATE_REVISION}=100"');
       expect(block).toContain('--to-revisions "${WEBHOOK_CANDIDATE_REVISION}=100"');
-      expect(block).toContain('rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"');
+      expect(block).toContain(
+        'rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"',
+      );
       expect(block).toContain('PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL');
       expect(block).not.toContain(
         'rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION" || true',
       );
-      expect(block).toContain(`verify_serving_kill_switch "$GCP_CLOUD_RUN_MCP_SERVICE" "$MCP_CANDIDATE_REVISION" ${expected}`);
-      expect(block).toContain(`verify_serving_kill_switch "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_CANDIDATE_REVISION" ${expected}`);
+      expect(block).toContain(
+        `verify_serving_kill_switch "$GCP_CLOUD_RUN_MCP_SERVICE" "$MCP_CANDIDATE_REVISION" ${expected}`,
+      );
+      expect(block).toContain(
+        `verify_serving_kill_switch "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_CANDIDATE_REVISION" ${expected}`,
+      );
 
       const stageMcp = block.indexOf('stage_candidate "$GCP_CLOUD_RUN_MCP_SERVICE" mcp');
-      const stageWebhook = block.indexOf('stage_candidate "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" webhook');
+      const stageWebhook = block.indexOf(
+        'stage_candidate "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" webhook',
+      );
       const promoteMcp = block.indexOf('--to-revisions "${MCP_CANDIDATE_REVISION}=100"');
       const promoteWebhook = block.indexOf('--to-revisions "${WEBHOOK_CANDIDATE_REVISION}=100"');
       expect(stageMcp).toBeGreaterThan(-1);
