@@ -601,20 +601,23 @@ jobs:
           test "$(jq -r '.pull_request // empty' <<<"$ISSUE_JSON")" = ""
           test "$(jq -r '.user.login' <<<"$ISSUE_JSON")" = "$GITHUB_REPOSITORY_OWNER"
           BODY="$(jq -r '.body // ""' <<<"$ISSUE_JSON")"
-          require_exact_line_once() {
-            local expected="$1"
-            test "$(grep -Fxc -- "$expected" <<<"$BODY" || true)" -eq 1
+          require_key_value_once() {
+            local key="$1" expected="$2" count actual
+            count="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {count++} END {print count+0}' <<<"$BODY")"
+            test "$count" -eq 1
+            actual="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {print substr($0,length(prefix)+1)}' <<<"$BODY")"
+            test "$actual" = "$expected"
           }
-          require_exact_line_once 'STAGING_SCHEMA_SYNC_AUTHORIZATION=ACTIVE'
-          require_exact_line_once "AUTHORIZED_CANDIDATE_SHA=$CANDIDATE_SHA"
-          require_exact_line_once "EXPECTED_MAX_MIGRATION=$EXPECTED_MAX_MIGRATION"
-          require_exact_line_once 'AUTHORIZED_ENVIRONMENT=toca-mcp-next-staging'
-          require_exact_line_once 'DATABASE_MUTATION_AUTHORIZED=true'
-          require_exact_line_once 'PRODUCTION_MUTATION_AUTHORIZED=false'
-          require_exact_line_once 'PROVIDER_MUTATION_AUTHORIZED=false'
-          require_exact_line_once 'TRAFFIC_MUTATION_AUTHORIZED=false'
-          require_exact_line_once 'CLOUD_RUN_MUTATION_AUTHORIZED=false'
-          require_exact_line_once 'FINANCIAL_CEILING=NO_NEW_PAID_RESOURCE_ALLOCATION'
+          require_key_value_once STAGING_SCHEMA_SYNC_AUTHORIZATION ACTIVE
+          require_key_value_once AUTHORIZED_CANDIDATE_SHA "$CANDIDATE_SHA"
+          require_key_value_once EXPECTED_MAX_MIGRATION "$EXPECTED_MAX_MIGRATION"
+          require_key_value_once AUTHORIZED_ENVIRONMENT toca-mcp-next-staging
+          require_key_value_once DATABASE_MUTATION_AUTHORIZED true
+          require_key_value_once PRODUCTION_MUTATION_AUTHORIZED false
+          require_key_value_once PROVIDER_MUTATION_AUTHORIZED false
+          require_key_value_once TRAFFIC_MUTATION_AUTHORIZED false
+          require_key_value_once CLOUD_RUN_MUTATION_AUTHORIZED false
+          require_key_value_once FINANCIAL_CEILING NO_NEW_PAID_RESOURCE_ALLOCATION
           echo "EXPECTED_MAX_MIGRATION=$EXPECTED_MAX_MIGRATION" >> "$GITHUB_ENV"
           echo 'STAGING_SCHEMA_SYNC_AUTHORIZATION=VERIFIED'
 
