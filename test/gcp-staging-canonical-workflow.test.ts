@@ -95,10 +95,17 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).toContain('  schema-sync:');
     expect(workflow).toContain('if: ${{ inputs.schema_sync_only }}');
     expect(workflow).toContain('if: ${{ !inputs.schema_sync_only }}');
+    expect(workflow).toContain('read_key_once()');
     expect(workflow).toContain('require_key_value_once()');
     expect(workflow).toContain('awk -v prefix="${key}="');
     expect(workflow).toContain('test "$count" -eq 1');
     expect(workflow).toContain('test "$actual" = "$expected"');
+    expect(workflow).toContain('EXPECTED_BEFORE_MAX_MIGRATION="$(read_key_once EXPECTED_BEFORE_MAX_MIGRATION)"');
+    expect(workflow).toContain('test "$BEFORE_MAX" = "$EXPECTED_BEFORE_MAX_MIGRATION"');
+    expect(workflow).toContain(
+      'diff -u staging-schema-sync-evidence/expected-before-prefix.txt staging-schema-sync-evidence/before-migrations.txt',
+    );
+    expect(workflow).toContain('STAGING_SCHEMA_SYNC_BEFORE_STATE=PASS');
     expect(workflow).toContain('require_key_value_once STAGING_SCHEMA_SYNC_AUTHORIZATION ACTIVE');
     expect(workflow).toContain('require_key_value_once DATABASE_MUTATION_AUTHORIZED true');
     expect(workflow).toContain('require_key_value_once PRODUCTION_MUTATION_AUTHORIZED false');
@@ -125,6 +132,8 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(schemaSyncBlock).toContain('cloudRunMutation:false');
     expect(schemaSyncBlock).toContain('databaseSecretRead:true');
     expect(schemaSyncBlock).toContain('secretPayloadDisclosed:false');
+    expect(schemaSyncBlock).toContain('beforeStateExactPrefix:true');
+    expect(schemaSyncBlock).toContain('expectedBeforeMaxMigration:$expectedBeforeMax');
     expect(schemaSyncBlock).not.toContain('gcloud run deploy');
     expect(schemaSyncBlock).not.toContain('gcloud run services update-traffic');
     expect(schemaSyncBlock).not.toContain('graph.facebook.com');
