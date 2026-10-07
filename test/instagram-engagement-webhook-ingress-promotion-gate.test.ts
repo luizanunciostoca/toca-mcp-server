@@ -5,15 +5,9 @@ const read = (path: string): string => readFileSync(path, 'utf8');
 
 const verifier = read('scripts/verify-instagram-engagement-webhook-ingress.sh');
 const direct = read('.github/workflows/instagram-engagement-limited-activation.yml');
-const comment = read(
-  '.github/workflows/instagram-engagement-comment-limited-promotion.yml',
-);
-const faq = read(
-  '.github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml',
-);
-const ag01 = read(
-  '.github/workflows/instagram-engagement-ag01-fallback-limited-activation.yml',
-);
+const comment = read('.github/workflows/instagram-engagement-comment-limited-promotion.yml');
+const faq = read('.github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml');
+const ag01 = read('.github/workflows/instagram-engagement-ag01-fallback-limited-activation.yml');
 
 const promotions = [direct, comment, faq];
 
@@ -108,8 +102,7 @@ describe('Instagram engagement ingress promotion gate', () => {
       '      - name: Publish sanitized FAQ expansion PASS evidence',
     ]);
 
-    const verifierCall =
-      'bash scripts/verify-instagram-engagement-webhook-ingress.sh';
+    const verifierCall = 'bash scripts/verify-instagram-engagement-webhook-ingress.sh';
     for (const workflow of promotions) {
       expect(countOccurrences(workflow, verifierCall)).toBe(2);
     }
@@ -126,15 +119,9 @@ describe('Instagram engagement ingress promotion gate', () => {
 
   it('keeps callback repair out of all promotion workflows', () => {
     for (const workflow of [...promotions, ag01]) {
-      expect(workflow).not.toContain(
-        'gcloud run services update "$WEBHOOK_SERVICE_NAME"',
-      );
-      expect(workflow).not.toContain(
-        'gcloud run services update-traffic "$WEBHOOK_SERVICE_NAME"',
-      );
-      expect(workflow).not.toContain(
-        'gcloud run deploy "$WEBHOOK_SERVICE_NAME"',
-      );
+      expect(workflow).not.toContain('gcloud run services update "$WEBHOOK_SERVICE_NAME"');
+      expect(workflow).not.toContain('gcloud run services update-traffic "$WEBHOOK_SERVICE_NAME"');
+      expect(workflow).not.toContain('gcloud run deploy "$WEBHOOK_SERVICE_NAME"');
     }
   });
 });

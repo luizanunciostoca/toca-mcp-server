@@ -6,9 +6,7 @@ const read = (path: string): string => readFileSync(path, 'utf8');
 const readonlyWorkflow = read(
   '.github/workflows/instagram-engagement-webhook-callback-readonly.yml',
 );
-const restoreWorkflow = read(
-  '.github/workflows/instagram-engagement-webhook-callback-restore.yml',
-);
+const restoreWorkflow = read('.github/workflows/instagram-engagement-webhook-callback-restore.yml');
 const verifier = read('scripts/verify-instagram-engagement-webhook-ingress.sh');
 
 const callbackWriters = [
@@ -41,9 +39,7 @@ function expectOrdered(source: string, markers: readonly string[]): void {
 describe('Instagram webhook callback governance', () => {
   it('serializes every callback writer and production deploy in one mutex', () => {
     for (const workflow of callbackWriters) {
-      expect(workflow).toContain(
-        'group: instagram-engagement-webhook-callback-control',
-      );
+      expect(workflow).toContain('group: instagram-engagement-webhook-callback-control');
       expect(workflow).toContain('cancel-in-progress: false');
     }
 
@@ -59,15 +55,13 @@ describe('Instagram webhook callback governance', () => {
       'BLOCKED_INGRESS_RESTRICTED',
       'BLOCKED_DEFAULT_URL_DISABLED',
       'BLOCKED_INVOKER_IAM_CHECK_ENABLED',
-      "STATUS=FAIL",
+      'STATUS=FAIL',
       'if [[ "$READBACK_OUTCOME" == success ]]; then STATUS=PASS; fi',
     ]) {
       expect(readonlyWorkflow).toContain(marker);
     }
 
-    expect(readonlyWorkflow).not.toContain(
-      'gcloud run services update "$WEBHOOK_SERVICE_NAME"',
-    );
+    expect(readonlyWorkflow).not.toContain('gcloud run services update "$WEBHOOK_SERVICE_NAME"');
   });
 
   it('consumes authorization before mutation and scopes the repair tightly', () => {
@@ -105,11 +99,9 @@ describe('Instagram webhook callback governance', () => {
     expect(restoreWorkflow).toContain(
       "if: (failure() || cancelled()) && env.MUTATION_ATTEMPTED == 'true'",
     );
+    expect(restoreWorkflow).toContain('AUTHORIZATION_STATE=CONSUMED_AND_CLOSED');
     expect(restoreWorkflow).toContain(
-      'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED',
-    );
-    expect(restoreWorkflow).toContain(
-      'if: always() && env.MUTATION_ATTEMPTED == \'true\' && (failure() || cancelled())',
+      "if: always() && env.MUTATION_ATTEMPTED == 'true' && (failure() || cancelled())",
     );
     expect(restoreWorkflow).toContain('WEBHOOK_CALLBACK_RESTORE_ROLLBACK=PASS');
   });
