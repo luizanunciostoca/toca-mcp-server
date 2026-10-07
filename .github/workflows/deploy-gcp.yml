@@ -298,6 +298,74 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
+      - name: Read-only kill-switch revision equivalence diagnostic
+        if: inputs.operation == 'kill_switch' && inputs.rollout == 'canary'
+        env:
+          BASELINE_REVISION: ${{ inputs.rollback_mcp_revision }}
+          CANDIDATE_REVISION: ${{ inputs.rollback_webhook_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOY_ENVIRONMENT" = staging
+          [[ "$BASELINE_REVISION" =~ ^toca-mcp-next-staging-[a-z0-9-]+$ ]]
+          [[ "$CANDIDATE_REVISION" =~ ^toca-mcp-next-staging-[a-z0-9-]+$ ]]
+
+          gcloud run revisions describe "$BASELINE_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/baseline.json
+          gcloud run revisions describe "$CANDIDATE_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/candidate.json
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/service.json
+
+          baseline_ready="$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .status] | last // empty' /tmp/baseline.json)"
+          candidate_ready="$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .status] | last // empty' /tmp/candidate.json)"
+          baseline_ks="$(jq -r '[.spec.containers[0].env[]? | select(.name=="TOCA_PLATFORM_KILL_SWITCH") | .value] | last // "ABSENT"' /tmp/baseline.json)"
+          candidate_ks="$(jq -r '[.spec.containers[0].env[]? | select(.name=="TOCA_PLATFORM_KILL_SWITCH") | .value] | last // "ABSENT"' /tmp/candidate.json)"
+
+          jq -S -c '.spec | .containers |= map(del(.env))' /tmp/baseline.json > /tmp/baseline-no-env.json
+          jq -S -c '.spec | .containers |= map(del(.env))' /tmp/candidate.json > /tmp/candidate-no-env.json
+          if cmp -s /tmp/baseline-no-env.json /tmp/candidate-no-env.json; then
+            echo 'NON_ENV_SPEC_EQUAL=true'
+          else
+            echo 'NON_ENV_SPEC_EQUAL=false'
+            diff -u /tmp/baseline-no-env.json /tmp/candidate-no-env.json || true
+          fi
+
+          jq -r '.spec.containers[0].env[]? | select(.name!="TOCA_PLATFORM_KILL_SWITCH") | .name' /tmp/baseline.json | sort -u > /tmp/baseline-env-names
+          jq -r '.spec.containers[0].env[]? | select(.name!="TOCA_PLATFORM_KILL_SWITCH") | .name' /tmp/candidate.json | sort -u > /tmp/candidate-env-names
+          if cmp -s /tmp/baseline-env-names /tmp/candidate-env-names; then
+            echo 'ENV_NAME_SET_EQUAL=true'
+          else
+            echo 'ENV_NAME_SET_EQUAL=false'
+            comm -3 /tmp/baseline-env-names /tmp/candidate-env-names | sed 's/^/ENV_NAME_SET_DIFF=/'
+          fi
+
+          while IFS= read -r name; do
+            baseline_entry="$(jq -S -c --arg name "$name" '.spec.containers[0].env[]? | select(.name==$name)' /tmp/baseline.json)"
+            candidate_entry="$(jq -S -c --arg name "$name" '.spec.containers[0].env[]? | select(.name==$name)' /tmp/candidate.json)"
+            if [[ "$baseline_entry" != "$candidate_entry" ]]; then
+              echo "ENV_ENTRY_DIFF=$name"
+            fi
+          done < <(comm -12 /tmp/baseline-env-names /tmp/candidate-env-names)
+
+          jq -S -c '.spec | .containers[0].env = ([.containers[0].env[]? | select(.name!="TOCA_PLATFORM_KILL_SWITCH")] | sort_by(.name))' /tmp/baseline.json > /tmp/baseline-normalized.json
+          jq -S -c '.spec | .containers[0].env = ([.containers[0].env[]? | select(.name!="TOCA_PLATFORM_KILL_SWITCH")] | sort_by(.name))' /tmp/candidate.json > /tmp/candidate-normalized.json
+          if cmp -s /tmp/baseline-normalized.json /tmp/candidate-normalized.json; then
+            echo 'NORMALIZED_SPEC_EQUAL=true'
+          else
+            echo 'NORMALIZED_SPEC_EQUAL=false'
+          fi
+
+          echo "BASELINE_READY=$baseline_ready"
+          echo "CANDIDATE_READY=$candidate_ready"
+          echo "BASELINE_KILL_SWITCH=$baseline_ks"
+          echo "CANDIDATE_KILL_SWITCH=$candidate_ks"
+          jq -c '{latestReadyRevisionName:.status.latestReadyRevisionName,traffic:[.status.traffic[]? | {revisionName,percent,latestRevision,tag}]}' /tmp/service.json | sed 's/^/SERVICE_SAFE_STATE=/'
+          echo 'DIAGNOSTIC_READ_ONLY=true'
+          echo 'TRAFFIC_MUTATION=false'
+          echo 'IAM_MUTATION=false'
+          echo 'DATABASE_MUTATION=false'
+          echo 'PROVIDER_CALLS=false'
+          echo 'PRODUCTION_ACCESS=false'
+
+
       - name: Resolve production Meta token to exact numeric secret version
         if: inputs.operation == 'deploy' && inputs.environment == 'production' && env.GCP_META_ACCESS_TOKEN_SECRET_VERSION == 'RESOLVE_RUNTIME'
         run: |
@@ -1368,7 +1436,7 @@ jobs:
           echo "ROLLBACK_COMPATIBILITY_REF=$ROLLBACK_COMPATIBILITY_REF" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Activate emergency mutation kill switch
-        if: inputs.operation == 'kill_switch'
+        if: inputs.operation == 'kill_switch' && inputs.rollout != 'canary'
         run: |
           set -euo pipefail
 
