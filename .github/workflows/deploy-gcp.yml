@@ -166,6 +166,26 @@ jobs:
           node-version: 24
           cache: ${{ inputs.operation == 'deploy' && 'pnpm' || '' }}
 
+      - name: Load repository-canonical staging coordinates for governed recovery
+        if: inputs.environment == 'staging'
+        id: staging_config
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging-recovery.env
+          cat /tmp/staging-recovery.env >> "$GITHUB_ENV"
+          set -a
+          source /tmp/staging-recovery.env
+          set +a
+          test "$DEPLOY_ENVIRONMENT" = staging
+          test "$GCP_PROJECT_ID" = toca-mcp-next-staging
+          test "$GCP_PROJECT_NUMBER" = 729069789107
+          test "$STAGING_DATABASE_ISOLATION_MODE" = DEDICATED_CLOUD_SQL
+          test "$STAGING_PROVIDER_MODE" = DISABLED
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+          echo 'STAGING_RECOVERY_CONFIG=PASS'
+
       - name: Install and run exact-head Quality
         if: inputs.operation == 'deploy'
         run: |
@@ -261,7 +281,15 @@ jobs:
             [[ "$META_PROVIDER_VERIFIED" == true ]] || { echo 'Meta-backed capability requires META_PROVIDER_VERIFIED=true' >&2; exit 1; }
           fi
 
-      - name: Authenticate with environment-specific WIF
+      - name: Authenticate isolated staging WIF from canonical config
+        if: inputs.environment == 'staging'
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.staging_config.outputs.wif }}
+          service_account: ${{ steps.staging_config.outputs.deployer_sa }}
+
+      - name: Authenticate production WIF from production coordinates
+        if: inputs.environment == 'production'
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
