@@ -25,6 +25,7 @@ describe('current-schema staging DR harness', () => {
     );
     expect(workflow).toContain("grep -c '^FINANCIAL_CEILING='");
     expect(workflow).toContain('^(USD|BRL):([0-9]+([.][0-9]{1,2})?)
+    expect(workflow).toContain('AUTHORIZED_CANDIDATE_SHA=$CANDIDATE_SHA');
     expect(workflow).toContain('AUTHORIZED_ENVIRONMENT=toca-mcp-next-staging');
     expect(workflow).toContain('PRODUCTION_MUTATION_AUTHORIZED=false');
     expect(workflow).toContain('PROVIDER_MUTATION_AUTHORIZED=false');
