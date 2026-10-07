@@ -124,6 +124,7 @@ describe('Instagram webhook callback governance', () => {
       'REVISION_DEPLOY_AUTHORIZED=false',
       'DATABASE_MUTATIONS_AUTHORIZED=false',
       'SECRET_PAYLOAD_READS_AUTHORIZED=true',
+      'TOKEN_SECRET_ID: toca-meta-oauth-token',
       'PROVIDER_READS_AUTHORIZED=true',
       'PROVIDER_METHODS=GET_ONLY',
       'PROVIDER_WRITES_AUTHORIZED=false',
