@@ -23,6 +23,15 @@ env:
   RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
   DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  WEBHOOK_SERVICE_NAME: toca-webhook-next-production
+  META_APP_SECRET_ID: toca-meta-app-secret
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_APP_ID: '2281930145887404'
+  INSTAGRAM_PAGE_ID: '306103746115875'
 
 jobs:
   activate:
@@ -62,6 +71,9 @@ jobs:
             'AUTO_REPLY_CHANNELS=DIRECT,COMMENT'
             'CURRENT_LIMITED_STATE_REQUIRED=true'
             'SERVICE_MUTATION_AUTHORIZED=true'
+            'SECRET_PAYLOAD_READS_AUTHORIZED=true'
+            'PROVIDER_READS_AUTHORIZED=true'
+            'PROVIDER_METHODS=GET_ONLY'
             'DATABASE_MUTATIONS_AUTHORIZED=false'
             'SCHEDULER_MUTATION_AUTHORIZED=false'
             'PROVIDER_CONFIG_MUTATION_AUTHORIZED=false'
@@ -116,6 +128,14 @@ jobs:
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify healthy Instagram webhook ingress before AG-01 mutation
+        env:
+          RUNTIME_IMAGE: ${{ steps.authz.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/verify-instagram-engagement-webhook-ingress.sh
 
       - name: Verify immutable image AG-01 privacy and LIMITED prestate
         id: prestate
@@ -232,6 +252,14 @@ jobs:
           AG01_IAM="$(gcloud run services get-iam-policy "$AG01_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           ! jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members//[])[]? | select(.=="allUsers")' <<< "$AG01_IAM" >/dev/null
           trap - ERR
+
+      - name: Reverify healthy Instagram webhook ingress after AG-01 cutover
+        env:
+          RUNTIME_IMAGE: ${{ steps.authz.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/verify-instagram-engagement-webhook-ingress.sh
 
       - name: Publish sanitized activation evidence
         if: success()
