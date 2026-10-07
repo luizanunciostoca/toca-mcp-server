@@ -35,53 +35,51 @@ describe('GCP rollback and mutation kill-switch readback', () => {
       'activate',
       '- name: Activate emergency mutation kill switch',
       '- name: Clear emergency mutation kill switch',
-      'TOCA_PLATFORM_KILL_SWITCH=true',
-      'verify_kill_switch_value "$service" true',
-      'PLATFORM_KILL_SWITCH_READBACK=true',
+      'true',
     ],
     [
       'clear',
       '- name: Clear emergency mutation kill switch',
       '- name: Automatic rollback after failed promotion',
-      'TOCA_PLATFORM_KILL_SWITCH=false',
-      'verify_kill_switch_value "$service" false',
-      'PLATFORM_KILL_SWITCH_READBACK=false',
+      'false',
     ],
   ])(
-    'reads back the serving revision after %s kill-switch mutation',
-    (_label, startMarker, endMarker, mutation, verification, marker) => {
+    'stages exact %s kill-switch candidates before pair cutover and compensates failures',
+    (_label, startMarker, endMarker, expected) => {
       const block = section(startMarker, endMarker);
 
-      expect(block).toContain(mutation);
-      expect(block).toContain('apply_kill_switch_value');
-      expect(block).toContain('verify_revision_kill_switch_value');
-      expect(block).toContain('verify_kill_switch_value');
-      expect(block).toContain('.status.traffic');
-      expect(block).toContain('.status.latestReadyRevisionName');
-      expect(block).toContain('before_latest');
-      expect(block).toContain('test "$revision" != "$before_latest"');
-      expect(block).toContain('gcloud run revisions describe "$revision"');
+      expect(block).toContain('serving_revision');
+      expect(block).toContain('normalized_revision_spec');
+      expect(block).toContain('stage_candidate');
+      expect(block).toContain('rollback_pair');
+      expect(block).toContain('verify_serving_kill_switch');
+      expect(block).toContain('suffix="ks-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${role}"');
+      expect(block).toContain('candidate="${service}-${suffix}"');
+      expect(block).toContain('--revision-suffix "$suffix"');
+      expect(block).toContain('--no-traffic');
+      expect(block).toContain('--update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected"');
+      expect(block).toContain('test "$candidate_spec" = "$previous_spec"');
+      expect(block).toContain('(.metadata.name == $candidate)');
       expect(block).toContain('.name == "TOCA_PLATFORM_KILL_SWITCH"');
-      expect(block).toContain('gcloud run services update-traffic "$service"');
-      expect(block).toContain('--to-revisions "${revision}=100"');
-      expect(block).toContain('PLATFORM_KILL_SWITCH_REVISION_PROMOTED');
-      expect(block).toContain(verification);
-      expect(block).toContain(marker);
+      expect(block).toContain('(.percent // 0) == 0');
+      expect(block).toContain('MCP_PREVIOUS_REVISION="$(serving_revision');
+      expect(block).toContain('WEBHOOK_PREVIOUS_REVISION="$(serving_revision');
+      expect(block).toContain('stage_candidate "$GCP_CLOUD_RUN_MCP_SERVICE" mcp');
+      expect(block).toContain('stage_candidate "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" webhook');
+      expect(block).toContain('--to-revisions "${MCP_CANDIDATE_REVISION}=100"');
+      expect(block).toContain('--to-revisions "${WEBHOOK_CANDIDATE_REVISION}=100"');
+      expect(block).toContain('rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"');
+      expect(block).toContain(`verify_serving_kill_switch "$GCP_CLOUD_RUN_MCP_SERVICE" "$MCP_CANDIDATE_REVISION" ${expected}`);
+      expect(block).toContain(`verify_serving_kill_switch "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_CANDIDATE_REVISION" ${expected}`);
 
-      const mutationIndex = block.indexOf(
-        '--update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected"',
-      );
-      const revisionVerifyIndex = block.indexOf(
-        'verify_revision_kill_switch_value "$service" "$revision" "$expected"',
-      );
-      const trafficIndex = block.indexOf('gcloud run services update-traffic "$service"');
-      const servingReadbackIndex = block.lastIndexOf(
-        'verify_kill_switch_value "$service" "$expected"',
-      );
-      expect(mutationIndex).toBeGreaterThan(-1);
-      expect(revisionVerifyIndex).toBeGreaterThan(mutationIndex);
-      expect(trafficIndex).toBeGreaterThan(revisionVerifyIndex);
-      expect(servingReadbackIndex).toBeGreaterThan(trafficIndex);
+      const stageMcp = block.indexOf('stage_candidate "$GCP_CLOUD_RUN_MCP_SERVICE" mcp');
+      const stageWebhook = block.indexOf('stage_candidate "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" webhook');
+      const promoteMcp = block.indexOf('--to-revisions "${MCP_CANDIDATE_REVISION}=100"');
+      const promoteWebhook = block.indexOf('--to-revisions "${WEBHOOK_CANDIDATE_REVISION}=100"');
+      expect(stageMcp).toBeGreaterThan(-1);
+      expect(stageWebhook).toBeGreaterThan(stageMcp);
+      expect(promoteMcp).toBeGreaterThan(stageWebhook);
+      expect(promoteWebhook).toBeGreaterThan(promoteMcp);
     },
   );
 
