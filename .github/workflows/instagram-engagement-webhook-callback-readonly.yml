@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: instagram-engagement-webhook-callback-control
+  group: instagram-engagement-production-callback
   cancel-in-progress: false
 
 env:
@@ -19,8 +19,6 @@ env:
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   WEBHOOK_SERVICE_NAME: toca-webhook-next-production
-  META_APP_SECRET_ID: toca-meta-app-secret
-  META_TOKEN_SECRET_ID: toca-meta-oauth-token
 
 jobs:
   readback:
@@ -31,7 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 10
-
     steps:
       - name: Checkout exact readback controller
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -48,7 +45,6 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = 'refs/heads/main'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-
           ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
           ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
@@ -57,29 +53,23 @@ jobs:
             (.user.login == $owner) and
             (.title | startswith("PRODUCTION AUTHORIZATION — Instagram webhook callback READONLY AUTO"))
           ' >/dev/null
-
           CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
           test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
-
           required=(
             "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
             'AUTHORIZATION_STATE=ACTIVE'
             'INSTAGRAM_ENGAGEMENT_WEBHOOK_CALLBACK_READONLY=AUTHORIZED'
             'READ_ONLY=true'
-            'SECRET_PAYLOAD_READS_AUTHORIZED=true'
             'SERVICE_MUTATIONS_AUTHORIZED=false'
             'DATABASE_MUTATIONS_AUTHORIZED=false'
             'PROVIDER_CALLS_AUTHORIZED=false'
             'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
-            'NEW_PAID_RESOURCE_ALLOCATION_AUTHORIZED=false'
           )
           for marker in "${required[@]}"; do grep -Fxq "$marker" <<< "$BODY"; done
-
           CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
           grep -Fxq 'MAIN_STABILITY=PASS' <<< "$CONTROL_BODY"
           grep -Fxq "EVALUATED_MAIN_SHA=$GITHUB_SHA" <<< "$CONTROL_BODY"
           grep -Fxq 'MERGE_RESERVATION=NONE' <<< "$CONTROL_BODY"
-
           echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate diagnostic identity
@@ -98,7 +88,7 @@ jobs:
           set -euo pipefail
           SERVICE_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           IAM_JSON="$(gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-          SERVING_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | if length == 1 then .[0] else empty end')"
+          SERVING_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | unique | if length == 1 then .[0] else empty end')"
           test -n "$SERVING_REVISION"
           REVISION_JSON="$(gcloud run revisions describe "$SERVING_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
 
@@ -106,34 +96,18 @@ jobs:
           DEFAULT_URL_DISABLED="$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"')"
           INVOKER_IAM_DISABLED="$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"')"
           STATUS_URL_PRESENT="$(printf '%s' "$SERVICE_JSON" | jq -r 'if ((.status.url // "") | length) > 0 then "true" else "false" end')"
-          TRAFFIC_SHA="$(printf '%s' "$SERVICE_JSON" | jq -cS '.status.traffic // []' | sha256sum | awk '{print $1}')"
-
           LEGACY_ALLUSERS_INVOKER=false
           if printf '%s' "$IAM_JSON" | jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' >/dev/null; then
             LEGACY_ALLUSERS_INVOKER=true
           fi
 
           REVISION_READY="$(printf '%s' "$REVISION_JSON" | jq -r '[.status.conditions[]? | select(.type == "Ready") | .status] | last // "False"')"
-          SERVICE_ROLE="$(printf '%s' "$REVISION_JSON" | jq -r '[.spec.containers[0].env[]? | select(.name == "TOCA_SERVICE_ROLE") | .value] | last // ""')"
           META_WEBHOOK_ENABLED="$(printf '%s' "$REVISION_JSON" | jq -r '[.spec.containers[0].env[]? | select(.name == "META_WEBHOOK_ENABLED") | .value] | last // "false"')"
           META_WEBHOOK_PERSISTENCE_ENABLED="$(printf '%s' "$REVISION_JSON" | jq -r '[.spec.containers[0].env[]? | select(.name == "META_WEBHOOK_PERSISTENCE_ENABLED") | .value] | last // "false"')"
           ENGAGEMENT_RUNTIME_ENABLED="$(printf '%s' "$REVISION_JSON" | jq -r '[.spec.containers[0].env[]? | select(.name == "INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value] | last // "false"')"
-          SERVING_IMAGE="$(printf '%s' "$REVISION_JSON" | jq -r '.spec.containers[0].image // empty')"
-          test -n "$SERVING_IMAGE"
+          SERVICE_ROLE="$(printf '%s' "$REVISION_JSON" | jq -r '[.spec.containers[0].env[]? | select(.name == "TOCA_SERVICE_ROLE") | .value] | last // ""')"
 
-          APP_SECRET_READABLE=false
-          if APP_SECRET="$(gcloud secrets versions access latest --secret "$META_APP_SECRET_ID" --project "$GCP_PROJECT_ID" 2>/dev/null)" && [[ -n "$APP_SECRET" ]]; then
-            APP_SECRET_READABLE=true
-          fi
-          unset APP_SECRET || true
-
-          META_ACCESS_TOKEN_READABLE=false
-          if META_TOKEN="$(gcloud secrets versions access latest --secret "$META_TOKEN_SECRET_ID" --project "$GCP_PROJECT_ID" 2>/dev/null)" && [[ -n "$META_TOKEN" ]]; then
-            META_ACCESS_TOKEN_READABLE=true
-          fi
-          unset META_TOKEN || true
-
-          CLASSIFICATION=PUBLIC_CALLBACK_SURFACE_READY
+          CLASSIFICATION=PUBLIC_CALLBACK_READY
           if [[ "$REVISION_READY" != True ]]; then
             CLASSIFICATION=BLOCKED_SERVING_REVISION_NOT_READY
           elif [[ "$SERVICE_ROLE" != webhook ]]; then
@@ -154,68 +128,71 @@ jobs:
             CLASSIFICATION=BLOCKED_LEGACY_ALLUSERS_INVOKER
           elif [[ "$STATUS_URL_PRESENT" != true ]]; then
             CLASSIFICATION=BLOCKED_STATUS_URL_MISSING
-          elif [[ "$APP_SECRET_READABLE" != true ]]; then
-            CLASSIFICATION=BLOCKED_APP_SECRET_UNREADABLE
-          elif [[ "$META_ACCESS_TOKEN_READABLE" != true ]]; then
-            CLASSIFICATION=BLOCKED_META_TOKEN_UNREADABLE
           fi
 
           {
             echo "classification=$CLASSIFICATION"
             echo "serving_revision=$SERVING_REVISION"
-            echo "serving_image=$SERVING_IMAGE"
             echo "revision_ready=$REVISION_READY"
             echo "ingress=$INGRESS"
             echo "default_url_disabled=$DEFAULT_URL_DISABLED"
             echo "invoker_iam_disabled=$INVOKER_IAM_DISABLED"
             echo "legacy_allusers_invoker=$LEGACY_ALLUSERS_INVOKER"
             echo "status_url_present=$STATUS_URL_PRESENT"
-            echo "traffic_sha=$TRAFFIC_SHA"
             echo "meta_webhook_enabled=$META_WEBHOOK_ENABLED"
             echo "meta_webhook_persistence_enabled=$META_WEBHOOK_PERSISTENCE_ENABLED"
             echo "engagement_runtime_enabled=$ENGAGEMENT_RUNTIME_ENABLED"
             echo "service_role=$SERVICE_ROLE"
-            echo "app_secret_readable=$APP_SECRET_READABLE"
-            echo "meta_access_token_readable=$META_ACCESS_TOKEN_READABLE"
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish sanitized callback readback and consume authorization
-        if: always() && steps.auth.outputs.authorization_issue != ''
+        if: always() && steps.auth.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
           READBACK_OUTCOME: ${{ steps.readback.outcome }}
           CLASSIFICATION: ${{ steps.readback.outputs.classification }}
           SERVING_REVISION: ${{ steps.readback.outputs.serving_revision }}
-          SERVING_IMAGE: ${{ steps.readback.outputs.serving_image }}
           REVISION_READY: ${{ steps.readback.outputs.revision_ready }}
           INGRESS: ${{ steps.readback.outputs.ingress }}
           DEFAULT_URL_DISABLED: ${{ steps.readback.outputs.default_url_disabled }}
           INVOKER_IAM_DISABLED: ${{ steps.readback.outputs.invoker_iam_disabled }}
           LEGACY_ALLUSERS_INVOKER: ${{ steps.readback.outputs.legacy_allusers_invoker }}
           STATUS_URL_PRESENT: ${{ steps.readback.outputs.status_url_present }}
-          TRAFFIC_SHA: ${{ steps.readback.outputs.traffic_sha }}
           META_WEBHOOK_ENABLED: ${{ steps.readback.outputs.meta_webhook_enabled }}
           META_WEBHOOK_PERSISTENCE_ENABLED: ${{ steps.readback.outputs.meta_webhook_persistence_enabled }}
           ENGAGEMENT_RUNTIME_ENABLED: ${{ steps.readback.outputs.engagement_runtime_enabled }}
           SERVICE_ROLE: ${{ steps.readback.outputs.service_role }}
-          APP_SECRET_READABLE: ${{ steps.readback.outputs.app_secret_readable }}
-          META_ACCESS_TOKEN_READABLE: ${{ steps.readback.outputs.meta_access_token_readable }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$READBACK_OUTCOME" == success ]]; then
-            READBACK_STATUS=PASS
-            EFFECTIVE_CLASSIFICATION="${CLASSIFICATION:-READBACK_FAILED}"
-          else
-            READBACK_STATUS=FAIL
-            EFFECTIVE_CLASSIFICATION=READBACK_FAILED
-          fi
-
-          printf -v REPORT '%s\n'             "WEBHOOK_CALLBACK_READONLY_STATUS=$READBACK_STATUS"             "CONTROLLER_SHA=$GITHUB_SHA"             "CALLBACK_CLASSIFICATION=$EFFECTIVE_CLASSIFICATION"             "SERVING_REVISION=${SERVING_REVISION:-UNKNOWN}"             "SERVING_IMAGE=${SERVING_IMAGE:-UNKNOWN}"             "REVISION_READY=${REVISION_READY:-UNKNOWN}"             "INGRESS=${INGRESS:-UNKNOWN}"             "DEFAULT_URL_DISABLED=${DEFAULT_URL_DISABLED:-UNKNOWN}"             "INVOKER_IAM_DISABLED=${INVOKER_IAM_DISABLED:-UNKNOWN}"             "LEGACY_ALLUSERS_INVOKER=${LEGACY_ALLUSERS_INVOKER:-UNKNOWN}"             "STATUS_URL_PRESENT=${STATUS_URL_PRESENT:-UNKNOWN}"             "TRAFFIC_SHA=${TRAFFIC_SHA:-UNKNOWN}"             "META_WEBHOOK_ENABLED=${META_WEBHOOK_ENABLED:-UNKNOWN}"             "META_WEBHOOK_PERSISTENCE_ENABLED=${META_WEBHOOK_PERSISTENCE_ENABLED:-UNKNOWN}"             "ENGAGEMENT_RUNTIME_ENABLED=${ENGAGEMENT_RUNTIME_ENABLED:-UNKNOWN}"             "SERVICE_ROLE=${SERVICE_ROLE:-UNKNOWN}"             "APP_SECRET_READABLE=${APP_SECRET_READABLE:-UNKNOWN}"             "META_ACCESS_TOKEN_READABLE=${META_ACCESS_TOKEN_READABLE:-UNKNOWN}"             'READ_ONLY=true'             'SERVICE_MUTATIONS=false'             'DATABASE_MUTATIONS=false'             'PROVIDER_CALLS=false'             'EXTERNAL_REPLY_WRITES=false'             'NEW_PAID_RESOURCE_ALLOCATION=false'
-
-          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT" >/dev/null
+          test -n "${AUTHORIZATION_ISSUE:-}"
+          STATUS=FAIL
+          if [[ "$READBACK_OUTCOME" == success ]]; then STATUS=PASS; fi
           ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
           BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
           BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
-          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}"             -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
+            -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
+          printf -v REPORT '%s\n' \
+            "WEBHOOK_CALLBACK_READONLY_STATUS=$STATUS" \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            "CALLBACK_CLASSIFICATION=${CLASSIFICATION:-READBACK_FAILED}" \
+            "SERVING_REVISION=${SERVING_REVISION:-UNKNOWN}" \
+            "REVISION_READY=${REVISION_READY:-UNKNOWN}" \
+            "INGRESS=${INGRESS:-UNKNOWN}" \
+            "DEFAULT_URL_DISABLED=${DEFAULT_URL_DISABLED:-UNKNOWN}" \
+            "INVOKER_IAM_DISABLED=${INVOKER_IAM_DISABLED:-UNKNOWN}" \
+            "LEGACY_ALLUSERS_INVOKER=${LEGACY_ALLUSERS_INVOKER:-UNKNOWN}" \
+            "STATUS_URL_PRESENT=${STATUS_URL_PRESENT:-UNKNOWN}" \
+            "META_WEBHOOK_ENABLED=${META_WEBHOOK_ENABLED:-UNKNOWN}" \
+            "META_WEBHOOK_PERSISTENCE_ENABLED=${META_WEBHOOK_PERSISTENCE_ENABLED:-UNKNOWN}" \
+            "ENGAGEMENT_RUNTIME_ENABLED=${ENGAGEMENT_RUNTIME_ENABLED:-UNKNOWN}" \
+            "SERVICE_ROLE=${SERVICE_ROLE:-UNKNOWN}" \
+            'READ_ONLY=true' \
+            'SERVICE_MUTATIONS=false' \
+            'DATABASE_MUTATIONS=false' \
+            'PROVIDER_CALLS=false' \
+            'EXTERNAL_REPLY_WRITES=false'
+          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT" >/dev/null
+          test "$STATUS" = PASS
