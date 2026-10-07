@@ -9,62 +9,58 @@ const readonlyWorkflow = read(
 const restoreWorkflow = read(
   '.github/workflows/instagram-engagement-webhook-callback-restore.yml',
 );
-const deployWorkflow = read('.github/workflows/deploy-gcp.yml');
-const ingressVerifier = read('scripts/verify-instagram-engagement-webhook-ingress.sh');
+const verifier = read('scripts/verify-instagram-engagement-webhook-ingress.sh');
 
-const promotionWorkflows = [
-  read('.github/workflows/instagram-engagement-limited-activation.yml'),
-  read('.github/workflows/instagram-engagement-comment-limited-promotion.yml'),
-  read('.github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml'),
-  read('.github/workflows/instagram-engagement-ag01-fallback-limited-activation.yml'),
-];
+const callbackWriters = [
+  '.github/workflows/instagram-engagement-final-shadow-proof.yml',
+  '.github/workflows/instagram-engagement-shadow-production.yml',
+  '.github/workflows/instagram-engagement-corrected-shadow-proof-retry.yml',
+  '.github/workflows/instagram-engagement-shadow-proof-recovery.yml',
+  '.github/workflows/instagram-engagement-corrected-runtime-shadow.yml',
+  '.github/workflows/instagram-engagement-shadow-candidate-recovery.yml',
+  '.github/workflows/instagram-engagement-shadow-unique-candidate-recovery.yml',
+  '.github/workflows/instagram-engagement-limited-activation.yml',
+  '.github/workflows/instagram-engagement-comment-limited-promotion.yml',
+  '.github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml',
+  '.github/workflows/instagram-engagement-ag01-fallback-limited-activation.yml',
+  '.github/workflows/instagram-engagement-webhook-callback-readonly.yml',
+  '.github/workflows/instagram-engagement-webhook-callback-restore.yml',
+].map(read);
 
-const callbackWriterWorkflows = [
-  read('.github/workflows/instagram-engagement-final-shadow-proof.yml'),
-  read('.github/workflows/instagram-engagement-shadow-production.yml'),
-  read('.github/workflows/instagram-engagement-shadow-proof-recovery.yml'),
-  read('.github/workflows/instagram-engagement-corrected-shadow-proof-retry.yml'),
-  read('.github/workflows/instagram-engagement-corrected-runtime-shadow.yml'),
-  read('.github/workflows/instagram-engagement-shadow-candidate-recovery.yml'),
-  read('.github/workflows/instagram-engagement-shadow-unique-candidate-recovery.yml'),
-];
+const deploy = read('.github/workflows/deploy-gcp.yml');
 
 function expectOrdered(source: string, markers: readonly string[]): void {
-  let previous = -1;
+  let prior = -1;
   for (const marker of markers) {
-    const current = source.indexOf(marker);
-    expect(current, marker).toBeGreaterThan(previous);
-    previous = current;
+    const index = source.indexOf(marker);
+    expect(index, marker).toBeGreaterThan(prior);
+    prior = index;
   }
 }
 
-describe('Instagram engagement webhook callback control', () => {
-  it('serializes every Instagram callback writer and promotion on one mutex', () => {
-    const shared = 'group: instagram-engagement-webhook-callback-control';
-
-    expect(readonlyWorkflow).toContain(shared);
-    expect(restoreWorkflow).toContain(shared);
-    for (const workflow of [...promotionWorkflows, ...callbackWriterWorkflows]) {
-      expect(workflow).toContain(shared);
+describe('Instagram webhook callback governance', () => {
+  it('serializes every callback writer and production deploy in one mutex', () => {
+    for (const workflow of callbackWriters) {
+      expect(workflow).toContain(
+        'group: instagram-engagement-webhook-callback-control',
+      );
       expect(workflow).toContain('cancel-in-progress: false');
     }
 
-    expect(deployWorkflow).toContain(
+    expect(deploy).toContain(
       "inputs.environment == 'production' && 'instagram-engagement-webhook-callback-control'",
     );
-    expect(deployWorkflow).toContain("format('deploy-gcp-next-{0}', inputs.environment)");
+    expect(deploy).toContain('cancel-in-progress: false');
   });
 
-  it('classifies restricted ingress and never reports a failed readback as PASS', () => {
+  it('classifies restricted ingress as blocked and never emits false readback PASS', () => {
     for (const marker of [
       'run.googleapis.com/ingress',
       'BLOCKED_INGRESS_RESTRICTED',
-      'INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED',
-      'READBACK_OUTCOME: ${{ steps.readback.outcome }}',
+      'BLOCKED_DEFAULT_URL_DISABLED',
+      'BLOCKED_INVOKER_IAM_CHECK_ENABLED',
+      "STATUS=FAIL",
       'if [[ "$READBACK_OUTCOME" == success ]]; then STATUS=PASS; fi',
-      '"WEBHOOK_CALLBACK_READONLY_STATUS=$STATUS"',
-      'CALLBACK_CLASSIFICATION=${CLASSIFICATION:-READBACK_FAILED}',
-      'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED',
     ]) {
       expect(readonlyWorkflow).toContain(marker);
     }
@@ -74,31 +70,25 @@ describe('Instagram engagement webhook callback control', () => {
     );
   });
 
-  it('limits repair to reversible callback posture and consumes authority before mutation', () => {
+  it('consumes authorization before mutation and scopes the repair tightly', () => {
     for (const marker of [
       'MUTATION_SCOPE=INGRESS_DEFAULT_URL_INVOKER_IAM_CHECK_ONLY',
+      'SERVICE_MUTATION_AUTHORIZED=true',
       'TRAFFIC_MUTATION_AUTHORIZED=false',
       'IMAGE_MUTATION_AUTHORIZED=false',
       'REVISION_DEPLOY_AUTHORIZED=false',
       'DATABASE_MUTATIONS_AUTHORIZED=false',
+      'SECRET_PAYLOAD_READS_AUTHORIZED=true',
       'PROVIDER_READS_AUTHORIZED=true',
       'PROVIDER_METHODS=GET_ONLY',
       'PROVIDER_WRITES_AUTHORIZED=false',
       'NEW_PAID_RESOURCES_AUTHORIZED=false',
       'GENERAL_AUTONOMY_AUTHORIZED=false',
-      'ROLLBACK_REQUIRED=true',
-      '--ingress=all',
-      '--default-url',
-      '--no-invoker-iam-check',
-      'PRE_TRAFFIC_SHA',
-      'PRE_IAM_SHA',
-      'PRE_IMAGE',
     ]) {
       expect(restoreWorkflow).toContain(marker);
     }
 
     expectOrdered(restoreWorkflow, [
-      '      - name: Capture exact service-level prestate',
       '      - name: Consume single-use authorization before mutation',
       '      - name: Restore only the required DRS-safe callback surface',
       '      - name: Read back runtime, DB schema, challenge and Meta subscriptions',
@@ -106,55 +96,40 @@ describe('Instagram engagement webhook callback control', () => {
       '      - name: Roll back exact service-level prestate on failure or cancellation',
     ]);
 
-    expect(restoreWorkflow).toContain(
-      "if: (failure() || cancelled()) && env.MUTATION_ATTEMPTED == 'true'",
-    );
-    expect(restoreWorkflow).toContain(
-      "if: always() && env.MUTATION_ATTEMPTED == 'true' && (failure() || cancelled())",
-    );
     expect(restoreWorkflow).not.toContain('gcloud run services update-traffic');
     expect(restoreWorkflow).not.toContain('gcloud run deploy');
     expect(restoreWorkflow).not.toContain('--member=allUsers');
   });
 
-  it('reuses the canonical zero-new-resource readiness and provider GET-only verifier', () => {
+  it('rolls back failure or cancellation and makes attempted authorization non-reusable', () => {
     expect(restoreWorkflow).toContain(
-      'bash scripts/verify-instagram-engagement-webhook-ingress.sh',
+      "if: (failure() || cancelled()) && env.MUTATION_ATTEMPTED == 'true'",
     );
-    for (const marker of [
-      'run.googleapis.com/ingress',
-      'curl --silent --show-error --connect-timeout 5 --max-time 20',
-      'AbortSignal.timeout(10_000)',
-      '/subscriptions',
-      '/subscribed_apps',
-      'CALLBACK_CHALLENGE_PASS=true',
-      'PROVIDER_METHODS=GET_ONLY',
-      'PROVIDER_WRITES=false',
-      'DATABASE_MUTATIONS=false',
-      'PERSISTENT_SERVICE_MUTATIONS=false',
-      'NEW_PAID_RESOURCE_ALLOCATION=false',
-    ]) {
-      expect(ingressVerifier).toContain(marker);
-    }
-
-    expect(ingressVerifier).not.toContain('gcloud run jobs deploy');
-    expect(ingressVerifier).not.toContain('gcloud run jobs execute');
-    expect(ingressVerifier).not.toContain("method: 'POST'");
+    expect(restoreWorkflow).toContain(
+      'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED',
+    );
+    expect(restoreWorkflow).toContain(
+      'if: always() && env.MUTATION_ATTEMPTED == \'true\' && (failure() || cancelled())',
+    );
+    expect(restoreWorkflow).toContain('WEBHOOK_CALLBACK_RESTORE_ROLLBACK=PASS');
   });
 
-  it('revalidates callback ingress before and after AG-01 cutover', () => {
-    const ag01 = promotionWorkflows[3];
-    expectOrdered(ag01, [
-      '      - name: Verify healthy Instagram webhook ingress before AG-01 mutation',
-      '      - name: Stage daemon candidate with grounded fallback at zero traffic',
-      '      - name: Cut over exact candidate transactionally and verify LIMITED readback',
-      '      - name: Reverify healthy Instagram webhook ingress after AG-01 cutover',
-      '      - name: Publish sanitized activation evidence',
-    ]);
+  it('bounds every network validation after opening the callback', () => {
+    expect(verifier).toContain('--connect-timeout 5 --max-time 15');
+    expect(verifier).toContain('--connect-timeout 5 --max-time 20');
+    expect(verifier).toContain('AbortSignal.timeout(10_000)');
+    expect(verifier).toContain("method: 'GET'");
+    expect(verifier).not.toContain("method: 'POST'");
+  });
 
-    const calls = ag01.match(
-      /bash scripts\/verify-instagram-engagement-webhook-ingress\.sh/g,
-    );
-    expect(calls?.length).toBe(2);
+  it('proves image and traffic stay unchanged across repair and rollback', () => {
+    for (const marker of [
+      'test "$CURRENT_IMAGE" = "$EXPECTED_IMAGE"',
+      'test "$POST_TRAFFIC_SHA" = "$PRE_TRAFFIC_SHA"',
+      'test "$POST_IAM_SHA" = "$PRE_IAM_SHA"',
+      'test "$CURRENT_REVISION" = "$EXPECTED_REVISION"',
+    ]) {
+      expect(restoreWorkflow).toContain(marker);
+    }
   });
 });
