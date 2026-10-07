@@ -49,6 +49,7 @@ export interface LiveCapabilityMatrix {
   readonly exact_head_sha: string;
   readonly generated_at: string;
   readonly runtime_identity: string | null;
+  readonly final_provider_phase_open: boolean;
   readonly total: number;
   readonly records: readonly LiveCapabilityMatrixRecord[];
   readonly counts_by_state: Readonly<Record<CapabilityClosureState, number>>;
@@ -61,6 +62,7 @@ export interface BuildLiveCapabilityMatrixOptions {
   readonly observedRuntimeTools?: readonly ToolDefinition[];
   readonly observedRuntimeBindingIds?: readonly string[];
   readonly providerEvidence?: readonly ProviderCapabilityValidationEvidence[];
+  readonly finalProviderPhaseOpen?: boolean;
 }
 
 interface RuntimeAssessment {
@@ -125,6 +127,7 @@ export function buildLiveCapabilityMatrix(
       return projectCapability(definition, {
         exactHeadSha: options.exactHeadSha,
         runtimeIdentity: options.runtimeIdentity ?? null,
+        finalProviderPhaseOpen: options.finalProviderPhaseOpen ?? false,
         runtime,
         evidence,
       });
@@ -135,6 +138,7 @@ export function buildLiveCapabilityMatrix(
     exact_head_sha: options.exactHeadSha,
     generated_at: now,
     runtime_identity: options.runtimeIdentity ?? null,
+    final_provider_phase_open: options.finalProviderPhaseOpen ?? false,
     total: records.length,
     records,
     counts_by_state: countStates(records),
@@ -146,13 +150,14 @@ function projectCapability(
   context: {
     readonly exactHeadSha: string;
     readonly runtimeIdentity: string | null;
+    readonly finalProviderPhaseOpen: boolean;
     readonly runtime: RuntimeAssessment;
     readonly evidence: EvidenceAssessment;
   },
 ): LiveCapabilityMatrixRecord {
-  const deferred = DEFERRED_FINAL_PREFIXES.some((prefix) =>
-    definition.capability_id.startsWith(prefix),
-  );
+  const deferred =
+    !context.finalProviderPhaseOpen &&
+    DEFERRED_FINAL_PREFIXES.some((prefix) => definition.capability_id.startsWith(prefix));
   const closureState = resolveClosureState(definition, {
     deferred,
     runtime: context.runtime,
