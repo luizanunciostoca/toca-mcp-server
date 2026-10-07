@@ -1,0 +1,284 @@
+name: AG-01 Grounded Runtime Activation V2
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: ag01-grounded-runtime-activation-v2
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  REPOSITORY: toca-mcp
+  SERVICE: toca-ag01-orchestrator
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+
+jobs:
+  activate:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — AG-01 grounded runtime activation V2 AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout exact controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate single-use authorization and bounded runtime drift
+        id: authz
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')" = "$GITHUB_SHA"
+          ISSUE_JSON="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
+          BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON")"
+          ISSUE_NUMBER="$(jq -r '.number' <<< "$ISSUE_JSON")"
+          jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '.state=="open" and .user.login==$owner and (.title|startswith("PRODUCTION AUTHORIZATION — AG-01 grounded runtime activation V2 AUTO"))' <<< "$ISSUE_JSON" >/dev/null
+          CONTROLLER_SHA="$(grep '^AUTHORIZED_CONTROLLER_SHA=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
+          RUNTIME_SHA="$(grep '^AUTHORIZED_RUNTIME_SOURCE_SHA=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
+          DIGEST="$(grep '^AUTHORIZED_IMAGE_DIGEST=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
+          PREVIOUS="$(grep '^EXPECTED_PREVIOUS_REVISION=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
+          test "$CONTROLLER_SHA" = "$GITHUB_SHA"
+          [[ "$RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$PREVIOUS" =~ ^toca-ag01-orchestrator-[a-z0-9-]+$ ]]
+          for marker in \
+            'AUTHORIZATION_STATE=ACTIVE' \
+            'AG01_GROUNDED_RUNTIME_ACTIVATION_V2=AUTHORIZED' \
+            'SERVICE_MUTATION_AUTHORIZED=true' \
+            'PROVIDER_WRITES_AUTHORIZED=false' \
+            'DIRECT_PROVIDER_WRITE_AUTHORIZED=false' \
+            'EXTERNAL_BUSINESS_SIDE_EFFECTS_AUTHORIZED=false' \
+            'ZERO_TRAFFIC_STAGE_REQUIRED=true' \
+            'STARTUP_PROBE_PATH=/healthz' \
+            'READINESS_GATE_PATH=/ready' \
+            'ROLLBACK_ON_FAILURE=true'; do
+            grep -Fxq "$marker" <<< "$BODY" || exit 1
+          done
+          git cat-file -e "$RUNTIME_SHA^{commit}"
+          CHANGED="$(git diff --name-only "$RUNTIME_SHA..$GITHUB_SHA")"
+          test -n "$CHANGED"
+          while IFS= read -r path; do
+            case "$path" in
+              .github/workflows/ag01-grounded-runtime-activation-v2.yml|.github/workflows/ag01-grounded-activation-rollback-guardian.yml|test/ag01-grounded-runtime-activation-v2.test.ts) ;;
+              *) echo "Unapproved runtime drift path: $path" >&2; exit 1 ;;
+            esac
+          done <<< "$CHANGED"
+          CONTROL="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
+          for line in 'MAIN_STABILITY=PASS' "EVALUATED_MAIN_SHA=$GITHUB_SHA" 'MERGE_RESERVATION=NONE' 'GENERAL_AUTONOMY=false'; do
+            grep -Fxq "$line" <<< "$CONTROL" || exit 1
+          done
+          echo "issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "runtime_sha=$RUNTIME_SHA" >> "$GITHUB_OUTPUT"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "previous=$PREVIOUS" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate governed deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify immutable image and production prestate
+        id: prestate
+        shell: bash
+        env:
+          DIGEST: ${{ steps.authz.outputs.digest }}
+          PREVIOUS: ${{ steps.authz.outputs.previous }}
+        run: |
+          set -euo pipefail
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/ag01@$DIGEST"
+          test "$(gcloud artifacts docker images describe "$IMAGE" --project "$PROJECT_ID" --format='value(image_summary.digest)')" = "$DIGEST"
+          SERVICE_JSON="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          CURRENT="$(jq -r '[.status.traffic[]? | select((.percent//0)==100 and (.revisionName//"")!="") | .revisionName] | if length==1 then .[0] else empty end' <<< "$SERVICE_JSON")"
+          test "$CURRENT" = "$PREVIOUS"
+          BASE_URL="$(jq -r '.status.url // empty' <<< "$SERVICE_JSON")"
+          test -n "$BASE_URL"
+          IAM_JSON="$(gcloud run services get-iam-policy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          ! jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members//[])[]? | select(.=="allUsers")' <<< "$IAM_JSON" >/dev/null
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Stage private candidate with process-only startup probe
+        id: stage
+        shell: bash
+        env:
+          IMAGE: ${{ steps.prestate.outputs.image }}
+          RUNTIME_SHA: ${{ steps.authz.outputs.runtime_sha }}
+          PREVIOUS: ${{ steps.authz.outputs.previous }}
+          DIGEST: ${{ steps.authz.outputs.digest }}
+        run: |
+          set -euo pipefail
+          SHORT="${RUNTIME_SHA::8}"
+          SUFFIX="g2-${SHORT}-${GITHUB_RUN_ATTEMPT}"
+          TAG="grounded2-${SHORT}-${GITHUB_RUN_ATTEMPT}"
+          CANDIDATE="${SERVICE}-${SUFFIX}"
+          gcloud run deploy "$SERVICE" \
+            --project "$PROJECT_ID" --region "$REGION" \
+            --image "$IMAGE" --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --revision-suffix "$SUFFIX" --update-env-vars "TOCA_RELEASE_SHA=$RUNTIME_SHA" \
+            --startup-probe 'httpGet.path=/healthz,httpGet.port=8080,initialDelaySeconds=0,failureThreshold=12,timeoutSeconds=3,periodSeconds=5' \
+            --tag "$TAG" --no-traffic --no-allow-unauthenticated --quiet
+          SERVICE_JSON="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          URL="$(jq -r --arg tag "$TAG" '.status.traffic[]? | select(.tag==$tag) | .url // empty' <<< "$SERVICE_JSON")"
+          test -n "$URL"
+          REV="$(gcloud run revisions describe "$CANDIDATE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          jq -e --arg sa "$RUNTIME_SERVICE_ACCOUNT" --arg sha "$RUNTIME_SHA" --arg digest "$DIGEST" '.spec.serviceAccountName==$sa and ([.status.conditions[]? | select(.type=="Ready") | .status]|last)=="True" and (.spec.containers[0].image|contains($digest)) and ([.spec.containers[0].env[]? | select(.name=="TOCA_RELEASE_SHA") | .value]|last)==$sha and .spec.containers[0].startupProbe.httpGet.path=="/healthz"' <<< "$REV" >/dev/null
+          jq -e --arg candidate "$CANDIDATE" --arg previous "$PREVIOUS" '([.status.traffic[]? | select(.revisionName==$candidate) | (.percent//0)]|add//0)==0 and ([.status.traffic[]? | select(.revisionName==$previous) | (.percent//0)]|add//0)==100' <<< "$SERVICE_JSON" >/dev/null
+          echo "candidate=$CANDIDATE" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Mint private candidate probe token
+        id: token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ steps.prestate.outputs.base_url }}
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Prove readiness and grounded answer before traffic
+        shell: bash
+        env:
+          ID_TOKEN: ${{ steps.token.outputs.id_token }}
+          URL: ${{ steps.stage.outputs.url }}
+          CANDIDATE: ${{ steps.stage.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          test "$(curl --max-time 10 --silent --show-error -o /tmp/health.json -w '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$URL/health")" = 200
+          READY_CODE=000
+          for attempt in $(seq 1 6); do
+            READY_CODE="$(curl --max-time 30 --silent --show-error -o /tmp/ready.json -w '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$URL/ready" || true)"
+            [[ "$READY_CODE" == 200 ]] && break
+            sleep 5
+          done
+          if [[ "$READY_CODE" != 200 ]]; then
+            ERROR_CODE="$(gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.revision_name=\"$CANDIDATE\" AND jsonPayload.event=\"ag01.readiness.failed\"" --project "$PROJECT_ID" --freshness=15m --limit=20 --order=desc --format=json 2>/dev/null | jq -r '[.[].jsonPayload.errorCode // empty] | map(select(length>0)) | first // "AG01_READINESS_UNKNOWN"')"
+            echo "AG01_READINESS_ERROR_CODE=$ERROR_CODE" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          KEY="grounded-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          jq -n --arg key "$KEY" '{idempotencyKey:$key,message:"Que horas começa o Sunset?",expectedIntent:"EVENT_INFO",correlationId:$key}' >/tmp/request.json
+          curl --max-time 60 --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $ID_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/request.json "$URL/v1/knowledge/answer" >/tmp/answer.json
+          jq -e '.status=="GROUNDED" and (.answer|type=="string" and length>0) and (.confidence>=0.85) and (.citedResourceIds|length>0) and (.evidence|length>0)' /tmp/answer.json >/dev/null
+
+      - name: Promote candidate transactionally
+        id: promote
+        shell: bash
+        env:
+          CANDIDATE: ${{ steps.stage.outputs.candidate }}
+          PREVIOUS: ${{ steps.authz.outputs.previous }}
+        run: |
+          set -euo pipefail
+          current(){ gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent//0)==100 and (.revisionName//"")!="") | .revisionName] | if length==1 then .[0] else empty end'; }
+          test "$(current)" = "$PREVIOUS"
+          IAM_JSON="$(gcloud run services get-iam-policy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          ! jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members//[])[]? | select(.=="allUsers")' <<< "$IAM_JSON" >/dev/null
+          gcloud run services update-traffic "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "$CANDIDATE=100" --quiet
+          echo 'traffic_changed=true' >> "$GITHUB_OUTPUT"
+          test "$(current)" = "$CANDIDATE"
+
+      - name: Verify production base readback
+        shell: bash
+        env:
+          ID_TOKEN: ${{ steps.token.outputs.id_token }}
+          BASE_URL: ${{ steps.prestate.outputs.base_url }}
+          CANDIDATE: ${{ steps.stage.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          test "$(curl --max-time 10 --silent --show-error -o /tmp/base-health.json -w '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$BASE_URL/health")" = 200
+          test "$(curl --max-time 30 --silent --show-error -o /tmp/base-ready.json -w '%{http_code}' -H "Authorization: Bearer $ID_TOKEN" "$BASE_URL/ready")" = 200
+          CURRENT="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent//0)==100) | .revisionName] | if length==1 then .[0] else empty end')"
+          test "$CURRENT" = "$CANDIDATE"
+          IAM_JSON="$(gcloud run services get-iam-policy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          ! jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members//[])[]? | select(.=="allUsers")' <<< "$IAM_JSON" >/dev/null
+          KEY="grounded-v2-base-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          jq -n --arg key "$KEY" '{idempotencyKey:$key,message:"Que horas começa o Sunset?",expectedIntent:"EVENT_INFO",correlationId:$key}' >/tmp/base-request.json
+          curl --max-time 60 --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $ID_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/base-request.json "$BASE_URL/v1/knowledge/answer" >/tmp/base-answer.json
+          jq -e '.status=="GROUNDED" and (.confidence>=0.85) and (.citedResourceIds|length>0)' /tmp/base-answer.json >/dev/null
+
+      - name: Publish success and consume authorization
+        if: success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.authz.outputs.issue }}
+          RUNTIME_SHA: ${{ steps.authz.outputs.runtime_sha }}
+          DIGEST: ${{ steps.authz.outputs.digest }}
+          CANDIDATE: ${{ steps.stage.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            'AG01_GROUNDED_RUNTIME_ACTIVATION_V2_STATUS=PASS' \
+            "RUNTIME_SOURCE_SHA=$RUNTIME_SHA" \
+            "IMAGE_DIGEST=$DIGEST" \
+            "PROMOTED_REVISION=$CANDIDATE" \
+            'TRAFFIC_PERCENT=100' \
+            'STARTUP_PROBE=/healthz' \
+            'READINESS_GATE=/ready' \
+            'DRIVE_SCOPE=READ_ONLY' \
+            'DIRECT_PROVIDER_WRITE=false' \
+            'EXTERNAL_BUSINESS_SIDE_EFFECT=false' \
+            'AUTHORIZATION_STATE=CONSUMED' \
+            "WORKFLOW_RUN_ID=$GITHUB_RUN_ID" \
+            'REUSE_PROHIBITED=true' > /tmp/success-comment.txt
+          gh issue comment "$ISSUE" --body-file /tmp/success-comment.txt
+          gh issue close "$ISSUE" --reason completed
+
+      - name: Roll back if a post-promotion gate failed
+        if: failure() && steps.promote.outputs.traffic_changed == 'true'
+        shell: bash
+        env:
+          CANDIDATE: ${{ steps.stage.outputs.candidate }}
+          PREVIOUS: ${{ steps.authz.outputs.previous }}
+        run: |
+          set -euo pipefail
+          CURRENT="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent//0)==100) | .revisionName] | if length==1 then .[0] else empty end')"
+          if [[ "$CURRENT" == "$CANDIDATE" ]]; then
+            gcloud run services update-traffic "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "$PREVIOUS=100" --quiet
+          fi
+          RESTORED="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent//0)==100) | .revisionName] | if length==1 then .[0] else empty end')"
+          test "$RESTORED" = "$PREVIOUS" || test "$RESTORED" != "$CANDIDATE"
+
+      - name: Consume failed authorization
+        if: failure() && steps.authz.outputs.issue != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.authz.outputs.issue }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            'AUTHORIZATION_STATE=CONSUMED' \
+            'AG01_GROUNDED_RUNTIME_ACTIVATION_V2_STATUS=FAIL' \
+            "WORKFLOW_RUN_ID=$GITHUB_RUN_ID" \
+            'REUSE_PROHIBITED=true' > /tmp/failure-comment.txt
+          gh issue comment "$ISSUE" --body-file /tmp/failure-comment.txt
+          gh issue close "$ISSUE" --reason completed
