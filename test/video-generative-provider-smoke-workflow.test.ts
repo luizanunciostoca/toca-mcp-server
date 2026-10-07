@@ -44,6 +44,30 @@ describe('video generative provider smoke', () => {
       expect(workflow).toContain('require_key_value_once PROVIDER_SAMPLE_COUNT 1');
       expect(workflow).toContain('require_key_value_once PROVIDER_RESOLUTION 720p');
       expect(workflow).toContain('require_key_value_once PROVIDER_AUDIO_GENERATION false');
+      expect(workflow).toContain(
+        'require_key_value_once PRODUCTION_ARTIFACT_REGISTRY_WRITE_AUTHORIZED true',
+      );
+      expect(workflow).toContain(
+        'require_key_value_once PRODUCTION_CLOUD_RUN_JOB_MUTATION_AUTHORIZED true',
+      );
+      expect(workflow).toContain(
+        'require_key_value_once PRODUCTION_GCS_REVIEW_ARTIFACT_WRITE_AUTHORIZED true',
+      );
+      expect(workflow).toContain('require_key_value_once GOOGLE_DRIVE_READ_AUTHORIZED true');
+      expect(workflow).toContain('require_key_value_once GOOGLE_SHEETS_READ_AUTHORIZED true');
+      expect(workflow).toContain(
+        'require_key_value_once GOOGLE_SHEETS_CANDIDATE_WRITE_AUTHORIZED true',
+      );
+      expect(workflow).toContain('require_key_value_once IAM_CREDENTIAL_SIGNING_AUTHORIZED true');
+      expect(workflow).toContain(
+        'require_key_value_once PRODUCTION_SERVICE_DEPLOYMENT_AUTHORIZED false',
+      );
+      expect(workflow).toContain(
+        'require_key_value_once PRODUCTION_TRAFFIC_MUTATION_AUTHORIZED false',
+      );
+      expect(workflow).toContain(
+        'require_key_value_once PRODUCTION_DATABASE_MUTATION_AUTHORIZED false',
+      );
       expect(workflow).toContain('require_key_value_once PUBLICATION_AUTHORIZED false');
       expect(workflow).toContain('require_key_value_once SCHEDULING_AUTHORIZED false');
       expect(workflow).toContain('require_key_value_once MARKETING_READY_AUTHORIZED false');
@@ -91,6 +115,13 @@ describe('video generative provider smoke', () => {
     expect(smokeWorkflow).toContain('generateAudio:false');
     expect(smokeWorkflow).toContain('productionProviderProofAuthorized:true');
     expect(smokeWorkflow).toContain('providerCallAuthorized:true');
+    expect(smokeWorkflow).toContain('productionArtifactRegistryWriteAuthorized:true');
+    expect(smokeWorkflow).toContain('productionCloudRunJobMutationAuthorized:true');
+    expect(smokeWorkflow).toContain('productionGcsReviewArtifactWriteAuthorized:true');
+    expect(smokeWorkflow).toContain('googleSheetsCandidateWriteAuthorized:true');
+    expect(smokeWorkflow).toContain('productionServiceDeploymentAuthorized:false');
+    expect(smokeWorkflow).toContain('productionTrafficMutationAuthorized:false');
+    expect(smokeWorkflow).toContain('productionDatabaseMutationAuthorized:false');
     expect(smokeWorkflow).toContain('publicationAuthorized:false');
     expect(smokeWorkflow).toContain('schedulingAuthorized:false');
     expect(smokeWorkflow).toContain('marketingReadyAuthorized:false');
