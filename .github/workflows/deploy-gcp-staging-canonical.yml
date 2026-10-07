@@ -617,6 +617,8 @@ jobs:
           require_key_value_once PROVIDER_MUTATION_AUTHORIZED false
           require_key_value_once TRAFFIC_MUTATION_AUTHORIZED false
           require_key_value_once CLOUD_RUN_MUTATION_AUTHORIZED false
+          require_key_value_once DATABASE_SECRET_READ_AUTHORIZED true
+          require_key_value_once SECRETS_DISCLOSURE_AUTHORIZED false
           require_key_value_once FINANCIAL_CEILING NO_NEW_PAID_RESOURCE_ALLOCATION
           echo "EXPECTED_MAX_MIGRATION=$EXPECTED_MAX_MIGRATION" >> "$GITHUB_ENV"
           echo 'STAGING_SCHEMA_SYNC_AUTHORIZATION=VERIFIED'
@@ -743,7 +745,7 @@ jobs:
           AFTER_MAX="$(tail -n1 staging-schema-sync-evidence/after-migrations.txt)"
           test "$AFTER_MAX" = "$EXPECTED_MAX_MIGRATION"
           ADDED_COUNT="$(comm -13 staging-schema-sync-evidence/before-migrations.txt staging-schema-sync-evidence/after-migrations.txt | wc -l | tr -d ' ')"
-          jq -n --arg candidate "$GITHUB_SHA" --arg beforeMax "$BEFORE_MAX" --arg afterMax "$AFTER_MAX" --arg expectedMax "$EXPECTED_MAX_MIGRATION" --argjson addedCount "$ADDED_COUNT" '{schemaVersion:"toca.staging.schema-sync.evidence.v1",candidateSha:$candidate,beforeMaxMigration:$beforeMax,afterMaxMigration:$afterMax,expectedMaxMigration:$expectedMax,addedMigrationCount:$addedCount,databaseMutation:true,productionMutation:false,providerMutation:false,trafficMutation:false,cloudRunMutation:false,secretPayloadDisclosed:false,result:"PASS"}' > staging-schema-sync-evidence/manifest.json
+          jq -n --arg candidate "$GITHUB_SHA" --arg beforeMax "$BEFORE_MAX" --arg afterMax "$AFTER_MAX" --arg expectedMax "$EXPECTED_MAX_MIGRATION" --argjson addedCount "$ADDED_COUNT" '{schemaVersion:"toca.staging.schema-sync.evidence.v1",candidateSha:$candidate,beforeMaxMigration:$beforeMax,afterMaxMigration:$afterMax,expectedMaxMigration:$expectedMax,addedMigrationCount:$addedCount,databaseMutation:true,productionMutation:false,providerMutation:false,trafficMutation:false,cloudRunMutation:false,databaseSecretRead:true,secretPayloadDisclosed:false,result:"PASS"}' > staging-schema-sync-evidence/manifest.json
           sha256sum staging-schema-sync-evidence/* > staging-schema-sync-evidence/SHA256SUMS
           unset DATABASE_URL DATABASE_SSL
           echo "STAGING_SCHEMA_SYNC=PASS before_max=$BEFORE_MAX after_max=$AFTER_MAX added=$ADDED_COUNT"
