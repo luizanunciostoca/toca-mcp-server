@@ -61,7 +61,10 @@ describe('GCP rollback and mutation kill-switch readback', () => {
       expect(block).toContain('test "$candidate_spec" = "$previous_spec"');
       expect(block).toContain('(.metadata.name == $candidate)');
       expect(block).toContain('.name == "TOCA_PLATFORM_KILL_SWITCH"');
-      expect(block).toContain('(.percent // 0) == 0');
+      expect(block).toContain(
+        'select(.revisionName == $candidate) | (.percent // 0)',
+      );
+      expect(block).toContain('| add // 0) == 0');
       expect(block).toContain('MCP_PREVIOUS_REVISION="$(serving_revision');
       expect(block).toContain('WEBHOOK_PREVIOUS_REVISION="$(serving_revision');
       expect(block).toContain('stage_candidate "$GCP_CLOUD_RUN_MCP_SERVICE" mcp');
