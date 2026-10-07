@@ -1477,17 +1477,23 @@ jobs:
           verify_exact_traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_PREVIOUS_REVISION"
 
           if ! gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${MCP_CANDIDATE_REVISION}=100" --quiet; then
-            rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION" || true
+            if ! rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"; then
+              echo 'PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL' >&2
+            fi
             exit 1
           fi
           if ! gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${WEBHOOK_CANDIDATE_REVISION}=100" --quiet; then
-            rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION" || true
+            if ! rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"; then
+              echo 'PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL' >&2
+            fi
             exit 1
           fi
 
           if ! verify_serving_kill_switch "$GCP_CLOUD_RUN_MCP_SERVICE" "$MCP_CANDIDATE_REVISION" true ||
              ! verify_serving_kill_switch "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_CANDIDATE_REVISION" true; then
-            rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION" || true
+            if ! rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"; then
+              echo 'PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL' >&2
+            fi
             exit 1
           fi
 
@@ -1604,17 +1610,23 @@ jobs:
           verify_exact_traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_PREVIOUS_REVISION"
 
           if ! gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${MCP_CANDIDATE_REVISION}=100" --quiet; then
-            rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION" || true
+            if ! rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"; then
+              echo 'PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL' >&2
+            fi
             exit 1
           fi
           if ! gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${WEBHOOK_CANDIDATE_REVISION}=100" --quiet; then
-            rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION" || true
+            if ! rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"; then
+              echo 'PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL' >&2
+            fi
             exit 1
           fi
 
           if ! verify_serving_kill_switch "$GCP_CLOUD_RUN_MCP_SERVICE" "$MCP_CANDIDATE_REVISION" false ||
              ! verify_serving_kill_switch "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_CANDIDATE_REVISION" false; then
-            rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION" || true
+            if ! rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"; then
+              echo 'PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL' >&2
+            fi
             exit 1
           fi
 
