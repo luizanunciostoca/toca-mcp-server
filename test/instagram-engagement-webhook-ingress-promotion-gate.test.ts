@@ -1,10 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const verifier = readFileSync(
-  'scripts/verify-instagram-engagement-webhook-ingress.sh',
-  'utf8',
-);
+const verifier = readFileSync('scripts/verify-instagram-engagement-webhook-ingress.sh', 'utf8');
 
 const direct = readFileSync(
   '.github/workflows/instagram-engagement-limited-activation.yml',
@@ -62,13 +59,10 @@ describe('Instagram engagement webhook ingress promotion gate', () => {
   });
 
   it('fails closed before any LIMITED mutation', () => {
-    const gate =
-      '      - name: Verify healthy Instagram webhook ingress before LIMITED mutation';
+    const gate = '      - name: Verify healthy Instagram webhook ingress before LIMITED mutation';
 
     for (const workflow of workflows) {
-      expect(workflow).toContain(
-        'WEBHOOK_SERVICE_NAME: toca-webhook-next-production',
-      );
+      expect(workflow).toContain('WEBHOOK_SERVICE_NAME: toca-webhook-next-production');
       expect(workflow).toContain('META_APP_SECRET_ID: toca-meta-app-secret');
       expect(workflow.indexOf(gate)).toBeGreaterThan(-1);
 
@@ -78,18 +72,9 @@ describe('Instagram engagement webhook ingress promotion gate', () => {
       expect(calls?.length).toBe(2);
     }
 
-    expectOrdered(direct, [
-      gate,
-      '      - name: Apply and verify production migrations',
-    ]);
-    expectOrdered(comment, [
-      gate,
-      '      - name: Prove dual-channel readiness without sending',
-    ]);
-    expectOrdered(faq, [
-      gate,
-      '      - name: Backup current shared FAQ and knowledge state',
-    ]);
+    expectOrdered(direct, [gate, '      - name: Apply and verify production migrations']);
+    expectOrdered(comment, [gate, '      - name: Prove dual-channel readiness without sending']);
+    expectOrdered(faq, [gate, '      - name: Backup current shared FAQ and knowledge state']);
   });
 
   it('rechecks ingress before publishing LIMITED PASS', () => {
@@ -115,15 +100,9 @@ describe('Instagram engagement webhook ingress promotion gate', () => {
 
   it('keeps webhook repair out of LIMITED promotion workflows', () => {
     for (const workflow of workflows) {
-      expect(workflow).not.toContain(
-        'gcloud run services update "$WEBHOOK_SERVICE_NAME"',
-      );
-      expect(workflow).not.toContain(
-        'gcloud run services update-traffic "$WEBHOOK_SERVICE_NAME"',
-      );
-      expect(workflow).not.toContain(
-        'gcloud run deploy "$WEBHOOK_SERVICE_NAME"',
-      );
+      expect(workflow).not.toContain('gcloud run services update "$WEBHOOK_SERVICE_NAME"');
+      expect(workflow).not.toContain('gcloud run services update-traffic "$WEBHOOK_SERVICE_NAME"');
+      expect(workflow).not.toContain('gcloud run deploy "$WEBHOOK_SERVICE_NAME"');
     }
   });
 });
