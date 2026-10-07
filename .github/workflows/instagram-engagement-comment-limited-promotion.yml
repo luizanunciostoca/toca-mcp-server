@@ -11,7 +11,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: instagram-engagement-comment-limited-promotion
+  group: instagram-engagement-webhook-callback-control
   cancel-in-progress: false
 
 env:
@@ -103,6 +103,9 @@ jobs:
             "PERSISTENT_COMMENT_PROMOTION_AUTHORIZED=true"
             "PERSISTENT_WRITES_AUTHORIZED=true"
             "SERVICE_MUTATION_AUTHORIZED=true"
+            "SECRET_PAYLOAD_READS_AUTHORIZED=true"
+            "PROVIDER_READS_AUTHORIZED=true"
+            "PROVIDER_METHODS=GET_ONLY"
             "SCHEDULER_MUTATION_AUTHORIZED=false"
             "DATABASE_MIGRATIONS_AUTHORIZED=false"
             "GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false"
