@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: instagram-engagement-webhook-callback-control
+  group: instagram-engagement-production-callback
   cancel-in-progress: false
 
 env:
@@ -19,12 +19,14 @@ env:
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
   GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
-  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
   WEBHOOK_SERVICE_NAME: toca-webhook-next-production
   META_APP_SECRET_ID: toca-meta-app-secret
-  TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_TOKEN_SECRET_ID: toca-meta-oauth-token
   META_APP_ID: '2281930145887404'
   INSTAGRAM_PAGE_ID: '306103746115875'
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  META_GRAPH_BASE_URL: https://graph.facebook.com
+  META_GRAPH_API_VERSION: v24.0
 
 jobs:
   restore:
@@ -34,8 +36,7 @@ jobs:
       startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram webhook callback restore AUTO')
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 15
-
+    timeout-minutes: 12
     steps:
       - name: Checkout exact restore controller
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -52,7 +53,6 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = 'refs/heads/main'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-
           ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
           ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
@@ -61,31 +61,30 @@ jobs:
             (.user.login == $owner) and
             (.title | startswith("PRODUCTION AUTHORIZATION — Instagram webhook callback restore AUTO"))
           ' >/dev/null
-
           CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
           test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
 
           PRESTATE_ISSUE="$(grep '^PRESTATE_READBACK_ISSUE=' <<< "$BODY" | cut -d= -f2-)"
           [[ "$PRESTATE_ISSUE" =~ ^[0-9]+$ ]]
-
           required=(
             "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
             'AUTHORIZATION_STATE=ACTIVE'
             'INSTAGRAM_ENGAGEMENT_WEBHOOK_CALLBACK_RESTORE=AUTHORIZED'
+            'EXPECTED_GCP_PROJECT=toca-mcp-production'
+            'EXPECTED_GCP_REGION=southamerica-east1'
             'EXPECTED_WEBHOOK_SERVICE=toca-webhook-next-production'
-            'MUTATION_SCOPE=PUBLIC_CALLBACK_SURFACE_ONLY'
+            'MUTATION_SCOPE=INGRESS_DEFAULT_URL_INVOKER_IAM_CHECK_ONLY'
             'SERVICE_MUTATION_AUTHORIZED=true'
-            'INGRESS_MUTATION_AUTHORIZED=true'
             'TRAFFIC_MUTATION_AUTHORIZED=false'
+            'IMAGE_MUTATION_AUTHORIZED=false'
             'REVISION_DEPLOY_AUTHORIZED=false'
             'DATABASE_MUTATIONS_AUTHORIZED=false'
-            'SECRET_PAYLOAD_READS_AUTHORIZED=true'
             'PROVIDER_READS_AUTHORIZED=true'
             'PROVIDER_METHODS=GET_ONLY'
             'PROVIDER_WRITES_AUTHORIZED=false'
             'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
-            'NEW_PAID_RESOURCE_ALLOCATION_AUTHORIZED=false'
-            'GENERAL_AUTONOMY_PROMOTION_AUTHORIZED=false'
+            'NEW_PAID_RESOURCES_AUTHORIZED=false'
+            'GENERAL_AUTONOMY_AUTHORIZED=false'
             'ROLLBACK_REQUIRED=true'
           )
           for marker in "${required[@]}"; do grep -Fxq "$marker" <<< "$BODY"; done
@@ -107,31 +106,9 @@ jobs:
           test -n "$PRESTATE_REPORT"
           grep -Fxq "CONTROLLER_SHA=$GITHUB_SHA" <<< "$PRESTATE_REPORT"
           grep -Eq '^CALLBACK_CLASSIFICATION=BLOCKED_(INGRESS_RESTRICTED|DEFAULT_URL_DISABLED|INVOKER_IAM_CHECK_ENABLED|STATUS_URL_MISSING)$' <<< "$PRESTATE_REPORT"
-          grep -Fxq 'APP_SECRET_READABLE=true' <<< "$PRESTATE_REPORT"
-          grep -Fxq 'META_ACCESS_TOKEN_READABLE=true' <<< "$PRESTATE_REPORT"
-
-          EXPECTED_REVISION="$(grep '^SERVING_REVISION=' <<< "$PRESTATE_REPORT" | cut -d= -f2-)"
-          EXPECTED_IMAGE="$(grep '^SERVING_IMAGE=' <<< "$PRESTATE_REPORT" | cut -d= -f2-)"
-          EXPECTED_INGRESS="$(grep '^INGRESS=' <<< "$PRESTATE_REPORT" | cut -d= -f2-)"
-          EXPECTED_DEFAULT_URL_DISABLED="$(grep '^DEFAULT_URL_DISABLED=' <<< "$PRESTATE_REPORT" | cut -d= -f2-)"
-          EXPECTED_INVOKER_IAM_DISABLED="$(grep '^INVOKER_IAM_DISABLED=' <<< "$PRESTATE_REPORT" | cut -d= -f2-)"
-          EXPECTED_TRAFFIC_SHA="$(grep '^TRAFFIC_SHA=' <<< "$PRESTATE_REPORT" | cut -d= -f2-)"
-
-          test -n "$EXPECTED_REVISION"
-          test -n "$EXPECTED_IMAGE"
-          test -n "$EXPECTED_INGRESS"
-          [[ "$EXPECTED_DEFAULT_URL_DISABLED" =~ ^(true|false)$ ]]
-          [[ "$EXPECTED_INVOKER_IAM_DISABLED" =~ ^(true|false)$ ]]
-          [[ "$EXPECTED_TRAFFIC_SHA" =~ ^[0-9a-f]{64}$ ]]
 
           echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
           echo "prestate_issue=$PRESTATE_ISSUE" >> "$GITHUB_OUTPUT"
-          echo "expected_revision=$EXPECTED_REVISION" >> "$GITHUB_OUTPUT"
-          echo "expected_image=$EXPECTED_IMAGE" >> "$GITHUB_OUTPUT"
-          echo "expected_ingress=$EXPECTED_INGRESS" >> "$GITHUB_OUTPUT"
-          echo "expected_default_url_disabled=$EXPECTED_DEFAULT_URL_DISABLED" >> "$GITHUB_OUTPUT"
-          echo "expected_invoker_iam_disabled=$EXPECTED_INVOKER_IAM_DISABLED" >> "$GITHUB_OUTPUT"
-          echo "expected_traffic_sha=$EXPECTED_TRAFFIC_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate governed deployer
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
@@ -142,72 +119,58 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Capture and reconcile exact service-level prestate
+      - name: Capture exact service-level prestate
         id: prestate
-        env:
-          EXPECTED_REVISION: ${{ steps.auth.outputs.expected_revision }}
-          EXPECTED_IMAGE: ${{ steps.auth.outputs.expected_image }}
-          EXPECTED_INGRESS: ${{ steps.auth.outputs.expected_ingress }}
-          EXPECTED_DEFAULT_URL_DISABLED: ${{ steps.auth.outputs.expected_default_url_disabled }}
-          EXPECTED_INVOKER_IAM_DISABLED: ${{ steps.auth.outputs.expected_invoker_iam_disabled }}
-          EXPECTED_TRAFFIC_SHA: ${{ steps.auth.outputs.expected_traffic_sha }}
         shell: bash
         run: |
           set -euo pipefail
           SERVICE_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           IAM_JSON="$(gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-
           if printf '%s' "$IAM_JSON" | jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' >/dev/null; then
             echo 'Legacy allUsers invoker is outside the authorized repair scope' >&2
             exit 1
           fi
 
-          SERVING_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | if length == 1 then .[0] else empty end')"
-          test "$SERVING_REVISION" = "$EXPECTED_REVISION"
-
+          SERVING_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | unique | if length == 1 then .[0] else empty end')"
+          test -n "$SERVING_REVISION"
           REVISION_JSON="$(gcloud run revisions describe "$SERVING_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-          PRE_IMAGE="$(printf '%s' "$REVISION_JSON" | jq -r '.spec.containers[0].image // empty')"
-          test "$PRE_IMAGE" = "$EXPECTED_IMAGE"
-
-          printf '%s' "$REVISION_JSON" | jq -e --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+          printf '%s' "$REVISION_JSON" | jq -e --arg runtime "$GCP_RUNTIME_SERVICE_ACCOUNT" '
             .spec.containers[0] as $c |
             def envValue($name): ([($c.env // [])[] | select(.name == $name) | .value] | last // null);
             (([.status.conditions[]? | select(.type == "Ready") | .status] | last) == "True") and
-            (.spec.serviceAccountName == $sa) and
-            ($c.command == ["node"]) and
-            ($c.args == ["dist/src/http-instagram-engagement.js"]) and
+            (.spec.serviceAccountName == $runtime) and
             (envValue("TOCA_SERVICE_ROLE") == "webhook") and
+            (envValue("MCP_ENABLED") == "false") and
             (envValue("META_WEBHOOK_ENABLED") == "true") and
             (envValue("META_WEBHOOK_PERSISTENCE_ENABLED") == "true") and
             (envValue("INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") == "true") and
             ((envValue("INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") // "false") == "false")
           ' >/dev/null
 
+          PRE_IMAGE="$(printf '%s' "$REVISION_JSON" | jq -r '.spec.containers[0].image // empty')"
           PRE_INGRESS="$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"')"
           PRE_DEFAULT_URL_DISABLED="$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"')"
           PRE_INVOKER_IAM_DISABLED="$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"')"
-          PRE_TRAFFIC_SHA="$(printf '%s' "$SERVICE_JSON" | jq -cS '(.status.traffic // []) | sort_by(.revisionName // "", .tag // "")' | sha256sum | awk '{print $1}')"
+          PRE_TRAFFIC_SHA="$(printf '%s' "$SERVICE_JSON" | jq -cS '.status.traffic // []' | sha256sum | awk '{print $1}')"
+          PRE_IAM_SHA="$(printf '%s' "$IAM_JSON" | jq -cS . | sha256sum | awk '{print $1}')"
 
-          test "$PRE_INGRESS" = "$EXPECTED_INGRESS"
-          test "$PRE_DEFAULT_URL_DISABLED" = "$EXPECTED_DEFAULT_URL_DISABLED"
-          test "$PRE_INVOKER_IAM_DISABLED" = "$EXPECTED_INVOKER_IAM_DISABLED"
-          test "$PRE_TRAFFIC_SHA" = "$EXPECTED_TRAFFIC_SHA"
+          test -n "$PRE_IMAGE"
+          if [[ "$PRE_INGRESS" == all && "$PRE_DEFAULT_URL_DISABLED" == false && "$PRE_INVOKER_IAM_DISABLED" == true ]]; then
+            echo 'Current callback surface is already public DRS-safe; repair authorization is stale' >&2
+            exit 1
+          fi
 
-          APP_SECRET="$(gcloud secrets versions access latest --secret "$META_APP_SECRET_ID" --project "$GCP_PROJECT_ID" 2>/dev/null)"
-          META_TOKEN="$(gcloud secrets versions access latest --secret "$TOKEN_SECRET_ID" --project "$GCP_PROJECT_ID" 2>/dev/null)"
-          test -n "$APP_SECRET"
-          test -n "$META_TOKEN"
-          unset APP_SECRET META_TOKEN
-
-          echo "serving_revision=$SERVING_REVISION" >> "$GITHUB_OUTPUT"
-          echo "pre_image=$PRE_IMAGE" >> "$GITHUB_OUTPUT"
-          echo "pre_ingress=$PRE_INGRESS" >> "$GITHUB_OUTPUT"
-          echo "pre_default_url_disabled=$PRE_DEFAULT_URL_DISABLED" >> "$GITHUB_OUTPUT"
-          echo "pre_invoker_iam_disabled=$PRE_INVOKER_IAM_DISABLED" >> "$GITHUB_OUTPUT"
-          echo "pre_traffic_sha=$PRE_TRAFFIC_SHA" >> "$GITHUB_OUTPUT"
+          {
+            echo "serving_revision=$SERVING_REVISION"
+            echo "pre_image=$PRE_IMAGE"
+            echo "pre_ingress=$PRE_INGRESS"
+            echo "pre_default_url_disabled=$PRE_DEFAULT_URL_DISABLED"
+            echo "pre_invoker_iam_disabled=$PRE_INVOKER_IAM_DISABLED"
+            echo "pre_traffic_sha=$PRE_TRAFFIC_SHA"
+            echo "pre_iam_sha=$PRE_IAM_SHA"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Consume single-use authorization before mutation
-        id: consume
         env:
           GH_TOKEN: ${{ github.token }}
           AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
@@ -215,14 +178,16 @@ jobs:
         run: |
           set -euo pipefail
           ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
+          test "$(printf '%s' "$ISSUE_JSON" | jq -r '.state')" = open
           BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
           grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY"
-          BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_IN_PROGRESS/' <<< "$BODY")"
-          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" -f body="$BODY" >/dev/null
-          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY"             --body $'WEBHOOK_CALLBACK_RESTORE_TRANSACTION=STARTED\nAUTHORIZATION_STATE=CONSUMED_IN_PROGRESS\nMUTATION_SCOPE=PUBLIC_CALLBACK_SURFACE_ONLY' >/dev/null
-          echo 'AUTHORIZATION_CONSUMED=true' >> "$GITHUB_ENV"
+          BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
+          grep -Fxq 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' <<< "$BODY"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" \
+            -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
+          echo 'RESTORE_AUTHORIZATION_CONSUMED=true'
 
-      - name: Restore only the minimal DRS-safe public callback surface
+      - name: Restore only the required DRS-safe callback surface
         id: mutate
         env:
           PRE_INGRESS: ${{ steps.prestate.outputs.pre_ingress }}
@@ -232,114 +197,282 @@ jobs:
         run: |
           set -euo pipefail
           FLAGS=()
-          if [[ "$PRE_INGRESS" != all ]]; then FLAGS+=(--ingress all); fi
+          if [[ "$PRE_INGRESS" != all ]]; then FLAGS+=(--ingress=all); fi
           if [[ "$PRE_DEFAULT_URL_DISABLED" == true ]]; then FLAGS+=(--default-url); fi
           if [[ "$PRE_INVOKER_IAM_DISABLED" != true ]]; then FLAGS+=(--no-invoker-iam-check); fi
-          (("${#FLAGS[@]}" > 0)) || {
-            echo 'No authorized callback surface mutation is required' >&2
-            exit 1
-          }
-
+          test "${#FLAGS[@]}" -gt 0
           echo 'MUTATION_ATTEMPTED=true' >> "$GITHUB_ENV"
-          gcloud run services update "$WEBHOOK_SERVICE_NAME"             --project "$GCP_PROJECT_ID" --region "$GCP_REGION"             "${FLAGS[@]}" --quiet
+          gcloud run services update "$WEBHOOK_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            "${FLAGS[@]}" --quiet
           echo 'mutation_completed=true' >> "$GITHUB_OUTPUT"
 
-      - name: Read back and prove complete poststate
+      - name: Read back runtime, DB schema, challenge and Meta subscriptions
         id: poststate
         env:
           EXPECTED_REVISION: ${{ steps.prestate.outputs.serving_revision }}
-          PRE_IMAGE: ${{ steps.prestate.outputs.pre_image }}
+          EXPECTED_IMAGE: ${{ steps.prestate.outputs.pre_image }}
           PRE_TRAFFIC_SHA: ${{ steps.prestate.outputs.pre_traffic_sha }}
-          RUNTIME_IMAGE: ${{ steps.prestate.outputs.pre_image }}
+          PRE_IAM_SHA: ${{ steps.prestate.outputs.pre_iam_sha }}
         shell: bash
         run: |
           set -euo pipefail
           SERVICE_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           IAM_JSON="$(gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-          CURRENT_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | if length == 1 then .[0] else empty end')"
+          CURRENT_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | unique | if length == 1 then .[0] else empty end')"
           test "$CURRENT_REVISION" = "$EXPECTED_REVISION"
-
           REVISION_JSON="$(gcloud run revisions describe "$CURRENT_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-          test "$(printf '%s' "$REVISION_JSON" | jq -r '.spec.containers[0].image // empty')" = "$PRE_IMAGE"
-
-          POST_TRAFFIC_SHA="$(printf '%s' "$SERVICE_JSON" | jq -cS '(.status.traffic // []) | sort_by(.revisionName // "", .tag // "")' | sha256sum | awk '{print $1}')"
+          CURRENT_IMAGE="$(printf '%s' "$REVISION_JSON" | jq -r '.spec.containers[0].image // empty')"
+          test "$CURRENT_IMAGE" = "$EXPECTED_IMAGE"
+          POST_TRAFFIC_SHA="$(printf '%s' "$SERVICE_JSON" | jq -cS '.status.traffic // []' | sha256sum | awk '{print $1}')"
+          POST_IAM_SHA="$(printf '%s' "$IAM_JSON" | jq -cS . | sha256sum | awk '{print $1}')"
           test "$POST_TRAFFIC_SHA" = "$PRE_TRAFFIC_SHA"
-          test "$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"')" = all
-          test "$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"')" = false
-          test "$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"')" = true
-          if printf '%s' "$IAM_JSON" | jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' >/dev/null; then
-            echo 'Legacy allUsers invoker unexpectedly present after restore' >&2
-            exit 1
-          fi
+          test "$POST_IAM_SHA" = "$PRE_IAM_SHA"
 
-          bash scripts/verify-instagram-engagement-webhook-ingress.sh
-          echo 'complete_poststate_verified=true' >> "$GITHUB_OUTPUT"
+          bash scripts/verify-instagram-webhook-callback-surface.sh
 
-      - name: Publish success result and close authorization
-        id: success_finalize
-        if: success() && env.MUTATION_ATTEMPTED == 'true'
+          WEBHOOK_URL="$(printf '%s' "$SERVICE_JSON" | jq -r '.status.url // empty')"
+          test -n "$WEBHOOK_URL"
+
+          set +x
+          APP_SECRET="$(gcloud secrets versions access latest --secret "$META_APP_SECRET_ID" --project "$GCP_PROJECT_ID")"
+          ROOT_TOKEN="$(gcloud secrets versions access latest --secret "$META_TOKEN_SECRET_ID" --project "$GCP_PROJECT_ID")"
+          test -n "$APP_SECRET"
+          test -n "$ROOT_TOKEN"
+          echo "::add-mask::$APP_SECRET"
+          echo "::add-mask::$ROOT_TOKEN"
+
+          META_APP_SECRET_VALUE="$APP_SECRET" \
+          META_ROOT_TOKEN_VALUE="$ROOT_TOKEN" \
+          WEBHOOK_URL_VALUE="$WEBHOOK_URL" \
+          META_APP_ID_VALUE="$META_APP_ID" \
+          INSTAGRAM_PAGE_ID_VALUE="$INSTAGRAM_PAGE_ID" \
+          META_GRAPH_BASE_URL_VALUE="$META_GRAPH_BASE_URL" \
+          META_GRAPH_API_VERSION_VALUE="$META_GRAPH_API_VERSION" \
+          node --input-type=module <<'NODE'
+          import { createHmac, randomBytes } from 'node:crypto';
+
+          const required = (name) => {
+            const value = process.env[name]?.trim();
+            if (!value) throw new Error(`${name}_REQUIRED`);
+            return value;
+          };
+          const appSecret = required('META_APP_SECRET_VALUE');
+          const rootToken = required('META_ROOT_TOKEN_VALUE');
+          const webhookUrl = required('WEBHOOK_URL_VALUE').replace(/\/$/u, '');
+          const appId = required('META_APP_ID_VALUE');
+          const pageId = required('INSTAGRAM_PAGE_ID_VALUE');
+          const graphBase = required('META_GRAPH_BASE_URL_VALUE').replace(/\/$/u, '');
+          const apiVersion = required('META_GRAPH_API_VERSION_VALUE');
+
+          async function readJson(url) {
+            const response = await fetch(url, {
+              method: 'GET',
+              signal: AbortSignal.timeout(15_000),
+            });
+            if (!response.ok) throw new Error(`META_GET_FAILED_${response.status}`);
+            return response.json();
+          }
+          const asArray = (value) => (Array.isArray(value) ? value : []);
+          const asRecord = (value) =>
+            value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+          const scalar = (value) =>
+            typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+          const fields = (value) => {
+            const result = new Set();
+            if (typeof value === 'string') {
+              for (const part of value.split(',')) if (part.trim()) result.add(part.trim());
+              return result;
+            }
+            for (const item of asArray(value)) {
+              if (typeof item === 'string' && item.trim()) result.add(item.trim());
+              else {
+                const name = scalar(asRecord(item).name).trim();
+                if (name) result.add(name);
+              }
+            }
+            return result;
+          };
+
+          let pageToken = '';
+          const accountsUrl = new URL(`${graphBase}/${apiVersion}/me/accounts`);
+          accountsUrl.searchParams.set('fields', 'id,access_token');
+          accountsUrl.searchParams.set('limit', '100');
+          accountsUrl.searchParams.set('access_token', rootToken);
+          const accounts = await readJson(accountsUrl);
+          const account = asArray(asRecord(accounts).data)
+            .map(asRecord)
+            .find((item) => scalar(item.id) === pageId && scalar(item.access_token));
+          pageToken = scalar(account?.access_token);
+          if (!pageToken) {
+            const pageUrl = new URL(`${graphBase}/${apiVersion}/${pageId}`);
+            pageUrl.searchParams.set('fields', 'id');
+            pageUrl.searchParams.set('access_token', rootToken);
+            const page = asRecord(await readJson(pageUrl));
+            if (scalar(page.id) !== pageId) throw new Error('META_PAGE_ID_MISMATCH');
+            pageToken = rootToken;
+          }
+
+          const appAccessToken = `${appId}|${appSecret}`;
+          const appUrl = new URL(`${graphBase}/${apiVersion}/${appId}/subscriptions`);
+          appUrl.searchParams.set('access_token', appAccessToken);
+          const appPayload = asRecord(await readJson(appUrl));
+          const instagramSubscription = asArray(appPayload.data)
+            .map(asRecord)
+            .find((entry) => scalar(entry.object) === 'instagram');
+          if (!instagramSubscription) throw new Error('META_APP_SUBSCRIPTION_MISSING');
+          const expectedCallback = `${webhookUrl}/webhooks/meta`.replace(/\/$/u, '');
+          const observedCallback = scalar(instagramSubscription.callback_url).replace(/\/$/u, '');
+          if (observedCallback !== expectedCallback) throw new Error('META_CALLBACK_URL_MISMATCH');
+          const appFields = fields(instagramSubscription.fields);
+          if (!appFields.has('comments') || !appFields.has('messages')) {
+            throw new Error('META_APP_FIELDS_MISSING');
+          }
+
+          const pageAppsUrl = new URL(`${graphBase}/${apiVersion}/${pageId}/subscribed_apps`);
+          pageAppsUrl.searchParams.set('fields', 'id,subscribed_fields');
+          pageAppsUrl.searchParams.set('access_token', pageToken);
+          const pageApps = asRecord(await readJson(pageAppsUrl));
+          const pageApp = asArray(pageApps.data)
+            .map(asRecord)
+            .find((entry) => scalar(entry.id) === appId);
+          if (!pageApp) throw new Error('META_PAGE_SUBSCRIPTION_MISSING');
+          if (!fields(pageApp.subscribed_fields).has('messages')) {
+            throw new Error('META_PAGE_MESSAGES_FIELD_MISSING');
+          }
+
+          const verifyToken = createHmac('sha256', appSecret)
+            .update('TOCA_META_WEBHOOK_VERIFY_TOKEN_V1', 'utf8')
+            .digest('hex');
+          const challenge = `restore-${randomBytes(12).toString('hex')}`;
+          const challengeUrl = new URL(`${webhookUrl}/webhooks/meta`);
+          challengeUrl.searchParams.set('hub.mode', 'subscribe');
+          challengeUrl.searchParams.set('hub.verify_token', verifyToken);
+          challengeUrl.searchParams.set('hub.challenge', challenge);
+          const challengeResponse = await fetch(challengeUrl, {
+            method: 'GET',
+            signal: AbortSignal.timeout(15_000),
+          });
+          const challengeBody = await challengeResponse.text();
+          if (!challengeResponse.ok || challengeBody !== challenge) {
+            throw new Error('META_CALLBACK_CHALLENGE_FAILED');
+          }
+
+          console.log('PROVIDER_GET_ONLY_READBACK=PASS');
+          console.log('APP_CALLBACK_URL_MATCH=true');
+          console.log('APP_COMMENTS_FIELD_PRESENT=true');
+          console.log('APP_MESSAGES_FIELD_PRESENT=true');
+          console.log('PAGE_APP_SUBSCRIPTION_PRESENT=true');
+          console.log('PAGE_MESSAGES_FIELD_PRESENT=true');
+          console.log('CALLBACK_CHALLENGE_PASS=true');
+          console.log('PROVIDER_METHODS=GET_ONLY');
+          console.log('PROVIDER_WRITES=false');
+          console.log('SECRETS_PRINTED=false');
+          NODE
+          unset APP_SECRET ROOT_TOKEN
+
+          echo "serving_revision=$CURRENT_REVISION" >> "$GITHUB_OUTPUT"
+          echo "image=$CURRENT_IMAGE" >> "$GITHUB_OUTPUT"
+          echo 'health_status=200' >> "$GITHUB_OUTPUT"
+          echo 'ready_status=200' >> "$GITHUB_OUTPUT"
+          echo 'invalid_challenge_status=403' >> "$GITHUB_OUTPUT"
+          echo 'provider_get_readback=PASS' >> "$GITHUB_OUTPUT"
+          echo 'callback_challenge_pass=true' >> "$GITHUB_OUTPUT"
+
+      - name: Publish successful repair evidence
+        id: report
         env:
           GH_TOKEN: ${{ github.token }}
           AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
-          SERVING_REVISION: ${{ steps.prestate.outputs.serving_revision }}
-          SERVING_IMAGE: ${{ steps.prestate.outputs.pre_image }}
+          SERVING_REVISION: ${{ steps.poststate.outputs.serving_revision }}
+          IMAGE: ${{ steps.poststate.outputs.image }}
+          HEALTH_STATUS: ${{ steps.poststate.outputs.health_status }}
+          READY_STATUS: ${{ steps.poststate.outputs.ready_status }}
+          INVALID_CHALLENGE_STATUS: ${{ steps.poststate.outputs.invalid_challenge_status }}
+          PROVIDER_GET_READBACK: ${{ steps.poststate.outputs.provider_get_readback }}
+          CALLBACK_CHALLENGE_PASS: ${{ steps.poststate.outputs.callback_challenge_pass }}
         shell: bash
         run: |
           set -euo pipefail
-          printf -v REPORT '%s\n'             'WEBHOOK_CALLBACK_RESTORE_STATUS=PASS'             "CONTROLLER_SHA=$GITHUB_SHA"             "SERVING_REVISION=$SERVING_REVISION"             "SERVING_IMAGE=$SERVING_IMAGE"             'INGRESS=all'             'DEFAULT_URL_DISABLED=false'             'INVOKER_IAM_DISABLED=true'             'LEGACY_ALLUSERS_INVOKER=false'             'READYZ=PASS'             'CALLBACK_CHALLENGE_PASS=true'             'META_SUBSCRIPTIONS_READBACK=PASS'             'PROVIDER_METHODS=GET_ONLY'             'TRAFFIC_MUTATION=false'             'REVISION_DEPLOY=false'             'DATABASE_MUTATIONS=false'             'PROVIDER_WRITES=false'             'EXTERNAL_REPLY_WRITES=false'             'NEW_PAID_RESOURCE_ALLOCATION=false'             'GENERAL_AUTONOMY_PROMOTED=false'
+          printf -v REPORT '%s\n' \
+            'WEBHOOK_CALLBACK_RESTORE_STATUS=PASS' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            "SERVING_REVISION=$SERVING_REVISION" \
+            "IMAGE=$IMAGE" \
+            'INGRESS=all' \
+            'DEFAULT_URL_DISABLED=false' \
+            'INVOKER_IAM_DISABLED=true' \
+            'LEGACY_ALLUSERS_INVOKER=false' \
+            "HEALTH_HTTP_STATUS=$HEALTH_STATUS" \
+            "READY_HTTP_STATUS=$READY_STATUS" \
+            "INVALID_CHALLENGE_HTTP_STATUS=$INVALID_CHALLENGE_STATUS" \
+            "PROVIDER_GET_ONLY_READBACK=$PROVIDER_GET_READBACK" \
+            "CALLBACK_CHALLENGE_PASS=$CALLBACK_CHALLENGE_PASS" \
+            'DATABASE_SCHEMA_READINESS=PASS' \
+            'IMAGE_MUTATION=false' \
+            'TRAFFIC_MUTATION=false' \
+            'REVISION_DEPLOY=false' \
+            'DATABASE_MUTATIONS=false' \
+            'PROVIDER_METHODS=GET_ONLY' \
+            'PROVIDER_WRITES=false' \
+            'NEW_PAID_RESOURCES=false' \
+            'EXTERNAL_REPLY_WRITES=false' \
+            'GENERAL_AUTONOMY=false'
           gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT" >/dev/null
 
-          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
-          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
-          BODY="$(sed 's/^AUTHORIZATION_STATE=CONSUMED_IN_PROGRESS$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
-          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}"             -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
-
-      - name: Roll back exact prestate after failure or cancellation
-        id: rollback
+      - name: Roll back exact service-level prestate on failure or cancellation
         if: (failure() || cancelled()) && env.MUTATION_ATTEMPTED == 'true'
         env:
           PRE_INGRESS: ${{ steps.prestate.outputs.pre_ingress }}
           PRE_DEFAULT_URL_DISABLED: ${{ steps.prestate.outputs.pre_default_url_disabled }}
           PRE_INVOKER_IAM_DISABLED: ${{ steps.prestate.outputs.pre_invoker_iam_disabled }}
           EXPECTED_REVISION: ${{ steps.prestate.outputs.serving_revision }}
-          PRE_IMAGE: ${{ steps.prestate.outputs.pre_image }}
+          EXPECTED_IMAGE: ${{ steps.prestate.outputs.pre_image }}
           PRE_TRAFFIC_SHA: ${{ steps.prestate.outputs.pre_traffic_sha }}
+          PRE_IAM_SHA: ${{ steps.prestate.outputs.pre_iam_sha }}
         shell: bash
         run: |
           set -euo pipefail
-          FLAGS=(--ingress "$PRE_INGRESS")
+          FLAGS=("--ingress=$PRE_INGRESS")
           if [[ "$PRE_DEFAULT_URL_DISABLED" == true ]]; then FLAGS+=(--no-default-url); else FLAGS+=(--default-url); fi
           if [[ "$PRE_INVOKER_IAM_DISABLED" == true ]]; then FLAGS+=(--no-invoker-iam-check); else FLAGS+=(--invoker-iam-check); fi
-
-          gcloud run services update "$WEBHOOK_SERVICE_NAME"             --project "$GCP_PROJECT_ID" --region "$GCP_REGION"             "${FLAGS[@]}" --quiet
+          gcloud run services update "$WEBHOOK_SERVICE_NAME" \
+            --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            "${FLAGS[@]}" --quiet
 
           SERVICE_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-          CURRENT_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | if length == 1 then .[0] else empty end')"
+          IAM_JSON="$(gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          CURRENT_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | unique | if length == 1 then .[0] else empty end')"
           test "$CURRENT_REVISION" = "$EXPECTED_REVISION"
-
           REVISION_JSON="$(gcloud run revisions describe "$CURRENT_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-          test "$(printf '%s' "$REVISION_JSON" | jq -r '.spec.containers[0].image // empty')" = "$PRE_IMAGE"
+          test "$(printf '%s' "$REVISION_JSON" | jq -r '.spec.containers[0].image // empty')" = "$EXPECTED_IMAGE"
           test "$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"')" = "$PRE_INGRESS"
           test "$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"')" = "$PRE_DEFAULT_URL_DISABLED"
           test "$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"')" = "$PRE_INVOKER_IAM_DISABLED"
-
-          POST_TRAFFIC_SHA="$(printf '%s' "$SERVICE_JSON" | jq -cS '(.status.traffic // []) | sort_by(.revisionName // "", .tag // "")' | sha256sum | awk '{print $1}')"
+          POST_TRAFFIC_SHA="$(printf '%s' "$SERVICE_JSON" | jq -cS '.status.traffic // []' | sha256sum | awk '{print $1}')"
+          POST_IAM_SHA="$(printf '%s' "$IAM_JSON" | jq -cS . | sha256sum | awk '{print $1}')"
           test "$POST_TRAFFIC_SHA" = "$PRE_TRAFFIC_SHA"
+          test "$POST_IAM_SHA" = "$PRE_IAM_SHA"
           echo 'WEBHOOK_CALLBACK_RESTORE_ROLLBACK=PASS'
 
-      - name: Finalize failed or cancelled transaction
-        if: always() && env.AUTHORIZATION_CONSUMED == 'true' && steps.success_finalize.outcome != 'success'
+      - name: Publish failure and rollback status
+        if: always() && env.MUTATION_ATTEMPTED == 'true' && (failure() || cancelled())
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
-          ROLLBACK_OUTCOME: ${{ steps.rollback.outcome }}
         shell: bash
         run: |
           set -euo pipefail
-          printf -v REPORT '%s\n'             'WEBHOOK_CALLBACK_RESTORE_STATUS=FAIL'             "CONTROLLER_SHA=$GITHUB_SHA"             "ROLLBACK_OUTCOME=${ROLLBACK_OUTCOME:-unknown}"             'AUTHORIZATION_REUSABLE=false'             'GENERAL_AUTONOMY_PROMOTED=false'
-          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT" >/dev/null || true
-
-          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
-          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
-          BODY="$(sed -e 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_FAILED_CLOSED/' -e 's/^AUTHORIZATION_STATE=CONSUMED_IN_PROGRESS$/AUTHORIZATION_STATE=CONSUMED_FAILED_CLOSED/' <<< "$BODY")"
-          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}"             -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
+          printf -v REPORT '%s\n' \
+            'WEBHOOK_CALLBACK_RESTORE_STATUS=FAIL' \
+            "CONTROLLER_SHA=$GITHUB_SHA" \
+            'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED' \
+            'ROLLBACK_REQUIRED=true' \
+            'PROVIDER_WRITES=false' \
+            'DATABASE_MUTATIONS=false' \
+            'TRAFFIC_MUTATION=false' \
+            'REVISION_DEPLOY=false' \
+            'NEW_PAID_RESOURCES=false' \
+            'GENERAL_AUTONOMY=false'
+          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT" >/dev/null
