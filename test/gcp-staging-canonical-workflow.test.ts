@@ -95,16 +95,18 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).toContain('  schema-sync:');
     expect(workflow).toContain('if: ${{ inputs.schema_sync_only }}');
     expect(workflow).toContain('if: ${{ !inputs.schema_sync_only }}');
+    expect(workflow).toContain('require_key_value_once()');
+    expect(workflow).toContain('awk -v prefix="${key}="');
+    expect(workflow).toContain('test "$count" -eq 1');
+    expect(workflow).toContain('test "$actual" = "$expected"');
+    expect(workflow).toContain('require_key_value_once STAGING_SCHEMA_SYNC_AUTHORIZATION ACTIVE');
+    expect(workflow).toContain('require_key_value_once DATABASE_MUTATION_AUTHORIZED true');
+    expect(workflow).toContain('require_key_value_once PRODUCTION_MUTATION_AUTHORIZED false');
+    expect(workflow).toContain('require_key_value_once PROVIDER_MUTATION_AUTHORIZED false');
+    expect(workflow).toContain('require_key_value_once TRAFFIC_MUTATION_AUTHORIZED false');
+    expect(workflow).toContain('require_key_value_once CLOUD_RUN_MUTATION_AUTHORIZED false');
     expect(workflow).toContain(
-      "require_exact_line_once 'STAGING_SCHEMA_SYNC_AUTHORIZATION=ACTIVE'",
-    );
-    expect(workflow).toContain("require_exact_line_once 'DATABASE_MUTATION_AUTHORIZED=true'");
-    expect(workflow).toContain("require_exact_line_once 'PRODUCTION_MUTATION_AUTHORIZED=false'");
-    expect(workflow).toContain("require_exact_line_once 'PROVIDER_MUTATION_AUTHORIZED=false'");
-    expect(workflow).toContain("require_exact_line_once 'TRAFFIC_MUTATION_AUTHORIZED=false'");
-    expect(workflow).toContain("require_exact_line_once 'CLOUD_RUN_MUTATION_AUTHORIZED=false'");
-    expect(workflow).toContain(
-      "require_exact_line_once 'FINANCIAL_CEILING=NO_NEW_PAID_RESOURCE_ALLOCATION'",
+      'require_key_value_once FINANCIAL_CEILING NO_NEW_PAID_RESOURCE_ALLOCATION',
     );
     const schemaSyncStart = workflow.indexOf('  schema-sync:\n');
     expect(schemaSyncStart).toBeGreaterThanOrEqual(0);
