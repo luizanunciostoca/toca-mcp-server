@@ -14,9 +14,7 @@ describe('current-schema staging DR harness', () => {
     expect(workflow).toContain('authorization_issue:');
     expect(workflow).toContain("require_exact_line_once 'DR_EXECUTION_AUTHORIZATION=ACTIVE'");
     expect(workflow).toContain("require_exact_line_once 'AUTHORIZATION_STATE=ACTIVE'");
-    expect(workflow).toContain(
-      "require_exact_line_absent 'DR_EXECUTION_AUTHORIZATION=PENDING'",
-    );
+    expect(workflow).toContain("require_exact_line_absent 'DR_EXECUTION_AUTHORIZATION=PENDING'");
     expect(workflow).toContain(
       "require_exact_line_absent 'AUTHORIZATION_STATE=PENDING_HUMAN_APPROVAL'",
     );
