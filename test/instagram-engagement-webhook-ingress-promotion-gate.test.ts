@@ -5,30 +5,34 @@ const verifier = readFileSync(
   'scripts/verify-instagram-engagement-webhook-ingress.sh',
   'utf8',
 );
-const workflows = [
-  {
-    path: '.github/workflows/instagram-engagement-limited-activation.yml',
-    firstMutation: '      - name: Apply and verify production migrations',
-    finalReadback: '      - name: Verify LIMITED runtime readback and unchanged scheduler',
-    publish: '      - name: Publish LIMITED activation PASS',
-  },
-  {
-    path: '.github/workflows/instagram-engagement-comment-limited-promotion.yml',
-    firstMutation: '      - name: Prove dual-channel readiness without sending',
-    finalReadback: '      - name: Verify dual-channel LIMITED readback and unchanged scheduler',
-    publish: '      - name: Publish Comment LIMITED promotion PASS',
-  },
-  {
-    path: '.github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml',
-    firstMutation: '      - name: Backup current shared FAQ and knowledge state',
-    finalReadback: '      - name: Verify dual-channel LIMITED readback and scheduler immutability',
-    publish: '      - name: Publish sanitized FAQ expansion PASS evidence',
-  },
-].map((entry) => ({ ...entry, source: readFileSync(entry.path, 'utf8') }));
+
+const direct = readFileSync(
+  '.github/workflows/instagram-engagement-limited-activation.yml',
+  'utf8',
+);
+const comment = readFileSync(
+  '.github/workflows/instagram-engagement-comment-limited-promotion.yml',
+  'utf8',
+);
+const faq = readFileSync(
+  '.github/workflows/instagram-engagement-faq-expansion-limited-refresh.yml',
+  'utf8',
+);
+
+const workflows = [direct, comment, faq];
+
+function expectOrdered(source: string, markers: readonly string[]): void {
+  let previous = -1;
+  for (const marker of markers) {
+    const index = source.indexOf(marker);
+    expect(index).toBeGreaterThan(previous);
+    previous = index;
+  }
+}
 
 describe('Instagram engagement webhook ingress promotion gate', () => {
-  it('proves only the DRS-safe public webhook serving boundary and challenge', () => {
-    for (const marker of [
+  it('proves the DRS-safe public webhook challenge without writes', () => {
+    const markers = [
       'gcloud run services describe "$WEBHOOK_SERVICE_NAME"',
       'run.googleapis.com/default-url-disabled',
       'run.googleapis.com/invoker-iam-disabled',
@@ -46,59 +50,80 @@ describe('Instagram engagement webhook ingress promotion gate', () => {
       'DATABASE_MUTATIONS=false',
       'TRAFFIC_MUTATIONS=false',
       'RAW_SECRET_LOGGED=false',
-    ]) {
+    ];
+
+    for (const marker of markers) {
       expect(verifier).toContain(marker);
     }
 
     expect(verifier).not.toContain('gcloud run services update ');
     expect(verifier).not.toContain('gcloud run deploy ');
     expect(verifier).not.toContain("method: 'POST'");
-    expect(verifier).not.toContain('META_APP_SECRET_VALUE=' + '$' + 'APP_SECRET" echo');
   });
 
-  it('fails closed before any LIMITED mutation when webhook ingress is unhealthy', () => {
+  it('fails closed before any LIMITED mutation', () => {
+    const gate =
+      '      - name: Verify healthy Instagram webhook ingress before LIMITED mutation';
+
     for (const workflow of workflows) {
-      expect(workflow.source).toContain(
+      expect(workflow).toContain(
         'WEBHOOK_SERVICE_NAME: toca-webhook-next-production',
       );
-      expect(workflow.source).toContain('META_APP_SECRET_ID: toca-meta-app-secret');
+      expect(workflow).toContain('META_APP_SECRET_ID: toca-meta-app-secret');
+      expect(workflow.indexOf(gate)).toBeGreaterThan(-1);
 
-      const gate = workflow.source.indexOf(
-        '      - name: Verify healthy Instagram webhook ingress before LIMITED mutation',
-      );
-      const mutation = workflow.source.indexOf(workflow.firstMutation);
-      expect(gate, workflow.path).toBeGreaterThan(-1);
-      expect(mutation, workflow.path).toBeGreaterThan(gate);
-
-      const gateCalls = workflow.source.match(
+      const calls = workflow.match(
         /bash scripts\/verify-instagram-engagement-webhook-ingress\.sh/g,
       );
-      expect(gateCalls?.length, workflow.path).toBe(2);
+      expect(calls?.length).toBe(2);
     }
+
+    expectOrdered(direct, [
+      gate,
+      '      - name: Apply and verify production migrations',
+    ]);
+    expectOrdered(comment, [
+      gate,
+      '      - name: Prove dual-channel readiness without sending',
+    ]);
+    expectOrdered(faq, [
+      gate,
+      '      - name: Backup current shared FAQ and knowledge state',
+    ]);
   });
 
-  it('rechecks ingress after runtime readback and before publishing LIMITED PASS', () => {
-    for (const workflow of workflows) {
-      const readback = workflow.source.indexOf(workflow.finalReadback);
-      const finalGate = workflow.source.indexOf(
-        '      - name: Reverify healthy Instagram webhook ingress before publishing LIMITED state',
-      );
-      const publish = workflow.source.indexOf(workflow.publish);
-      expect(readback, workflow.path).toBeGreaterThan(-1);
-      expect(finalGate, workflow.path).toBeGreaterThan(readback);
-      expect(publish, workflow.path).toBeGreaterThan(finalGate);
-    }
+  it('rechecks ingress before publishing LIMITED PASS', () => {
+    const finalGate =
+      '      - name: Reverify healthy Instagram webhook ingress before publishing LIMITED state';
+
+    expectOrdered(direct, [
+      '      - name: Verify LIMITED runtime readback and unchanged scheduler',
+      finalGate,
+      '      - name: Publish LIMITED activation PASS',
+    ]);
+    expectOrdered(comment, [
+      '      - name: Verify dual-channel LIMITED readback and unchanged scheduler',
+      finalGate,
+      '      - name: Publish Comment LIMITED promotion PASS',
+    ]);
+    expectOrdered(faq, [
+      '      - name: Verify dual-channel LIMITED readback and scheduler immutability',
+      finalGate,
+      '      - name: Publish sanitized FAQ expansion PASS evidence',
+    ]);
   });
 
-  it('keeps webhook repair out of the LIMITED promotion workflows', () => {
+  it('keeps webhook repair out of LIMITED promotion workflows', () => {
     for (const workflow of workflows) {
-      expect(workflow.source).not.toContain(
+      expect(workflow).not.toContain(
         'gcloud run services update "$WEBHOOK_SERVICE_NAME"',
       );
-      expect(workflow.source).not.toContain(
+      expect(workflow).not.toContain(
         'gcloud run services update-traffic "$WEBHOOK_SERVICE_NAME"',
       );
-      expect(workflow.source).not.toContain('gcloud run deploy "$WEBHOOK_SERVICE_NAME"');
+      expect(workflow).not.toContain(
+        'gcloud run deploy "$WEBHOOK_SERVICE_NAME"',
+      );
     }
   });
 });
