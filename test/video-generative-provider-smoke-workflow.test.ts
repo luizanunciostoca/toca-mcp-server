@@ -98,16 +98,16 @@ describe('video generative provider smoke', () => {
     expect(smokeWorkflow).toContain('AUTHORIZATION_STATE=CONSUMED_EXECUTION_STARTED');
     expect(smokeWorkflow).toContain('VIDEO_GENERATIVE_SMOKE=CONSUMED');
     expect(smokeWorkflow).toContain('-f state=closed');
-    expect(smokeWorkflow).toContain("jq -e '.state == \"closed\"'");
+    expect(smokeWorkflow).toContain('jq -e \'.state == "closed"\'');
   });
 
   it('pins the production proof target, cost-shaping request and cleanup boundary', () => {
-    expect(smokeWorkflow).toContain("test \"$GCP_PROJECT_ID\" = 'toca-mcp-production'");
-    expect(smokeWorkflow).toContain("test \"$GCP_REGION\" = 'southamerica-east1'");
+    expect(smokeWorkflow).toContain('test "$GCP_PROJECT_ID" = \'toca-mcp-production\'');
+    expect(smokeWorkflow).toContain('test "$GCP_REGION" = \'southamerica-east1\'');
     expect(smokeWorkflow).toContain(
-      "test \"$GCP_RUNTIME_SERVICE_ACCOUNT\" = 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com'",
+      'test "$GCP_RUNTIME_SERVICE_ACCOUNT" = \'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com\'',
     );
-    expect(smokeWorkflow).toContain("test \"$BUCKET\" = 'toca-mcp-publication-assets'");
+    expect(smokeWorkflow).toContain('test "$BUCKET" = \'toca-mcp-publication-assets\'');
     expect(smokeWorkflow).toContain('financialCeiling:$financialCeiling');
     expect(smokeWorkflow).toContain('outputSeconds:8');
     expect(smokeWorkflow).toContain('sampleCount:1');

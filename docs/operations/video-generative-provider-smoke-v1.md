@@ -94,7 +94,6 @@ The Veo request is cost-shaped and proof-shaped to exactly one 8-second, 9:16, 7
 
 The production target is pinned to the canonical project, runtime/deployer identities and publication-asset bucket. Authorized persistent side effects are limited to the immutable Artifact Registry image, the GCS review candidate/artifact lineage, and the exact `CONTENT_ITEMS` candidate writeback required to mark `GENERATED_REVIEW_REQUIRED`. Drive/Sheets reads and IAM Credentials signing are explicitly authorized support operations. Production services, traffic and databases are not mutated. The ephemeral Cloud Run Job is deleted after execution and an independent absence check must pass. The generated MP4 remains a review candidate only.
 
-
 If service-account signing, Workspace sharing, Vertex authorization, model availability, quota or GCS access is not actually present, execution fails closed and the blocker is reported rather than bypassed.
 
 ## Output
