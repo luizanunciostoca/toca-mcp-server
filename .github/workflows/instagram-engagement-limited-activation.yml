@@ -23,6 +23,8 @@ env:
   CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
   DATABASE_SECRET_ID: toca-database-url
   TOKEN_SECRET_ID: toca-meta-oauth-token
+  WEBHOOK_SERVICE_NAME: toca-webhook-next-production
+  META_APP_SECRET_ID: toca-meta-app-secret
   DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
   SCHEDULER_JOB_NAME: toca-managed-instagram-tick
   INSTAGRAM_ACCOUNT_ID: '17841402033495654'
@@ -120,6 +122,12 @@ jobs:
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify healthy Instagram webhook ingress before LIMITED mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/verify-instagram-engagement-webhook-ingress.sh
 
       - name: Verify immutable image and capture fail-closed prestate
         id: prestate
@@ -339,6 +347,12 @@ jobs:
               .httpTarget.oidcToken.audience == $audience
             ' >/dev/null
           echo 'INSTAGRAM_ENGAGEMENT_LIMITED_RUNTIME_READBACK=PASS'
+
+      - name: Reverify healthy Instagram webhook ingress before publishing LIMITED state
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/verify-instagram-engagement-webhook-ingress.sh
 
       - name: Publish LIMITED activation PASS
         env:
