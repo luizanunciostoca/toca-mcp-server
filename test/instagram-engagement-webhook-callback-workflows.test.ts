@@ -170,7 +170,10 @@ describe('Instagram webhook callback governance', () => {
     );
     expect(restoreWorkflow).toContain('AUTHORIZATION_STATE=CONSUMED_AND_CLOSED');
     expect(restoreWorkflow).toContain(
-      "if: always() && env.MUTATION_ATTEMPTED == 'true' && (failure() || cancelled())",
+      "if: always() && env.AUTHORIZATION_CONSUMED == 'true' && (failure() || cancelled())",
+    );
+    expect(restoreWorkflow).toContain(
+      "echo 'AUTHORIZATION_CONSUMED=true' >> \"$GITHUB_ENV\"",
     );
     expect(restoreWorkflow).toContain('WEBHOOK_CALLBACK_RESTORE_ROLLBACK=PASS');
   });
