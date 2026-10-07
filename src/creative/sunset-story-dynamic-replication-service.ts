@@ -4,6 +4,10 @@ import {
   type SunsetStoryRenderPlan,
   validateSunsetStoryAiRenderPlan,
 } from './sunset-story-render-plan.js';
+import {
+  type SunsetStoryProductionContext,
+  validateSunsetStoryProductionContext,
+} from './sunset-story-production-gate.js';
 import type { SunsetStorySelectionHistoryItem } from './sunset-story-template-selector.js';
 import type {
   SunsetStoryTemplateSelectionService,
@@ -53,6 +57,7 @@ export interface SunsetStoryDynamicReplicationRequest {
   readonly imageBytes: Uint8Array;
   readonly imageMimeType: 'image/jpeg' | 'image/png';
   readonly intent: SunsetStoryIntent;
+  readonly productionContext: SunsetStoryProductionContext;
   readonly history?: readonly SunsetStorySelectionHistoryItem[];
   readonly referenceImageBytes?: Uint8Array;
 }
@@ -100,6 +105,8 @@ export class SunsetStoryDynamicReplicationService {
   async replicate(
     request: SunsetStoryDynamicReplicationRequest,
   ): Promise<SunsetStoryDynamicReplicationResult> {
+    validateSunsetStoryProductionContext(request.productionContext);
+
     const selection = await this.selector.select({
       assetId: request.assetId,
       imageBytes: request.imageBytes,

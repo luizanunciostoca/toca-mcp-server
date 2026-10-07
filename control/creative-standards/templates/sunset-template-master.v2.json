@@ -1,7 +1,7 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "templateId": "SUNSET_TEMPLATE_MASTER_V2",
-  "templateVersion": "1.0",
+  "templateVersion": "1.1",
   "status": "APPROVED_VISUAL_CONTRACT",
   "runtimeIntegrationStatus": "PENDING_TEMPLATE_LIBRARY_INTEGRATION",
   "runtimeEligible": false,
@@ -50,7 +50,7 @@
   "protectedLayoutRegions": [
     { "id": "TIME", "x": 489, "y": 240, "width": 523, "height": 96 },
     { "id": "DISPLAY_LINE_1", "x": 76, "y": 388, "width": 953, "height": 178 },
-    { "id": "DISPLAY_LINE_2", "x": 62, "y": 598, "width": 982, "height": 425 },
+    { "id": "DISPLAY_LINE_2", "x": 64, "y": 598, "width": 978, "height": 425 },
     { "id": "EMBEDDED_TOCA_SYMBOL", "x": 523, "y": 752, "width": 155, "height": 152 },
     { "id": "BRAND_FOOTER", "x": 180, "y": 1660, "width": 670, "height": 150 }
   ],
@@ -82,7 +82,7 @@
     "displayLine2": {
       "kind": "DISPLAY_HEADLINE_MONUMENTAL",
       "text": "SOL",
-      "region": { "x": 62, "y": 598, "width": 982, "height": 425 },
+      "region": { "x": 64, "y": 598, "width": 978, "height": 425 },
       "textColor": "#FFFFFF",
       "alignment": "CENTER",
       "lineCount": 1,
@@ -156,7 +156,8 @@
     "THREE_LOGO_FOOTER_ONLY",
     "FOOTER_ORDER_FIXED",
     "WHITE_GRAPHIC_ELEMENTS",
-    "BACKGROUND_FULL_BLEED"
+    "BACKGROUND_FULL_BLEED",
+    "SAFE_AREA_HARD_GATE"
   ],
   "photoAdaptation": {
     "strategy": "ADAPT_PHOTO_TO_TEMPLATE",
@@ -196,7 +197,9 @@
       "NO_EDITOR_PLACEHOLDER",
       "NO_TECHNICAL_TEXT_IN_FINAL",
       "ESSENTIAL_SUBJECT_RECOGNIZABLE",
-      "ASSET_LINEAGE_COMPLETE"
+      "ASSET_LINEAGE_COMPLETE",
+      "SAFE_AREA_PASS",
+      "PROTECTED_FEATURE_AUDIT_PASS"
     ]
   },
   "productionMethod": {
