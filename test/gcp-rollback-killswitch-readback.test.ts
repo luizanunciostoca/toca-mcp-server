@@ -68,11 +68,15 @@ describe('GCP rollback and mutation kill-switch readback', () => {
       expect(block).toContain(verification);
       expect(block).toContain(marker);
 
-      const mutationIndex = block.indexOf('--update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected"');
+      const mutationIndex = block.indexOf(
+        '--update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected"',
+      );
       const revisionVerifyIndex = block.indexOf(
         'verify_revision_kill_switch_value "$service" "$revision" "$expected"',
       );
-      const trafficIndex = block.indexOf('gcloud run services update-traffic "$service"');
+      const trafficIndex = block.indexOf(
+        'gcloud run services update-traffic "$service"',
+      );
       const servingReadbackIndex = block.lastIndexOf(
         'verify_kill_switch_value "$service" "$expected"',
       );
