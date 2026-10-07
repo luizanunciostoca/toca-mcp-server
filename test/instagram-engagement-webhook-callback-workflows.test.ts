@@ -78,8 +78,9 @@ describe('Instagram webhook callback governance', () => {
   it('shares the callback mutex only for matching issue-triggered controllers', () => {
     for (const [path, titlePrefix, fallback] of issueScoped) {
       const workflow = read(path);
-      expect(workflow).toContain(`startsWith(github.event.issue.title, '${titlePrefix}')`);
-      expect(workflow).toContain("'instagram-engagement-webhook-callback-control'");
+      expect(workflow).toContain(
+        `github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, '${titlePrefix}') && 'instagram-engagement-webhook-callback-control'`,
+      );
       expect(workflow).toContain(`format('${fallback}-{0}', github.run_id)`);
       expect(workflow).toContain('cancel-in-progress: false');
       expect(workflow).not.toContain('group: instagram-engagement-webhook-callback-control\n');
