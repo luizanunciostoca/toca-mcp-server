@@ -16,7 +16,7 @@ describe('staging runtime exercise controller', () => {
     expect(section).toContain("github.actor == 'luizanunciostoca'");
     expect(section).toContain('github.event.issue.number == 151');
     expect(section).toContain("startsWith(github.event.comment.body, '/toca-staging-recovery ')");
-    expect(section).toContain("test \"$GITHUB_ACTOR\" = \"$ALLOWED_ACTOR\"");
+    expect(section).toContain('test "$GITHUB_ACTOR" = "$ALLOWED_ACTOR"');
     expect(section).toContain('test "$CONTROLLER_SHA" = "$MAIN_SHA"');
   });
 
