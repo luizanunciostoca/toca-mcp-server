@@ -601,11 +601,17 @@ jobs:
           test "$(jq -r '.pull_request // empty' <<<"$ISSUE_JSON")" = ""
           test "$(jq -r '.user.login' <<<"$ISSUE_JSON")" = "$GITHUB_REPOSITORY_OWNER"
           BODY="$(jq -r '.body // ""' <<<"$ISSUE_JSON")"
-          require_key_value_once() {
-            local key="$1" expected="$2" count actual
+          read_key_once() {
+            local key="$1" count actual
             count="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {count++} END {print count+0}' <<<"$BODY")"
             test "$count" -eq 1
             actual="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {print substr($0,length(prefix)+1)}' <<<"$BODY")"
+            test -n "$actual"
+            printf '%s' "$actual"
+          }
+          require_key_value_once() {
+            local key="$1" expected="$2" actual
+            actual="$(read_key_once "$key")"
             test "$actual" = "$expected"
           }
           require_key_value_once STAGING_SCHEMA_SYNC_AUTHORIZATION ACTIVE
@@ -620,7 +626,12 @@ jobs:
           require_key_value_once DATABASE_SECRET_READ_AUTHORIZED true
           require_key_value_once SECRETS_DISCLOSURE_AUTHORIZED false
           require_key_value_once FINANCIAL_CEILING NO_NEW_PAID_RESOURCE_ALLOCATION
+          EXPECTED_BEFORE_MAX_MIGRATION="$(read_key_once EXPECTED_BEFORE_MAX_MIGRATION)"
+          [[ "$EXPECTED_BEFORE_MAX_MIGRATION" =~ ^[0-9]{3}_[a-z0-9_]+\.sql$ ]]
+          grep -Fxq "$EXPECTED_BEFORE_MAX_MIGRATION" /tmp/repo-migrations.txt
+          test "$EXPECTED_BEFORE_MAX_MIGRATION" != "$EXPECTED_MAX_MIGRATION"
           echo "EXPECTED_MAX_MIGRATION=$EXPECTED_MAX_MIGRATION" >> "$GITHUB_ENV"
+          echo "EXPECTED_BEFORE_MAX_MIGRATION=$EXPECTED_BEFORE_MAX_MIGRATION" >> "$GITHUB_ENV"
           echo 'STAGING_SCHEMA_SYNC_AUTHORIZATION=VERIFIED'
 
       - name: Setup pnpm
@@ -739,13 +750,21 @@ jobs:
 
           capture_migrations staging-schema-sync-evidence/before-migrations.txt
           BEFORE_MAX="$(tail -n1 staging-schema-sync-evidence/before-migrations.txt)"
+          test "$BEFORE_MAX" = "$EXPECTED_BEFORE_MAX_MIGRATION"
+          awk -v max="$EXPECTED_BEFORE_MAX_MIGRATION" '
+            { print }
+            $0 == max { found=1; exit }
+            END { if (!found) exit 1 }
+          ' staging-schema-sync-evidence/repository-migrations.txt > staging-schema-sync-evidence/expected-before-prefix.txt
+          diff -u staging-schema-sync-evidence/expected-before-prefix.txt staging-schema-sync-evidence/before-migrations.txt
+          echo 'STAGING_SCHEMA_SYNC_BEFORE_STATE=PASS'
           pnpm migrate
           capture_migrations staging-schema-sync-evidence/after-migrations.txt
           diff -u staging-schema-sync-evidence/repository-migrations.txt staging-schema-sync-evidence/after-migrations.txt
           AFTER_MAX="$(tail -n1 staging-schema-sync-evidence/after-migrations.txt)"
           test "$AFTER_MAX" = "$EXPECTED_MAX_MIGRATION"
           ADDED_COUNT="$(comm -13 staging-schema-sync-evidence/before-migrations.txt staging-schema-sync-evidence/after-migrations.txt | wc -l | tr -d ' ')"
-          jq -n --arg candidate "$GITHUB_SHA" --arg beforeMax "$BEFORE_MAX" --arg afterMax "$AFTER_MAX" --arg expectedMax "$EXPECTED_MAX_MIGRATION" --argjson addedCount "$ADDED_COUNT" '{schemaVersion:"toca.staging.schema-sync.evidence.v1",candidateSha:$candidate,beforeMaxMigration:$beforeMax,afterMaxMigration:$afterMax,expectedMaxMigration:$expectedMax,addedMigrationCount:$addedCount,databaseMutation:true,productionMutation:false,providerMutation:false,trafficMutation:false,cloudRunMutation:false,databaseSecretRead:true,secretPayloadDisclosed:false,result:"PASS"}' > staging-schema-sync-evidence/manifest.json
+          jq -n --arg candidate "$GITHUB_SHA" --arg beforeMax "$BEFORE_MAX" --arg expectedBeforeMax "$EXPECTED_BEFORE_MAX_MIGRATION" --arg afterMax "$AFTER_MAX" --arg expectedMax "$EXPECTED_MAX_MIGRATION" --argjson addedCount "$ADDED_COUNT" '{schemaVersion:"toca.staging.schema-sync.evidence.v1",candidateSha:$candidate,beforeMaxMigration:$beforeMax,expectedBeforeMaxMigration:$expectedBeforeMax,afterMaxMigration:$afterMax,expectedMaxMigration:$expectedMax,addedMigrationCount:$addedCount,beforeStateExactPrefix:true,databaseMutation:true,productionMutation:false,providerMutation:false,trafficMutation:false,cloudRunMutation:false,databaseSecretRead:true,secretPayloadDisclosed:false,result:"PASS"}' > staging-schema-sync-evidence/manifest.json
           sha256sum staging-schema-sync-evidence/* > staging-schema-sync-evidence/SHA256SUMS
           unset DATABASE_URL DATABASE_SSL
           echo "STAGING_SCHEMA_SYNC=PASS before_max=$BEFORE_MAX after_max=$AFTER_MAX added=$ADDED_COUNT"
