@@ -1,0 +1,163 @@
+name: Instagram Engagement Webhook Callback Readonly
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: instagram-engagement-webhook-callback-readonly
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WEBHOOK_SERVICE_NAME: toca-webhook-next-production
+
+jobs:
+  readback:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram webhook callback READONLY AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact readback controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate exact owner read-only authorization
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          printf '%s' "$ISSUE_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title | startswith("PRODUCTION AUTHORIZATION — Instagram webhook callback READONLY AUTO"))
+          ' >/dev/null
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+          required=(
+            "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+            'AUTHORIZATION_STATE=ACTIVE'
+            'INSTAGRAM_ENGAGEMENT_WEBHOOK_CALLBACK_READONLY=AUTHORIZED'
+            'READ_ONLY=true'
+            'SERVICE_MUTATIONS_AUTHORIZED=false'
+            'DATABASE_MUTATIONS_AUTHORIZED=false'
+            'PROVIDER_CALLS_AUTHORIZED=false'
+            'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+          )
+          for marker in "${required[@]}"; do grep -Fxq "$marker" <<< "$BODY"; done
+          CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
+          grep -Fxq 'MAIN_STABILITY=PASS' <<< "$CONTROL_BODY"
+          grep -Fxq "EVALUATED_MAIN_SHA=$GITHUB_SHA" <<< "$CONTROL_BODY"
+          grep -Fxq 'MERGE_RESERVATION=NONE' <<< "$CONTROL_BODY"
+          echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate diagnostic identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DIAGNOSTIC_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read authoritative webhook callback posture
+        id: readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          IAM_JSON="$(gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          SERVING_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | if length == 1 then .[0] else empty end')"
+          test -n "$SERVING_REVISION"
+          REVISION_JSON="$(gcloud run revisions describe "$SERVING_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+
+          DEFAULT_URL_DISABLED="$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"')"
+          INVOKER_IAM_DISABLED="$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"')"
+          STATUS_URL_PRESENT="$(printf '%s' "$SERVICE_JSON" | jq -r 'if ((.status.url // "") | length) > 0 then "true" else "false" end')"
+          LEGACY_ALLUSERS_INVOKER=false
+          if printf '%s' "$IAM_JSON" | jq -e '.bindings[]? | select(.role == "roles/run.invoker") | (.members // [])[]? | select(. == "allUsers")' >/dev/null; then
+            LEGACY_ALLUSERS_INVOKER=true
+          fi
+          REVISION_READY="$(printf '%s' "$REVISION_JSON" | jq -r '[.status.conditions[]? | select(.type == "Ready") | .status] | last // "False"')"
+          META_WEBHOOK_ENABLED="$(printf '%s' "$REVISION_JSON" | jq -r '[.spec.containers[0].env[]? | select(.name == "META_WEBHOOK_ENABLED") | .value] | last // "false"')"
+          META_WEBHOOK_PERSISTENCE_ENABLED="$(printf '%s' "$REVISION_JSON" | jq -r '[.spec.containers[0].env[]? | select(.name == "META_WEBHOOK_PERSISTENCE_ENABLED") | .value] | last // "false"')"
+          SERVICE_ROLE="$(printf '%s' "$REVISION_JSON" | jq -r '[.spec.containers[0].env[]? | select(.name == "TOCA_SERVICE_ROLE") | .value] | last // ""')"
+
+          CLASSIFICATION=PUBLIC_CALLBACK_READY
+          if [[ "$REVISION_READY" != True ]]; then
+            CLASSIFICATION=BLOCKED_SERVING_REVISION_NOT_READY
+          elif [[ "$SERVICE_ROLE" != webhook ]]; then
+            CLASSIFICATION=BLOCKED_WRONG_SERVICE_ROLE
+          elif [[ "$META_WEBHOOK_ENABLED" != true ]]; then
+            CLASSIFICATION=BLOCKED_META_WEBHOOK_DISABLED
+          elif [[ "$META_WEBHOOK_PERSISTENCE_ENABLED" != true ]]; then
+            CLASSIFICATION=BLOCKED_META_WEBHOOK_PERSISTENCE_DISABLED
+          elif [[ "$DEFAULT_URL_DISABLED" == true ]]; then
+            CLASSIFICATION=BLOCKED_DEFAULT_URL_DISABLED
+          elif [[ "$INVOKER_IAM_DISABLED" != true ]]; then
+            CLASSIFICATION=BLOCKED_INVOKER_IAM_CHECK_ENABLED
+          elif [[ "$LEGACY_ALLUSERS_INVOKER" == true ]]; then
+            CLASSIFICATION=BLOCKED_LEGACY_ALLUSERS_INVOKER
+          elif [[ "$STATUS_URL_PRESENT" != true ]]; then
+            CLASSIFICATION=BLOCKED_STATUS_URL_MISSING
+          fi
+
+          {
+            echo "classification=$CLASSIFICATION"
+            echo "serving_revision=$SERVING_REVISION"
+            echo "revision_ready=$REVISION_READY"
+            echo "default_url_disabled=$DEFAULT_URL_DISABLED"
+            echo "invoker_iam_disabled=$INVOKER_IAM_DISABLED"
+            echo "legacy_allusers_invoker=$LEGACY_ALLUSERS_INVOKER"
+            echo "status_url_present=$STATUS_URL_PRESENT"
+            echo "meta_webhook_enabled=$META_WEBHOOK_ENABLED"
+            echo "meta_webhook_persistence_enabled=$META_WEBHOOK_PERSISTENCE_ENABLED"
+            echo "service_role=$SERVICE_ROLE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish sanitized callback readback and consume authorization
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+          CLASSIFICATION: ${{ steps.readback.outputs.classification }}
+          SERVING_REVISION: ${{ steps.readback.outputs.serving_revision }}
+          REVISION_READY: ${{ steps.readback.outputs.revision_ready }}
+          DEFAULT_URL_DISABLED: ${{ steps.readback.outputs.default_url_disabled }}
+          INVOKER_IAM_DISABLED: ${{ steps.readback.outputs.invoker_iam_disabled }}
+          LEGACY_ALLUSERS_INVOKER: ${{ steps.readback.outputs.legacy_allusers_invoker }}
+          STATUS_URL_PRESENT: ${{ steps.readback.outputs.status_url_present }}
+          META_WEBHOOK_ENABLED: ${{ steps.readback.outputs.meta_webhook_enabled }}
+          META_WEBHOOK_PERSISTENCE_ENABLED: ${{ steps.readback.outputs.meta_webhook_persistence_enabled }}
+          SERVICE_ROLE: ${{ steps.readback.outputs.service_role }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${AUTHORIZATION_ISSUE:-}"
+          printf -v REPORT '%s\n'             'WEBHOOK_CALLBACK_READONLY_STATUS=PASS'             "CONTROLLER_SHA=$GITHUB_SHA"             "CALLBACK_CLASSIFICATION=${CLASSIFICATION:-READBACK_FAILED}"             "SERVING_REVISION=${SERVING_REVISION:-UNKNOWN}"             "REVISION_READY=${REVISION_READY:-UNKNOWN}"             "DEFAULT_URL_DISABLED=${DEFAULT_URL_DISABLED:-UNKNOWN}"             "INVOKER_IAM_DISABLED=${INVOKER_IAM_DISABLED:-UNKNOWN}"             "LEGACY_ALLUSERS_INVOKER=${LEGACY_ALLUSERS_INVOKER:-UNKNOWN}"             "STATUS_URL_PRESENT=${STATUS_URL_PRESENT:-UNKNOWN}"             "META_WEBHOOK_ENABLED=${META_WEBHOOK_ENABLED:-UNKNOWN}"             "META_WEBHOOK_PERSISTENCE_ENABLED=${META_WEBHOOK_PERSISTENCE_ENABLED:-UNKNOWN}"             "SERVICE_ROLE=${SERVICE_ROLE:-UNKNOWN}"             'READ_ONLY=true'             'SERVICE_MUTATIONS=false'             'DATABASE_MUTATIONS=false'             'PROVIDER_CALLS=false'             'EXTERNAL_REPLY_WRITES=false'
+          gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT" >/dev/null
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
