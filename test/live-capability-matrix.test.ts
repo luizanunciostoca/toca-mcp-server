@@ -56,6 +56,39 @@ describe('TOCA-MAX live capability matrix projection', () => {
     }
   });
 
+  it('opens the final provider phase explicitly without manufacturing provider proof', () => {
+    const closed = buildLiveCapabilityMatrix(CAPABILITY_CATALOG, {
+      exactHeadSha: SHA,
+      now: NOW,
+    });
+    const opened = buildLiveCapabilityMatrix(CAPABILITY_CATALOG, {
+      exactHeadSha: SHA,
+      now: NOW,
+      finalProviderPhaseOpen: true,
+    });
+
+    expect(closed.final_provider_phase_open).toBe(false);
+    expect(opened.final_provider_phase_open).toBe(true);
+
+    for (const prefix of ['google_business.', 'google_ads.', 'whatsapp.', 'email.']) {
+      const closedRecords = closed.records.filter((record) =>
+        record.capability_id.startsWith(prefix),
+      );
+      const openedRecords = opened.records.filter((record) =>
+        record.capability_id.startsWith(prefix),
+      );
+      expect(closedRecords.length, prefix).toBeGreaterThan(0);
+      expect(openedRecords).toHaveLength(closedRecords.length);
+      expect(closedRecords.every((record) => record.deferred_final_provider_phase)).toBe(true);
+      expect(openedRecords.every((record) => !record.deferred_final_provider_phase)).toBe(true);
+      expect(openedRecords.every((record) => record.closure_state !== 'DEFERRED')).toBe(true);
+      expect(
+        openedRecords.some((record) => record.closure_state === 'PRODUCTION_VERIFIED'),
+        prefix,
+      ).toBe(false);
+    }
+  });
+
   it('does not trust a source PRODUCTION_VALIDATED label without active proof', () => {
     const definition = requireBaseDefinition();
     const productionDefinition = {
