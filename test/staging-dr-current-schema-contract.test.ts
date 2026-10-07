@@ -28,9 +28,7 @@ describe('current-schema staging DR harness', () => {
       "require_exact_line_absent 'FINANCIAL_CEILING=PENDING_OWNER_APPROVAL'",
     );
     expect(workflow).toContain("grep -c '^FINANCIAL_CEILING='");
-    expect(workflow).toContain(
-      '^(USD|BRL):([0-9]+([.][0-9]{1,2})?)',
-    );
+    expect(workflow).toContain('^(USD|BRL):([0-9]+([.][0-9]{1,2})?)');
     expect(workflow).not.toContain(
       "grep -Fxq 'DR_EXECUTION_AUTHORIZATION=ACTIVE'",
     );
