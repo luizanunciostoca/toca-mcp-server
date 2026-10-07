@@ -1430,15 +1430,25 @@ jobs:
 
           stage_candidate() {
             local service="$1" role="$2" expected="$3" previous="$4" output_var="$5"
-            local suffix candidate
+            local suffix candidate previous_json previous_image previous_release_sha_count previous_release_sha
+            previous_json="$(gcloud run revisions describe "$previous" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            previous_image="$(printf '%s' "$previous_json" | jq -r '.spec.containers[0].image // empty')"
+            previous_release_sha_count="$(printf '%s' "$previous_json" | jq '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA")] | length')"
+            previous_release_sha="$(printf '%s' "$previous_json" | jq -r '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value] | last // empty')"
+            test -n "$previous_image"
+            [[ "$previous_image" =~ @sha256:[0-9a-f]{64}$ ]]
+            test "$previous_release_sha_count" = 1
+            [[ "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]
+
             suffix="ks-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${role}"
             candidate="${service}-${suffix}"
             gcloud run services update "$service" \
               --project "$GCP_PROJECT_ID" \
               --region "$GCP_REGION" \
+              --image "$previous_image" \
               --revision-suffix "$suffix" \
               --no-traffic \
-              --update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected" \
+              --update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected,TOCA_RELEASE_SHA=$previous_release_sha" \
               --quiet
             verify_candidate "$service" "$candidate" "$previous" "$expected"
             printf -v "$output_var" '%s' "$candidate"
@@ -1563,15 +1573,25 @@ jobs:
 
           stage_candidate() {
             local service="$1" role="$2" expected="$3" previous="$4" output_var="$5"
-            local suffix candidate
+            local suffix candidate previous_json previous_image previous_release_sha_count previous_release_sha
+            previous_json="$(gcloud run revisions describe "$previous" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            previous_image="$(printf '%s' "$previous_json" | jq -r '.spec.containers[0].image // empty')"
+            previous_release_sha_count="$(printf '%s' "$previous_json" | jq '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA")] | length')"
+            previous_release_sha="$(printf '%s' "$previous_json" | jq -r '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value] | last // empty')"
+            test -n "$previous_image"
+            [[ "$previous_image" =~ @sha256:[0-9a-f]{64}$ ]]
+            test "$previous_release_sha_count" = 1
+            [[ "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]
+
             suffix="ks-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${role}"
             candidate="${service}-${suffix}"
             gcloud run services update "$service" \
               --project "$GCP_PROJECT_ID" \
               --region "$GCP_REGION" \
+              --image "$previous_image" \
               --revision-suffix "$suffix" \
               --no-traffic \
-              --update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected" \
+              --update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected,TOCA_RELEASE_SHA=$previous_release_sha" \
               --quiet
             verify_candidate "$service" "$candidate" "$previous" "$expected"
             printf -v "$output_var" '%s' "$candidate"
