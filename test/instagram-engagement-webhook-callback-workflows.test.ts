@@ -154,7 +154,7 @@ describe('Instagram webhook callback governance', () => {
   it('treats already-ready callback posture as a verified zero-mutation success path', () => {
     expect(restoreWorkflow).toContain('MUTATION_REQUIRED=false');
     expect(restoreWorkflow).toContain('if [[ "$MUTATION_REQUIRED" == false ]]');
-    expect(restoreWorkflow).toContain("echo 'mutation_completed=false' >> \"$GITHUB_OUTPUT\"");
+    expect(restoreWorkflow).toContain('echo \'mutation_completed=false\' >> "$GITHUB_OUTPUT"');
     expectOrdered(restoreWorkflow, [
       '      - name: Capture exact service-level prestate',
       '      - name: Consume single-use authorization before mutation',
