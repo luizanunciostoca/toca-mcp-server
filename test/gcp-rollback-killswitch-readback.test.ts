@@ -53,13 +53,33 @@ describe('GCP rollback and mutation kill-switch readback', () => {
       const block = section(startMarker, endMarker);
 
       expect(block).toContain(mutation);
+      expect(block).toContain('apply_kill_switch_value');
+      expect(block).toContain('verify_revision_kill_switch_value');
       expect(block).toContain('verify_kill_switch_value');
       expect(block).toContain('.status.traffic');
       expect(block).toContain('.status.latestReadyRevisionName');
+      expect(block).toContain('before_latest');
+      expect(block).toContain('test "$revision" != "$before_latest"');
       expect(block).toContain('gcloud run revisions describe "$revision"');
       expect(block).toContain('.name == "TOCA_PLATFORM_KILL_SWITCH"');
+      expect(block).toContain('gcloud run services update-traffic "$service"');
+      expect(block).toContain('--to-revisions "${revision}=100"');
+      expect(block).toContain('PLATFORM_KILL_SWITCH_REVISION_PROMOTED');
       expect(block).toContain(verification);
       expect(block).toContain(marker);
+
+      const mutationIndex = block.indexOf('--update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected"');
+      const revisionVerifyIndex = block.indexOf(
+        'verify_revision_kill_switch_value "$service" "$revision" "$expected"',
+      );
+      const trafficIndex = block.indexOf('gcloud run services update-traffic "$service"');
+      const servingReadbackIndex = block.lastIndexOf(
+        'verify_kill_switch_value "$service" "$expected"',
+      );
+      expect(mutationIndex).toBeGreaterThan(-1);
+      expect(revisionVerifyIndex).toBeGreaterThan(mutationIndex);
+      expect(trafficIndex).toBeGreaterThan(revisionVerifyIndex);
+      expect(servingReadbackIndex).toBeGreaterThan(trafficIndex);
     },
   );
 
