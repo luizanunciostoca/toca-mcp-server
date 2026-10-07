@@ -95,7 +95,9 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).toContain('  schema-sync:');
     expect(workflow).toContain('if: ${{ inputs.schema_sync_only }}');
     expect(workflow).toContain('if: ${{ !inputs.schema_sync_only }}');
-    expect(workflow).toContain("require_exact_line_once 'STAGING_SCHEMA_SYNC_AUTHORIZATION=ACTIVE'");
+    expect(workflow).toContain(
+      "require_exact_line_once 'STAGING_SCHEMA_SYNC_AUTHORIZATION=ACTIVE'",
+    );
     expect(workflow).toContain("require_exact_line_once 'DATABASE_MUTATION_AUTHORIZED=true'");
     expect(workflow).toContain("require_exact_line_once 'PRODUCTION_MUTATION_AUTHORIZED=false'");
     expect(workflow).toContain("require_exact_line_once 'PROVIDER_MUTATION_AUTHORIZED=false'");
