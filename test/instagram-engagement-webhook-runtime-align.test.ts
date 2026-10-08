@@ -42,9 +42,7 @@ describe('Instagram webhook runtime alignment', () => {
     }
 
     expect(workflow).not.toContain('gcloud run deploy "$DAEMON_SERVICE_NAME"');
-    expect(workflow).not.toContain(
-      'gcloud run services update-traffic "$DAEMON_SERVICE_NAME"',
-    );
+    expect(workflow).not.toContain('gcloud run services update-traffic "$DAEMON_SERVICE_NAME"');
     expect(workflow).not.toContain('gcloud run jobs deploy');
     expect(workflow).not.toContain('gcloud run jobs execute');
   });
