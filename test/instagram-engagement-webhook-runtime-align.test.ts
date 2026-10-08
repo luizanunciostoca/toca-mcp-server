@@ -77,12 +77,10 @@ describe('Instagram webhook runtime alignment', () => {
       "if: (failure() || cancelled()) && env.MUTATION_ATTEMPTED == 'true'",
     );
     expect(workflow).toContain('--to-revisions="$OLD_REVISION=100"');
-    expect(workflow).not.toContain(
-      'if [[ "${TRAFFIC_CHANGED:-false}" == true ]]',
-    );
+    expect(workflow).not.toContain('if [[ "${TRAFFIC_CHANGED:-false}" == true ]]');
     expect(workflow).toContain('INSTAGRAM_WEBHOOK_RUNTIME_ALIGNMENT_ROLLBACK=PASS');
     expect(workflow).toContain('ROLLBACK_REQUIRED=true');
-    expect(workflow).toContain("AUTH_STATE_LINE=");
+    expect(workflow).toContain('AUTH_STATE_LINE=');
     expect(workflow).toContain('"$AUTH_STATE_LINE"');
   });
 });
