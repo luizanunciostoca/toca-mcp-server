@@ -1,0 +1,33 @@
+name: P0.9 Dispatch Exact-Head Staging
+
+on:
+  push:
+    branches:
+      - ops/p0-9-dispatch-staging-20260828
+    paths:
+      - '.github/workflows/p0-9-dispatch-staging.yml'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch canonical staging deploy for exact candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/${REPO}/actions/workflows/deploy-gcp-staging-canonical.yml/dispatches" \
+            -f ref='ops/p0-9-candidate-b1d-20260828' \
+            -f 'inputs[candidate_sha]=b1d838a6b3efe35b7df3afb6b53c4a9b42f7712a' \
+            -f 'inputs[promote_full]=false' \
+            -f 'inputs[evidence_issue]=321'
+          echo 'P0_9_DISPATCHED=true'
