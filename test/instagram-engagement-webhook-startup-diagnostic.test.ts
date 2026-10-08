@@ -41,7 +41,9 @@ describe('Instagram webhook startup diagnostic', () => {
       'gcloud run revisions describe "$EXPECTED_REVISION"',
       'gcloud run revisions describe "$HEALTHY_REVISION"',
       '.metadata.labels["serving.knative.dev/service"] == $service',
-      'resource.type="cloud_run_revision"',
+      'cloud_run_revision',
+      'resource.labels.service_name',
+      'resource.labels.revision_name',
       '--freshness=7d',
       'APPROVED_ERROR_TOKENS=',
       'ENV_PRESENCE=',
@@ -57,6 +59,7 @@ describe('Instagram webhook startup diagnostic', () => {
     ]) {
       expect(workflow).toContain(marker);
     }
+    expect(workflow).not.toContain("|| printf '[]");
   });
 
   it('publishes only allowlisted classifications rather than raw startup strings', () => {
