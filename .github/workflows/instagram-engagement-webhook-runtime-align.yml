@@ -198,6 +198,7 @@ jobs:
           grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY"
           BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
           gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
+          echo 'AUTHORIZATION_CONSUMED=true' >> "$GITHUB_ENV"
 
       - name: Stage webhook candidate on the daemon immutable artifact
         id: stage
@@ -297,10 +298,11 @@ jobs:
           ISSUE: ${{ steps.auth.outputs.authorization_issue }}
           CANDIDATE: ${{ steps.stage.outputs.candidate_revision }}
           DIGEST: ${{ steps.auth.outputs.expected_daemon_digest }}
+          RUNTIME_SOURCE_SHA: ${{ steps.auth.outputs.runtime_source_sha }}
         shell: bash
         run: |
           set -euo pipefail
-          printf -v REPORT '%s\n'             'INSTAGRAM_WEBHOOK_RUNTIME_ALIGNMENT_STATUS=PASS'             "CONTROLLER_SHA=$GITHUB_SHA"             "PREVIOUS_WEBHOOK_REVISION=${{ steps.auth.outputs.expected_webhook_revision }}"             "PROMOTED_WEBHOOK_REVISION=$CANDIDATE"             "PREVIOUS_WEBHOOK_IMAGE_DIGEST=${{ steps.auth.outputs.expected_webhook_digest }}"             "PROMOTED_WEBHOOK_IMAGE_DIGEST=$DIGEST"             "DAEMON_REVISION=${{ steps.auth.outputs.expected_daemon_revision }}"             "DAEMON_IMAGE_DIGEST=$DIGEST"             'SAME_IMMUTABLE_ARTIFACT_AS_DAEMON=true'             'ZERO_TRAFFIC_STAGE_VERIFIED=true'             'WEBHOOK_TRAFFIC_PERCENT=100'             'DAEMON_MUTATION=false'             'DATABASE_MUTATIONS=false'             'PROVIDER_METHODS=GET_ONLY'             'PROVIDER_WRITES=false'             'NEW_PAID_RESOURCES=false'             'GENERAL_AUTONOMY=false'             'ROLLBACK_REQUIRED=false'
+          printf -v REPORT '%s\n'             'INSTAGRAM_WEBHOOK_RUNTIME_ALIGNMENT_STATUS=PASS'             "CONTROLLER_SHA=$GITHUB_SHA"             "RUNTIME_SOURCE_SHA=$RUNTIME_SOURCE_SHA"             "PREVIOUS_WEBHOOK_REVISION=${{ steps.auth.outputs.expected_webhook_revision }}"             "PROMOTED_WEBHOOK_REVISION=$CANDIDATE"             "PREVIOUS_WEBHOOK_IMAGE_DIGEST=${{ steps.auth.outputs.expected_webhook_digest }}"             "PROMOTED_WEBHOOK_IMAGE_DIGEST=$DIGEST"             "DAEMON_REVISION=${{ steps.auth.outputs.expected_daemon_revision }}"             "DAEMON_IMAGE_DIGEST=$DIGEST"             'SAME_IMMUTABLE_ARTIFACT_AS_DAEMON=true'             'ZERO_TRAFFIC_STAGE_VERIFIED=true'             'WEBHOOK_TRAFFIC_PERCENT=100'             'DAEMON_MUTATION=false'             'DATABASE_MUTATIONS=false'             'PROVIDER_METHODS=GET_ONLY'             'PROVIDER_WRITES=false'             'NEW_PAID_RESOURCES=false'             'GENERAL_AUTONOMY=false'             'ROLLBACK_REQUIRED=false'
           gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT" >/dev/null
 
       - name: Roll back webhook traffic on failure or cancellation
@@ -311,9 +313,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${TRAFFIC_CHANGED:-false}" == true ]]; then
-            gcloud run services update-traffic "$WEBHOOK_SERVICE_NAME"               --project "$GCP_PROJECT_ID" --region "$GCP_REGION"               --to-revisions="$OLD_REVISION=100" --quiet
-          fi
+          gcloud run services update-traffic "$WEBHOOK_SERVICE_NAME"               --project "$GCP_PROJECT_ID" --region "$GCP_REGION"               --to-revisions="$OLD_REVISION=100" --quiet
           SERVICE_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           ROUTED="$(jq -r '[.status.traffic[]? | select((.percent//0)==100 and (.revisionName//"")!="") | .revisionName] | if length==1 then .[0] else empty end' <<< "$SERVICE_JSON")"
           test "$ROUTED" = "$OLD_REVISION"
@@ -331,5 +331,8 @@ jobs:
         run: |
           set -euo pipefail
           [[ -n "${ISSUE:-}" ]] || exit 0
-          printf -v REPORT '%s\n'             'INSTAGRAM_WEBHOOK_RUNTIME_ALIGNMENT_STATUS=FAIL'             "CONTROLLER_SHA=$GITHUB_SHA"             'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED'             'ROLLBACK_REQUIRED=true'             'DAEMON_MUTATION=false'             'DATABASE_MUTATIONS=false'             'PROVIDER_WRITES=false'             'GENERAL_AUTONOMY=false'
+          ISSUE_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE}" --jq '.body // ""' 2>/dev/null || true)"
+          AUTH_STATE_LINE="$(printf '%s\n' "$ISSUE_BODY" | grep '^AUTHORIZATION_STATE=' | tail -1 || true)"
+          [[ -n "$AUTH_STATE_LINE" ]] || AUTH_STATE_LINE='AUTHORIZATION_STATE=UNKNOWN'
+          printf -v REPORT '%s\n'             'INSTAGRAM_WEBHOOK_RUNTIME_ALIGNMENT_STATUS=FAIL'             "CONTROLLER_SHA=$GITHUB_SHA"             "$AUTH_STATE_LINE"             'ROLLBACK_REQUIRED=true'             'DAEMON_MUTATION=false'             'DATABASE_MUTATIONS=false'             'PROVIDER_WRITES=false'             'GENERAL_AUTONOMY=false'
           gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT" >/dev/null
