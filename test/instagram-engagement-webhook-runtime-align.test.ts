@@ -26,6 +26,7 @@ describe('Instagram webhook runtime alignment', () => {
     for (const marker of [
       'EXPECTED_WEBHOOK_IMAGE_DIGEST',
       'EXPECTED_DAEMON_IMAGE_DIGEST',
+      'RUNTIME_SOURCE_SHA=$RUNTIME_SOURCE_SHA',
       'SAME_IMMUTABLE_ARTIFACT_AS_DAEMON=true',
       'gcloud run deploy "$WEBHOOK_SERVICE_NAME"',
       '--no-traffic',
@@ -76,7 +77,12 @@ describe('Instagram webhook runtime alignment', () => {
       "if: (failure() || cancelled()) && env.MUTATION_ATTEMPTED == 'true'",
     );
     expect(workflow).toContain('--to-revisions="$OLD_REVISION=100"');
+    expect(workflow).not.toContain(
+      'if [[ "${TRAFFIC_CHANGED:-false}" == true ]]',
+    );
     expect(workflow).toContain('INSTAGRAM_WEBHOOK_RUNTIME_ALIGNMENT_ROLLBACK=PASS');
     expect(workflow).toContain('ROLLBACK_REQUIRED=true');
+    expect(workflow).toContain("AUTH_STATE_LINE=");
+    expect(workflow).toContain('"$AUTH_STATE_LINE"');
   });
 });
