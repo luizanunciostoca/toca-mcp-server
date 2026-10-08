@@ -1,0 +1,89 @@
+name: TEMP OCI Index Runtime Manifest Diagnostic 064c 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  diagnose-oci:
+    if: github.head_ref == 'ops/diag-post-promotion-064c-20260823'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: 064ce49901adea9c93a0bf02835ae07d3f121af2
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Load staging coordinates
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '064ce49901adea9c93a0bf02835ae07d3f121af2'
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging.env
+          cat /tmp/staging.env >> "$GITHUB_ENV"
+          set -a; source /tmp/staging.env; set +a
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_PROJECT_NUMBER" = '729069789107'
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate staging deployer only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Authenticate Docker to staging Artifact Registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - name: Prove build index contains Cloud Run runtime manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_URI="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY}/server"
+          INDEX_DIGEST='sha256:272b563274d359abbe49c7b7f588705d17a438e13917d4c354b5741c7b5217c2'
+          RUNTIME_DIGEST='sha256:3ee30ef0ed3ca7043c6d1e882966a1a627e072dbddd497abd5700946666ef4d8'
+          docker buildx imagetools inspect "${IMAGE_URI}@${INDEX_DIGEST}" --format '{{json .Manifest}}' > /tmp/oci-manifest.json
+          TOP_DIGEST="$(jq -r '.digest // empty' /tmp/oci-manifest.json)"
+          MEDIA_TYPE="$(jq -r '.mediaType // empty' /tmp/oci-manifest.json)"
+          AMD64_DIGEST="$(jq -r 'first(.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest) // empty' /tmp/oci-manifest.json)"
+          ATTESTATION_COUNT="$(jq '[.manifests[]? | select(.platform.os == "unknown" and .platform.architecture == "unknown")] | length' /tmp/oci-manifest.json)"
+          test "$TOP_DIGEST" = "$INDEX_DIGEST"
+          test "$AMD64_DIGEST" = "$RUNTIME_DIGEST"
+          cat > /tmp/comment.md <<EOF
+          STAGING_OCI_INDEX_DIAG RUN_ID=${GITHUB_RUN_ID} CANDIDATE=064ce49901adea9c93a0bf02835ae07d3f121af2
+
+          INDEX_DIGEST=${INDEX_DIGEST}
+          INDEX_MEDIA_TYPE=${MEDIA_TYPE}
+          LINUX_AMD64_MANIFEST_DIGEST=${AMD64_DIGEST}
+          CLOUD_RUN_RUNTIME_DIGEST=${RUNTIME_DIGEST}
+          RUNTIME_MANIFEST_IS_INDEX_CHILD=true
+          ATTESTATION_MANIFEST_COUNT=${ATTESTATION_COUNT}
+
+          READ_ONLY=true
+          SECRET_PAYLOAD_READ=false
+          PROVIDER_ACCESS=false
+          PRODUCTION_ACCESS=false
+          TRAFFIC_MUTATION=false
+          IAM_MUTATION=false
+          EOF
+          gh issue comment 151 --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
