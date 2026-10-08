@@ -17,7 +17,7 @@ env:
   GCP_PROJECT_ID: toca-mcp-production
   GCP_REGION: southamerica-east1
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
-  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_DIAGNOSTIC_SERVICE_ACCOUNT: toca-ag01-diagnostic-reader@toca-mcp-production.iam.gserviceaccount.com
   WEBHOOK_SERVICE_NAME: toca-webhook-next-production
 
 jobs:
@@ -58,19 +58,25 @@ jobs:
           test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
 
           EXPECTED_REVISION="$(grep '^EXPECTED_REVISION=' <<< "$BODY" | cut -d= -f2-)"
+          HEALTHY_REVISION="$(grep '^EXPECTED_HEALTHY_REVISION=' <<< "$BODY" | cut -d= -f2-)"
           [[ "$EXPECTED_REVISION" =~ ^toca-webhook-next-production-[a-z0-9-]+$ ]]
+          [[ "$HEALTHY_REVISION" =~ ^toca-webhook-next-production-[a-z0-9-]+$ ]]
+          test "$EXPECTED_REVISION" != "$HEALTHY_REVISION"
+
           required=(
             "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
             'AUTHORIZATION_STATE=ACTIVE'
             'INSTAGRAM_WEBHOOK_STARTUP_DIAGNOSTIC=AUTHORIZED'
             'EXPECTED_SERVICE=toca-webhook-next-production'
             "EXPECTED_REVISION=$EXPECTED_REVISION"
+            "EXPECTED_HEALTHY_REVISION=$HEALTHY_REVISION"
             'READ_ONLY=true'
             'SERVICE_MUTATIONS_AUTHORIZED=false'
             'TRAFFIC_MUTATIONS_AUTHORIZED=false'
             'DATABASE_MUTATIONS_AUTHORIZED=false'
             'PROVIDER_CALLS_AUTHORIZED=false'
             'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+            'RAW_LOG_PAYLOAD_PUBLISHED=false'
           )
           for marker in "${required[@]}"; do grep -Fxq "$marker" <<< "$BODY"; done
 
@@ -81,8 +87,9 @@ jobs:
 
           echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
           echo "expected_revision=$EXPECTED_REVISION" >> "$GITHUB_OUTPUT"
+          echo "healthy_revision=$HEALTHY_REVISION" >> "$GITHUB_OUTPUT"
 
-      - name: Authenticate diagnostic identity
+      - name: Authenticate dedicated diagnostic reader
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -91,116 +98,138 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Read revision conditions and startup logs only
+      - name: Read revision conditions and allowlisted startup evidence
         id: readback
         env:
           EXPECTED_REVISION: ${{ steps.auth.outputs.expected_revision }}
+          HEALTHY_REVISION: ${{ steps.auth.outputs.healthy_revision }}
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p startup-diagnostic
+          target_json="$(mktemp)"
+          healthy_json="$(mktemp)"
+          service_json="$(mktemp)"
+          logs_json="$(mktemp)"
 
-          SERVICE_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-          REVISION_JSON="$(gcloud run revisions describe "$EXPECTED_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          gcloud run services describe "$WEBHOOK_SERVICE_NAME"             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "$service_json"
+          gcloud run revisions describe "$EXPECTED_REVISION"             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "$target_json"
+          gcloud run revisions describe "$HEALTHY_REVISION"             --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "$healthy_json"
 
-          test "$(printf '%s' "$REVISION_JSON" | jq -r '.metadata.labels["serving.knative.dev/service"] // .metadata.labels["serving.knative.dev/serviceUid"] // empty' | wc -l)" -ge 1
-          test "$(printf '%s' "$REVISION_JSON" | jq -r '.metadata.name')" = "$EXPECTED_REVISION"
+          test "$(jq -r '.metadata.name' "$target_json")" = "$EXPECTED_REVISION"
+          test "$(jq -r '.metadata.name' "$healthy_json")" = "$HEALTHY_REVISION"
+          jq -e --arg service "$WEBHOOK_SERVICE_NAME"             '.metadata.labels["serving.knative.dev/service"] == $service'             "$target_json" >/dev/null
+          jq -e --arg service "$WEBHOOK_SERVICE_NAME"             '.metadata.labels["serving.knative.dev/service"] == $service'             "$healthy_json" >/dev/null
 
-          ROUTED="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end')"
-          LATEST_READY="$(printf '%s' "$SERVICE_JSON" | jq -r '.status.latestReadyRevisionName // empty')"
-          LATEST_CREATED="$(printf '%s' "$SERVICE_JSON" | jq -r '.status.latestCreatedRevisionName // empty')"
-          READY="$(printf '%s' "$REVISION_JSON" | jq -r '[.status.conditions[]? | select(.type=="Ready") | .status] | last // "Unknown"')"
-          READY_REASON="$(printf '%s' "$REVISION_JSON" | jq -r '[.status.conditions[]? | select(.type=="Ready") | .reason] | last // "UNKNOWN"')"
-          READY_MESSAGE="$(printf '%s' "$REVISION_JSON" | jq -r '[.status.conditions[]? | select(.type=="Ready") | .message] | last // ""')"
+          ROUTED="$(jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end' "$service_json")"
+          test "$ROUTED" = "$HEALTHY_REVISION"
 
-          printf -v LOG_FILTER 'resource.type="cloud_run_revision" AND resource.labels.service_name="%s" AND resource.labels.revision_name="%s"' \
-            "$WEBHOOK_SERVICE_NAME" "$EXPECTED_REVISION"
-          gcloud logging read "$LOG_FILTER" \
-            --project "$GCP_PROJECT_ID" --freshness=30m --limit=300 --order=asc --format=json \
-            > /tmp/webhook-startup-logs.json || printf '[]\\n' > /tmp/webhook-startup-logs.json
+          gcloud logging read             "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${WEBHOOK_SERVICE_NAME}\" AND resource.labels.revision_name=\"${EXPECTED_REVISION}\""             --project "$GCP_PROJECT_ID" --freshness=7d --limit=300 --order=asc --format=json > "$logs_json"
 
-          REVISION_JSON_VALUE="$REVISION_JSON" READY_MESSAGE_VALUE="$READY_MESSAGE" node <<'NODE'
-          import fs from 'node:fs';
+          ready_status="$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .status] | last // "UNKNOWN"' "$target_json")"
+          ready_reason="$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .reason] | last // "UNKNOWN"' "$target_json")"
+          [[ "$ready_status" =~ ^(True|False|Unknown|UNKNOWN)$ ]] || ready_status=UNKNOWN
+          [[ "$ready_reason" =~ ^[A-Za-z0-9_.-]{1,100}$ ]] || ready_reason=REDACTED_UNSAFE_REASON
 
-          const logs = JSON.parse(fs.readFileSync('/tmp/webhook-startup-logs.json','utf8'));
-          const values = [];
-          const walk = (value) => {
-            if (typeof value === 'string') values.push(value);
-            else if (Array.isArray(value)) value.forEach(walk);
-            else if (value && typeof value === 'object') Object.values(value).forEach(walk);
-          };
-          walk(logs);
+          has_env(){ jq -e --arg n "$2" '[.spec.containers[0].env[]? | select(.name==$n)] | length > 0' "$1" >/dev/null; }
+          env_summary=''
+          for name in             DATABASE_URL META_APP_SECRET META_APP_ID META_APP_SECRET_PROVIDER META_APP_SECRET_KEY             META_WEBHOOK_VERIFY_TOKEN_KEY META_WEBHOOK_ENABLED META_WEBHOOK_PERSISTENCE_ENABLED             META_ENABLED META_PROVIDER_VERIFIED TOCA_SERVICE_ROLE MCP_ENABLED TOCA_DEPLOY_ENVIRONMENT             TOCA_RELEASE_SHA INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED INSTAGRAM_ENGAGEMENT_WRITES_ENABLED             INSTAGRAM_BUSINESS_ACCOUNT_ID; do
+            target_present=false
+            healthy_present=false
+            has_env "$target_json" "$name" && target_present=true
+            has_env "$healthy_json" "$name" && healthy_present=true
+            env_summary+="${name}:candidate=${target_present},healthy=${healthy_present};"
+          done
 
-          const readyMessage = process.env.READY_MESSAGE_VALUE || '';
-          if (readyMessage) values.push(readyMessage);
+          target_sa_ok=false
+          healthy_sa_ok=false
+          test "$(jq -r '.spec.serviceAccountName // empty' "$target_json")" = 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' && target_sa_ok=true
+          test "$(jq -r '.spec.serviceAccountName // empty' "$healthy_json")" = 'toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com' && healthy_sa_ok=true
 
-          const redact = (input) => String(input)
-            .replace(/https?:\/\/[^\s]+/giu,'<URL>')
-            .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu,'<EMAIL>')
-            .replace(/sha256:[a-f0-9]{32,}/giu,'<DIGEST>')
-            .replace(/\b[0-9]{10,}\b/gu,'<ID>')
-            .replace(/\b[A-Za-z0-9_\-]{32,}\b/gu,'<TOKEN>')
-            .replace(/(secret|token|password|authorization)=([^\s,;]+)/giu,'$1=<REDACTED>')
-            .replace(/\s+/gu,' ')
-            .trim()
-            .slice(0,700);
+          target_command="$(jq -c '.spec.containers[0].command // []' "$target_json")"
+          healthy_command="$(jq -c '.spec.containers[0].command // []' "$healthy_json")"
+          target_args="$(jq -c '.spec.containers[0].args // []' "$target_json")"
+          healthy_args="$(jq -c '.spec.containers[0].args // []' "$healthy_json")"
+          command_match=false
+          args_match=false
+          test "$target_command" = "$healthy_command" && command_match=true
+          test "$target_args" = "$healthy_args" && args_match=true
 
-          const interesting = values
-            .map(redact)
-            .filter(Boolean)
-            .filter((value) => /(error|fail|missing|required|invalid|readiness|database|postgres|meta_|webhook|secret|token|port|listen|startup|econn|timeout|permission|denied|zod)/iu.test(value));
+          log_text="$(jq -r '
+            [
+              .[] |
+              [
+                (.textPayload // null),
+                (.jsonPayload.message // null),
+                (.jsonPayload.errorCode // null),
+                (.jsonPayload.event // null)
+              ][] |
+              select(type == "string")
+            ] | join("\n")
+          ' "$logs_json")"
 
-          const unique = [...new Set(interesting)].slice(0,40);
-          fs.writeFileSync('/tmp/startup-errors.txt', unique.join('\n'));
+          approved_tokens=(
+            META_WEBHOOK_VERIFY_TOKEN_REFERENCE_MISSING
+            META_WEBHOOK_DERIVED_VERIFY_TOKEN_REQUIRES_ENV_APP_SECRET
+            META_APP_SECRET_KEY_REQUIRED
+            META_APP_SECRET_REFERENCE_MISSING
+            READINESS_DATABASE_URL_REQUIRED
+            READINESS_DATABASE_POOL_UNAVAILABLE
+            READINESS_MIGRATIONS_PENDING
+            READINESS_SCHEMA_MISSING
+            ERR_MODULE_NOT_FOUND
+            EADDRINUSE
+            EACCES
+          )
+          found=''
+          for token in "${approved_tokens[@]}"; do
+            if grep -Fq "$token" <<< "$log_text"; then found+="${token},"; fi
+          done
+          found="${found%,}"
 
-          let classification = 'STARTUP_FAILURE_UNCLASSIFIED';
-          const joined = unique.join('\n');
-          if (/META_WEBHOOK_VERIFY_TOKEN_REFERENCE_MISSING|META_WEBHOOK_DERIVED_VERIFY_TOKEN_REQUIRES_ENV_APP_SECRET|META_APP_SECRET_(KEY|REFERENCE)_MISSING/iu.test(joined)) classification='STARTUP_META_WEBHOOK_SECRET_CONFIG';
-          else if (/Missing environment secret|READINESS_SECRET_MISSING|secret.*required/iu.test(joined)) classification='STARTUP_SECRET_REFERENCE_MISSING';
-          else if (/DATABASE_URL|required.*database|ECONNREFUSED|postgres/iu.test(joined)) classification='STARTUP_DATABASE_CONFIG_OR_CONNECTIVITY';
-          else if (/PORT=8080|listen|failed to start/iu.test(joined)) classification='STARTUP_PORT_OR_PROCESS_EXIT';
-          else if (/Zod|Invalid input|configuration/iu.test(joined)) classification='STARTUP_CONFIG_VALIDATION';
-
-          fs.writeFileSync('/tmp/classification.txt', classification);
-          NODE
-
-          CLASSIFICATION="$(cat /tmp/classification.txt)"
-          ERROR_COUNT="$(awk 'NF{count++} END{print count+0}' /tmp/startup-errors.txt)"
-          {
-            echo "classification=$CLASSIFICATION"
-            echo "error_count=$ERROR_COUNT"
-            echo "routed_revision=$ROUTED"
-            echo "latest_ready_revision=$LATEST_READY"
-            echo "latest_created_revision=$LATEST_CREATED"
-            echo "candidate_ready=$READY"
-            echo "candidate_ready_reason=$READY_REASON"
-          } >> "$GITHUB_OUTPUT"
+          classification=UNCLASSIFIED_STARTUP_FAILURE
+          if [[ -n "$found" ]]; then
+            classification=APPROVED_WEBHOOK_STARTUP_ERROR
+          elif grep -Eqi 'relation .* does not exist|undefined table|migration.*missing' <<< "$log_text"; then
+            classification=PERSISTENCE_SCHEMA_OR_MIGRATION_FAILURE
+          elif grep -Eqi 'ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|connection refused|connection timed out' <<< "$log_text"; then
+            classification=STARTUP_DEPENDENCY_CONNECTIVITY_FAILURE
+          elif grep -Eqi 'permission denied|PERMISSION_DENIED|403' <<< "$log_text"; then
+            classification=STARTUP_PERMISSION_FAILURE
+          elif grep -Eqi 'Cannot find module|ERR_MODULE_NOT_FOUND|module not found' <<< "$log_text"; then
+            classification=STARTUP_MODULE_LOAD_FAILURE
+          elif grep -Eqi 'failed to start and listen|PORT=|startup probe' <<< "$log_text"; then
+            classification=CLOUD_RUN_STARTUP_PROBE_FAILURE
+          elif grep -Eqi 'ZodError|Invalid input|configuration' <<< "$log_text"; then
+            classification=STARTUP_CONFIG_VALIDATION
+          fi
 
           {
             echo "WEBHOOK_STARTUP_DIAGNOSTIC=PASS"
-            echo "CLASSIFICATION=$CLASSIFICATION"
             echo "EXPECTED_REVISION=$EXPECTED_REVISION"
+            echo "HEALTHY_REVISION=$HEALTHY_REVISION"
             echo "ROUTED_REVISION=$ROUTED"
-            echo "LATEST_READY_REVISION=$LATEST_READY"
-            echo "LATEST_CREATED_REVISION=$LATEST_CREATED"
-            echo "CANDIDATE_READY=$READY"
-            echo "CANDIDATE_READY_REASON=$READY_REASON"
-            echo "SANITIZED_ERROR_COUNT=$ERROR_COUNT"
+            echo "TARGET_READY_STATUS=$ready_status"
+            echo "TARGET_READY_REASON=$ready_reason"
+            echo "CLASSIFICATION=$classification"
+            echo "APPROVED_ERROR_TOKENS=${found:-NONE}"
+            echo "ENV_PRESENCE=$env_summary"
+            echo "CANDIDATE_RUNTIME_SA_MATCH=$target_sa_ok"
+            echo "HEALTHY_RUNTIME_SA_MATCH=$healthy_sa_ok"
+            echo "COMMAND_MATCH=$command_match"
+            echo "ARGS_MATCH=$args_match"
+            echo 'RAW_LOG_PAYLOAD_PUBLISHED=false'
             echo 'READ_ONLY=true'
             echo 'SERVICE_MUTATIONS=false'
             echo 'TRAFFIC_MUTATIONS=false'
             echo 'DATABASE_MUTATIONS=false'
             echo 'PROVIDER_CALLS=false'
             echo 'EXTERNAL_REPLY_WRITES=false'
-            echo 'RAW_USER_DATA_LOGGED=false'
-            echo 'SECRETS_PRINTED=false'
-            echo
-            echo 'SANITIZED_STARTUP_ERRORS_BEGIN'
-            cat /tmp/startup-errors.txt
-            echo 'SANITIZED_STARTUP_ERRORS_END'
-          } > /tmp/startup-report.txt
+          } > /tmp/startup-report.env
 
-      - name: Publish sanitized diagnostic and consume authorization
+          cat /tmp/startup-report.env >> "$GITHUB_STEP_SUMMARY"
+          echo "classification=$classification" >> "$GITHUB_OUTPUT"
+
+      - name: Publish allowlisted diagnostic and consume authorization
         if: always() && steps.auth.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -212,11 +241,11 @@ jobs:
           ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
           BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
-          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}"             -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
 
-          if [[ "$READBACK_OUTCOME" == success && -f /tmp/startup-report.txt ]]; then
-            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/startup-report.txt >/dev/null
+          if [[ "$READBACK_OUTCOME" == success && -f /tmp/startup-report.env ]]; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/startup-report.env >/dev/null
           else
-            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body $'WEBHOOK_STARTUP_DIAGNOSTIC=FAIL\nREAD_ONLY=true\nSERVICE_MUTATIONS=false\nTRAFFIC_MUTATIONS=false\nDATABASE_MUTATIONS=false\nPROVIDER_CALLS=false\nEXTERNAL_REPLY_WRITES=false' >/dev/null
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body $'WEBHOOK_STARTUP_DIAGNOSTIC=FAIL\nRAW_LOG_PAYLOAD_PUBLISHED=false\nREAD_ONLY=true\nSERVICE_MUTATIONS=false\nTRAFFIC_MUTATIONS=false\nDATABASE_MUTATIONS=false\nPROVIDER_CALLS=false\nEXTERNAL_REPLY_WRITES=false' >/dev/null
             exit 1
           fi
