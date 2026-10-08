@@ -41,7 +41,7 @@ describe('Instagram webhook startup diagnostic', () => {
       'gcloud run revisions describe "$EXPECTED_REVISION"',
       'gcloud run revisions describe "$HEALTHY_REVISION"',
       '.metadata.labels["serving.knative.dev/service"] == $service',
-      'resource.type=\"cloud_run_revision\"',
+      'resource.type="cloud_run_revision"',
       '--freshness=7d',
       'APPROVED_ERROR_TOKENS=',
       'ENV_PRESENCE=',
