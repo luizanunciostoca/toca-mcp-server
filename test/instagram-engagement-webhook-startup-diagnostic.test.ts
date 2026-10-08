@@ -28,7 +28,7 @@ describe('Instagram webhook startup diagnostic', () => {
     for (const marker of [
       'gcloud run revisions describe "$EXPECTED_REVISION"',
       'gcloud logging read',
-      'resource.type=\\\"cloud_run_revision\\\"',
+      'resource.type="cloud_run_revision"',
       'SANITIZED_STARTUP_ERRORS_BEGIN',
       'RAW_USER_DATA_LOGGED=false',
       'SECRETS_PRINTED=false',
