@@ -1,0 +1,335 @@
+name: Instagram Engagement Webhook Runtime Alignment
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: ${{ github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram webhook runtime alignment AUTO') && 'instagram-engagement-webhook-callback-control' || format('instagram-webhook-runtime-align-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: toca-mcp-production
+  GCP_REGION: southamerica-east1
+  GCP_ARTIFACT_REPOSITORY: toca-mcp
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  GCP_DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  GCP_RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  CLOUD_SQL_INSTANCE: toca-mcp-production:southamerica-east1:toca-mcp-db
+  DATABASE_SECRET_ID: toca-database-url
+  TOKEN_SECRET_ID: toca-meta-oauth-token
+  META_APP_SECRET_ID: toca-meta-app-secret
+  DAEMON_SERVICE_NAME: toca-managed-instagram-daemon
+  WEBHOOK_SERVICE_NAME: toca-webhook-next-production
+  SCHEDULER_JOB_NAME: toca-managed-instagram-tick
+  INSTAGRAM_ACCOUNT_ID: '17841402033495654'
+  INSTAGRAM_PAGE_ID: '306103746115875'
+  META_APP_ID: '2281930145887404'
+  TOCA_TENANT_ID: toca
+  TOCA_WORKSPACE_ID: toca
+  TOCA_ORGANIZATION_ID: toca
+  META_REDIRECT_URI: https://toca-meta-oauth-staging-990081828836.southamerica-east1.run.app/oauth/meta/callback
+  META_REQUESTED_SCOPES: pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish
+
+jobs:
+  align:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — Instagram webhook runtime alignment AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact alignment controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate exact owner authorization and stable main
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          printf '%s' "$ISSUE_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+            (.state == "open") and
+            (.user.login == $owner) and
+            (.title | startswith("PRODUCTION AUTHORIZATION — Instagram webhook runtime alignment AUTO"))
+          ' >/dev/null
+          CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
+
+          EXPECTED_WEBHOOK_REVISION="$(grep '^EXPECTED_WEBHOOK_REVISION=' <<< "$BODY" | cut -d= -f2-)"
+          EXPECTED_WEBHOOK_DIGEST="$(grep '^EXPECTED_WEBHOOK_IMAGE_DIGEST=' <<< "$BODY" | cut -d= -f2-)"
+          EXPECTED_DAEMON_REVISION="$(grep '^EXPECTED_DAEMON_REVISION=' <<< "$BODY" | cut -d= -f2-)"
+          EXPECTED_DAEMON_DIGEST="$(grep '^EXPECTED_DAEMON_IMAGE_DIGEST=' <<< "$BODY" | cut -d= -f2-)"
+          [[ "$EXPECTED_WEBHOOK_REVISION" =~ ^toca-webhook-next-production-[a-z0-9-]+$ ]]
+          [[ "$EXPECTED_DAEMON_REVISION" =~ ^toca-managed-instagram-daemon-[a-z0-9-]+$ ]]
+          [[ "$EXPECTED_WEBHOOK_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_DAEMON_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          required=(
+            "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
+            'AUTHORIZATION_STATE=ACTIVE'
+            'INSTAGRAM_WEBHOOK_RUNTIME_ALIGNMENT=AUTHORIZED'
+            "EXPECTED_WEBHOOK_REVISION=$EXPECTED_WEBHOOK_REVISION"
+            "EXPECTED_WEBHOOK_IMAGE_DIGEST=$EXPECTED_WEBHOOK_DIGEST"
+            "EXPECTED_DAEMON_REVISION=$EXPECTED_DAEMON_REVISION"
+            "EXPECTED_DAEMON_IMAGE_DIGEST=$EXPECTED_DAEMON_DIGEST"
+            'SERVICE_MUTATION_AUTHORIZED=true'
+            'WEBHOOK_IMAGE_MUTATION_AUTHORIZED=true'
+            'WEBHOOK_TRAFFIC_MUTATION_AUTHORIZED=true'
+            'DAEMON_MUTATION_AUTHORIZED=false'
+            'DATABASE_MUTATIONS_AUTHORIZED=false'
+            'PROVIDER_READS_AUTHORIZED=true'
+            'PROVIDER_METHODS=GET_ONLY'
+            'PROVIDER_WRITES_AUTHORIZED=false'
+            'NEW_PAID_RESOURCES_AUTHORIZED=false'
+            'GENERAL_AUTONOMY_AUTHORIZED=false'
+            'ZERO_TRAFFIC_STAGE_REQUIRED=true'
+            'ROLLBACK_REQUIRED=true'
+          )
+          for marker in "${required[@]}"; do grep -Fxq "$marker" <<< "$BODY"; done
+
+          CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
+          grep -Fxq 'MAIN_STABILITY=PASS' <<< "$CONTROL_BODY"
+          grep -Fxq "EVALUATED_MAIN_SHA=$GITHUB_SHA" <<< "$CONTROL_BODY"
+          grep -Fxq 'MERGE_RESERVATION=NONE' <<< "$CONTROL_BODY"
+          RUNTIME_SOURCE_SHA="$(grep '^ENGAGEMENT_RUNTIME_SOURCE_SHA=' <<< "$CONTROL_BODY" | cut -d= -f2-)"
+          grep -Fxq "ENGAGEMENT_RUNTIME_IMAGE_DIGEST=$EXPECTED_DAEMON_DIGEST" <<< "$CONTROL_BODY"
+          [[ "$RUNTIME_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "expected_webhook_revision=$EXPECTED_WEBHOOK_REVISION" >> "$GITHUB_OUTPUT"
+          echo "expected_webhook_digest=$EXPECTED_WEBHOOK_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "expected_daemon_revision=$EXPECTED_DAEMON_REVISION" >> "$GITHUB_OUTPUT"
+          echo "expected_daemon_digest=$EXPECTED_DAEMON_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_source_sha=$RUNTIME_SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$EXPECTED_DAEMON_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate governed deployer
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Capture exact daemon and webhook prestate
+        id: prestate
+        env:
+          EXPECTED_WEBHOOK_REVISION: ${{ steps.auth.outputs.expected_webhook_revision }}
+          EXPECTED_WEBHOOK_DIGEST: ${{ steps.auth.outputs.expected_webhook_digest }}
+          EXPECTED_DAEMON_REVISION: ${{ steps.auth.outputs.expected_daemon_revision }}
+          EXPECTED_DAEMON_DIGEST: ${{ steps.auth.outputs.expected_daemon_digest }}
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')" = "$EXPECTED_DAEMON_DIGEST"
+
+          DAEMON_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          WEBHOOK_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          DAEMON_REVISION="$(jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end' <<< "$DAEMON_JSON")"
+          WEBHOOK_REVISION="$(jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end' <<< "$WEBHOOK_JSON")"
+          test "$DAEMON_REVISION" = "$EXPECTED_DAEMON_REVISION"
+          test "$WEBHOOK_REVISION" = "$EXPECTED_WEBHOOK_REVISION"
+
+          DAEMON_REV_JSON="$(gcloud run revisions describe "$DAEMON_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          WEBHOOK_REV_JSON="$(gcloud run revisions describe "$WEBHOOK_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          DAEMON_IMAGE="$(jq -r '.spec.containers[0].image // empty' <<< "$DAEMON_REV_JSON")"
+          WEBHOOK_IMAGE="$(jq -r '.spec.containers[0].image // empty' <<< "$WEBHOOK_REV_JSON")"
+          [[ "$DAEMON_IMAGE" == *"@$EXPECTED_DAEMON_DIGEST" ]]
+          [[ "$WEBHOOK_IMAGE" == *"@$EXPECTED_WEBHOOK_DIGEST" ]]
+          test "$DAEMON_IMAGE" != "$WEBHOOK_IMAGE"
+
+          jq -e --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+            .spec.containers[0] as $c |
+            def envValue($n): ([($c.env // [])[] | select(.name==$n) | .value] | last // null);
+            (([.status.conditions[]? | select(.type=="Ready") | .status] | last)=="True") and
+            (.spec.serviceAccountName==$sa) and
+            (envValue("INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED")=="true") and
+            (envValue("INSTAGRAM_ENGAGEMENT_WRITES_ENABLED")=="true") and
+            (envValue("INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS")=="DIRECT,COMMENT") and
+            ((envValue("INSTAGRAM_PUBLICATION_WRITES_ENABLED") // "false")=="false")
+          ' <<< "$DAEMON_REV_JSON" >/dev/null
+
+          WEBHOOK_IAM="$(gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          ! jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members//[])[]? | select(.=="allUsers")' <<< "$WEBHOOK_IAM" >/dev/null
+          test "$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"' <<< "$WEBHOOK_JSON")" = all
+          test "$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' <<< "$WEBHOOK_JSON")" = false
+          test "$(jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"' <<< "$WEBHOOK_JSON")" = true
+
+          DAEMON_TRAFFIC_SHA="$(jq -cS '.status.traffic // []' <<< "$DAEMON_JSON" | sha256sum | awk '{print $1}')"
+          WEBHOOK_TRAFFIC_SHA="$(jq -cS '.status.traffic // []' <<< "$WEBHOOK_JSON" | sha256sum | awk '{print $1}')"
+          WEBHOOK_IAM_SHA="$(jq -cS . <<< "$WEBHOOK_IAM" | sha256sum | awk '{print $1}')"
+          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
+          SCHEDULER_SHA="$(jq -cS '{state,schedule,timeZone,httpTarget}' <<< "$SCHEDULER_JSON" | sha256sum | awk '{print $1}')"
+
+          echo "daemon_image=$DAEMON_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "daemon_traffic_sha=$DAEMON_TRAFFIC_SHA" >> "$GITHUB_OUTPUT"
+          echo "webhook_traffic_sha=$WEBHOOK_TRAFFIC_SHA" >> "$GITHUB_OUTPUT"
+          echo "webhook_iam_sha=$WEBHOOK_IAM_SHA" >> "$GITHUB_OUTPUT"
+          echo "scheduler_sha=$SCHEDULER_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Consume single-use authorization before mutation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
+          BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
+          grep -Fxq 'AUTHORIZATION_STATE=ACTIVE' <<< "$BODY"
+          BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}" -f state=closed -f state_reason=completed -f body="$BODY" >/dev/null
+
+      - name: Stage webhook candidate on the daemon immutable artifact
+        id: stage
+        env:
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          RUNTIME_SOURCE_SHA: ${{ steps.auth.outputs.runtime_source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_TAIL="${GITHUB_RUN_ID: -7}"
+          SUFFIX="wa${RUN_TAIL}a${GITHUB_RUN_ATTEMPT}"
+          CANDIDATE="${WEBHOOK_SERVICE_NAME}-${SUFFIX}"
+          WEBHOOK_ENV="^@^NODE_ENV=production@MCP_ENABLED=false@TOCA_SERVICE_ROLE=webhook@TOCA_DEFAULT_TENANT_ID=$TOCA_TENANT_ID@TOCA_DEFAULT_WORKSPACE_ID=$TOCA_WORKSPACE_ID@TOCA_DEFAULT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID@TOCA_DEPLOY_ENVIRONMENT=production@TOCA_RELEASE_SHA=$RUNTIME_SOURCE_SHA@META_ENABLED=true@META_PROVIDER_VERIFIED=true@META_WEBHOOK_ENABLED=true@META_WEBHOOK_PERSISTENCE_ENABLED=true@META_APP_ID=$META_APP_ID@META_APP_SECRET_PROVIDER=env@META_APP_SECRET_KEY=META_APP_SECRET@META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth@META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token@META_REDIRECT_URI=$META_REDIRECT_URI@META_REQUESTED_SCOPES=$META_REQUESTED_SCOPES@META_GRAPH_BASE_URL=https://graph.facebook.com@META_GRAPH_API_VERSION=v24.0@INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED=true@INSTAGRAM_ENGAGEMENT_TENANT_ID=$TOCA_TENANT_ID@INSTAGRAM_ENGAGEMENT_WORKSPACE_ID=$TOCA_WORKSPACE_ID@INSTAGRAM_ENGAGEMENT_ORGANIZATION_ID=$TOCA_ORGANIZATION_ID@INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false@INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID"
+
+          echo 'MUTATION_ATTEMPTED=true' >> "$GITHUB_ENV"
+          gcloud run deploy "$WEBHOOK_SERVICE_NAME"             --image "$RUNTIME_IMAGE"             --project "$GCP_PROJECT_ID" --region "$GCP_REGION"             --service-account "$GCP_RUNTIME_SERVICE_ACCOUNT"             --add-cloudsql-instances "$CLOUD_SQL_INSTANCE"             --update-secrets "DATABASE_URL=$DATABASE_SECRET_ID:latest,META_APP_SECRET=$META_APP_SECRET_ID:latest"             --update-env-vars "$WEBHOOK_ENV"             --command node --args dist/src/http-instagram-engagement.js             --revision-suffix "$SUFFIX"             --no-traffic --quiet
+
+          CANDIDATE_JSON="$(gcloud run revisions describe "$CANDIDATE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          jq -e --arg digest "${RUNTIME_IMAGE##*@}" --arg sa "$GCP_RUNTIME_SERVICE_ACCOUNT" '
+            .spec.containers[0] as $c |
+            def envValue($n): ([($c.env // [])[] | select(.name==$n) | .value] | last // null);
+            (([.status.conditions[]? | select(.type=="Ready") | .status] | last)=="True") and
+            (.spec.serviceAccountName==$sa) and
+            ($c.image | endswith($digest)) and
+            ($c.command==["node"]) and
+            ($c.args==["dist/src/http-instagram-engagement.js"]) and
+            (envValue("MCP_ENABLED")=="false") and
+            (envValue("META_WEBHOOK_ENABLED")=="true") and
+            (envValue("META_WEBHOOK_PERSISTENCE_ENABLED")=="true") and
+            (envValue("INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED")=="true") and
+            ((envValue("INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") // "false")=="false")
+          ' <<< "$CANDIDATE_JSON" >/dev/null
+
+          SERVICE_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          OLD="${{ steps.auth.outputs.expected_webhook_revision }}"
+          jq -e --arg candidate "$CANDIDATE" --arg old "$OLD" '
+            ([.status.traffic[]? | select(.revisionName==$candidate) | (.percent//0)] | add//0)==0 and
+            ([.status.traffic[]? | select(.revisionName==$old) | (.percent//0)] | add//0)==100
+          ' <<< "$SERVICE_JSON" >/dev/null
+
+          echo "candidate_revision=$CANDIDATE" >> "$GITHUB_OUTPUT"
+
+      - name: Cut over only webhook traffic
+        env:
+          CANDIDATE: ${{ steps.stage.outputs.candidate_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$WEBHOOK_SERVICE_NAME"             --project "$GCP_PROJECT_ID" --region "$GCP_REGION"             --to-revisions="$CANDIDATE=100" --quiet
+          echo 'TRAFFIC_CHANGED=true' >> "$GITHUB_ENV"
+
+      - name: Verify aligned webhook end to end without provider writes
+        id: verify
+        env:
+          CANDIDATE: ${{ steps.stage.outputs.candidate_revision }}
+          RUNTIME_IMAGE: ${{ steps.auth.outputs.runtime_image }}
+          PRE_DAEMON_TRAFFIC_SHA: ${{ steps.prestate.outputs.daemon_traffic_sha }}
+          PRE_WEBHOOK_IAM_SHA: ${{ steps.prestate.outputs.webhook_iam_sha }}
+          PRE_SCHEDULER_SHA: ${{ steps.prestate.outputs.scheduler_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          WEBHOOK_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          ROUTED="$(jq -r '[.status.traffic[]? | select((.percent//0)==100 and (.revisionName//"")!="") | .revisionName] | if length==1 then .[0] else empty end' <<< "$WEBHOOK_JSON")"
+          test "$ROUTED" = "$CANDIDATE"
+          test "$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"' <<< "$WEBHOOK_JSON")" = all
+          test "$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' <<< "$WEBHOOK_JSON")" = false
+          test "$(jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"' <<< "$WEBHOOK_JSON")" = true
+
+          WEBHOOK_IAM="$(gcloud run services get-iam-policy "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          test "$(jq -cS . <<< "$WEBHOOK_IAM" | sha256sum | awk '{print $1}')" = "$PRE_WEBHOOK_IAM_SHA"
+          ! jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members//[])[]? | select(.=="allUsers")' <<< "$WEBHOOK_IAM" >/dev/null
+
+          DAEMON_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          test "$(jq -cS '.status.traffic // []' <<< "$DAEMON_JSON" | sha256sum | awk '{print $1}')" = "$PRE_DAEMON_TRAFFIC_SHA"
+          DAEMON_ROUTED="$(jq -r '[.status.traffic[]? | select((.percent//0)==100 and (.revisionName//"")!="") | .revisionName] | if length==1 then .[0] else empty end' <<< "$DAEMON_JSON")"
+          test "$DAEMON_ROUTED" = "${{ steps.auth.outputs.expected_daemon_revision }}"
+
+          SCHEDULER_JSON="$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --project "$GCP_PROJECT_ID" --location "$GCP_REGION" --format=json)"
+          test "$(jq -cS '{state,schedule,timeZone,httpTarget}' <<< "$SCHEDULER_JSON" | sha256sum | awk '{print $1}')" = "$PRE_SCHEDULER_SHA"
+
+          bash scripts/verify-instagram-engagement-webhook-ingress.sh
+
+          echo 'INSTAGRAM_WEBHOOK_RUNTIME_ALIGNMENT=PASS'
+          echo "ALIGNED_REVISION=$CANDIDATE"
+          echo "ALIGNED_IMAGE_DIGEST=${RUNTIME_IMAGE##*@}"
+          echo 'DAEMON_MUTATION=false'
+          echo 'DATABASE_MUTATIONS=false'
+          echo 'PROVIDER_METHODS=GET_ONLY'
+          echo 'PROVIDER_WRITES=false'
+          echo 'GENERAL_AUTONOMY=false'
+
+      - name: Publish successful alignment evidence
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+          CANDIDATE: ${{ steps.stage.outputs.candidate_revision }}
+          DIGEST: ${{ steps.auth.outputs.expected_daemon_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf -v REPORT '%s\n'             'INSTAGRAM_WEBHOOK_RUNTIME_ALIGNMENT_STATUS=PASS'             "CONTROLLER_SHA=$GITHUB_SHA"             "PREVIOUS_WEBHOOK_REVISION=${{ steps.auth.outputs.expected_webhook_revision }}"             "PROMOTED_WEBHOOK_REVISION=$CANDIDATE"             "PREVIOUS_WEBHOOK_IMAGE_DIGEST=${{ steps.auth.outputs.expected_webhook_digest }}"             "PROMOTED_WEBHOOK_IMAGE_DIGEST=$DIGEST"             "DAEMON_REVISION=${{ steps.auth.outputs.expected_daemon_revision }}"             "DAEMON_IMAGE_DIGEST=$DIGEST"             'SAME_IMMUTABLE_ARTIFACT_AS_DAEMON=true'             'ZERO_TRAFFIC_STAGE_VERIFIED=true'             'WEBHOOK_TRAFFIC_PERCENT=100'             'DAEMON_MUTATION=false'             'DATABASE_MUTATIONS=false'             'PROVIDER_METHODS=GET_ONLY'             'PROVIDER_WRITES=false'             'NEW_PAID_RESOURCES=false'             'GENERAL_AUTONOMY=false'             'ROLLBACK_REQUIRED=false'
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT" >/dev/null
+
+      - name: Roll back webhook traffic on failure or cancellation
+        if: (failure() || cancelled()) && env.MUTATION_ATTEMPTED == 'true'
+        env:
+          OLD_REVISION: ${{ steps.auth.outputs.expected_webhook_revision }}
+          PRE_DAEMON_TRAFFIC_SHA: ${{ steps.prestate.outputs.daemon_traffic_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${TRAFFIC_CHANGED:-false}" == true ]]; then
+            gcloud run services update-traffic "$WEBHOOK_SERVICE_NAME"               --project "$GCP_PROJECT_ID" --region "$GCP_REGION"               --to-revisions="$OLD_REVISION=100" --quiet
+          fi
+          SERVICE_JSON="$(gcloud run services describe "$WEBHOOK_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          ROUTED="$(jq -r '[.status.traffic[]? | select((.percent//0)==100 and (.revisionName//"")!="") | .revisionName] | if length==1 then .[0] else empty end' <<< "$SERVICE_JSON")"
+          test "$ROUTED" = "$OLD_REVISION"
+          DAEMON_JSON="$(gcloud run services describe "$DAEMON_SERVICE_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          test "$(jq -cS '.status.traffic // []' <<< "$DAEMON_JSON" | sha256sum | awk '{print $1}')" = "$PRE_DAEMON_TRAFFIC_SHA"
+          echo 'INSTAGRAM_WEBHOOK_RUNTIME_ALIGNMENT_ROLLBACK=PASS'
+
+      - name: Publish failed alignment evidence
+        if: always() && (failure() || cancelled())
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.auth.outputs.authorization_issue }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${ISSUE:-}" ]] || exit 0
+          printf -v REPORT '%s\n'             'INSTAGRAM_WEBHOOK_RUNTIME_ALIGNMENT_STATUS=FAIL'             "CONTROLLER_SHA=$GITHUB_SHA"             'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED'             'ROLLBACK_REQUIRED=true'             'DAEMON_MUTATION=false'             'DATABASE_MUTATIONS=false'             'PROVIDER_WRITES=false'             'GENERAL_AUTONOMY=false'
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT" >/dev/null
