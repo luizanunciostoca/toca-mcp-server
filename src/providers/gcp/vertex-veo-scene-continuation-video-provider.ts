@@ -99,6 +99,7 @@ export class VertexVeoSceneContinuationVideoProvider {
         parameters: {
           aspectRatio: '9:16',
           durationSeconds: request.seconds,
+          generateAudio: false,
           storageUri: storagePrefix,
           sampleCount: 1,
           resizeMode: 'crop',
