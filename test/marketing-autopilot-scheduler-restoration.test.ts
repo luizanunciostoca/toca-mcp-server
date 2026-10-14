@@ -268,7 +268,8 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
       canaryContentItemId: productionCanaryId,
       canaryScheduledAt: '2026-10-15T09:00:00-03:00',
       rollForwardFromContentItemId: 'MKT-20260917-SUNSET-FEED-0900',
-      rollForwardReason: 'EXPIRED_PRIOR_CANARY_NO_VERIFIED_PUBLICATION_FRESH_OWNER_APPROVED_QA_PASSED_OCTOBER',
+      rollForwardReason:
+        'EXPIRED_PRIOR_CANARY_NO_VERIFIED_PUBLICATION_FRESH_OWNER_APPROVED_QA_PASSED_OCTOBER',
       promoteToLimitedAfterVerifiedCanary: true,
       generalAutonomy: false,
       limited: { generalAutonomy: false },
@@ -417,9 +418,7 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
       extraEnv: { ...env, MARKETING_AUTOPILOT_COMMAND_PATH: path },
     });
     expect(verified.status).not.toBe(0);
-    expect(verified.stderr).toContain(
-      'AUTOPILOT_CANARY_COMMAND_PROTECTED_CAPTION_MISMATCH',
-    );
+    expect(verified.stderr).toContain('AUTOPILOT_CANARY_COMMAND_PROTECTED_CAPTION_MISMATCH');
   });
 
   it('selects only the 09:00 canary before any provider-verified publication exists', () => {
