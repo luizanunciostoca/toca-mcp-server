@@ -71,14 +71,14 @@ jobs:
           read_key_once() {
             local key="$1" count actual
             count="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {count++} END {print count+0}' <<<"$BODY")"
-            test "$count" -eq 1
+            test "$count" -eq 1 || return 1
             actual="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {print substr($0,length(prefix)+1)}' <<<"$BODY")"
-            test -n "$actual"
+            test -n "$actual" || return 1
             printf '%s' "$actual"
           }
           require_key_value_once() {
             local key="$1" expected="$2" actual
-            actual="$(read_key_once "$key")"
+            actual="$(read_key_once "$key")" || return 1
             test "$actual" = "$expected"
           }
 
@@ -119,7 +119,7 @@ jobs:
           require_control_value_once() {
             local key="$1" expected="$2" count actual
             count="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {count++} END {print count+0}' <<<"$CONTROL_BODY")"
-            test "$count" -eq 1
+            test "$count" -eq 1 || return 1
             actual="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {print substr($0,length(prefix)+1)}' <<<"$CONTROL_BODY")"
             test "$actual" = "$expected"
           }
@@ -140,24 +140,38 @@ jobs:
           CURRENT_MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
           test "$CURRENT_MAIN_SHA" = "$GITHUB_SHA"
           LIVE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}")"
-          test "$(jq -r '.state' <<<"$LIVE_JSON")" = open
-          BODY="$(jq -r '.body // ""' <<<"$LIVE_JSON")"
-          test "$(grep -Fxc 'AUTHORIZATION_STATE=ACTIVE' <<<"$BODY" || true)" -eq 1
-          test "$(grep -Fxc 'VIDEO_GENERATIVE_SMOKE=AUTHORIZED' <<<"$BODY" || true)" -eq 1
-          test "$(grep -Fxc "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA" <<<"$BODY" || true)" -eq 1
-          CONSUMED_BODY="$(awk '
-            $0=="AUTHORIZATION_STATE=ACTIVE" {$0="AUTHORIZATION_STATE=CONSUMED_EXECUTION_STARTED"}
-            $0=="VIDEO_GENERATIVE_SMOKE=AUTHORIZED" {$0="VIDEO_GENERATIVE_SMOKE=CONSUMED"}
-            {print}
-          ' <<<"$BODY")"
+          # Revalidate the complete previously validated authority, not selected markers.
+          jq -e --slurpfile validated /tmp/video-auth.json '
+            def authority: {id, number, html_url, title, user: {id: .user.id, login: .user.login}, body};
+            (.state == "open") and
+            (.updated_at == $validated[0].updated_at) and
+            (authority == ($validated[0] | authority))
+          ' <<<"$LIVE_JSON" >/dev/null
+
+          CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
+          require_control_value_once() {
+            local key="$1" expected="$2" count actual
+            count="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {count++} END {print count+0}' <<<"$CONTROL_BODY")"
+            test "$count" -eq 1 || return 1
+            actual="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {print substr($0,length(prefix)+1)}' <<<"$CONTROL_BODY")"
+            test "$actual" = "$expected"
+          }
+          require_control_value_once MAIN_STABILITY PASS
+          require_control_value_once EVALUATED_MAIN_SHA "$GITHUB_SHA"
+          require_control_value_once MERGE_RESERVATION NONE
+
+          # Close only: never overwrite a concurrent owner edit/revocation with a stale body.
+          # Closed state is the one-shot barrier; the consumption receipt is append-only.
           gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}" \
-            -f body="$CONSUMED_BODY" -f state=closed >/tmp/video-auth-consumed.json
-          jq -e '.state == "closed"' /tmp/video-auth-consumed.json >/dev/null
-          READBACK="$(jq -r '.body // ""' /tmp/video-auth-consumed.json)"
-          test "$(grep -Fxc 'AUTHORIZATION_STATE=CONSUMED_EXECUTION_STARTED' <<<"$READBACK" || true)" -eq 1
-          test "$(grep -Fxc 'VIDEO_GENERATIVE_SMOKE=CONSUMED' <<<"$READBACK" || true)" -eq 1
+            -f state=closed >/dev/null
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}" > /tmp/video-auth-consumed.json
+          jq -e --slurpfile validated /tmp/video-auth.json '
+            def authority: {id, number, html_url, title, user: {id: .user.id, login: .user.login}, body};
+            (.state == "closed") and
+            (authority == ($validated[0] | authority))
+          ' /tmp/video-auth-consumed.json >/dev/null
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}/comments" \
-            -f body="VIDEO_PROVIDER_AUTHORIZATION_CONSUMED run_id=${GITHUB_RUN_ID} candidate_sha=${GITHUB_SHA} financial_ceiling=${VIDEO_PROVIDER_FINANCIAL_CEILING} publication=false scheduling=false paid_media=false" >/dev/null
+            -f body="VIDEO_PROVIDER_AUTHORIZATION_CONSUMED AUTHORIZATION_STATE=CONSUMED_EXECUTION_STARTED VIDEO_GENERATIVE_SMOKE=CONSUMED run_id=${GITHUB_RUN_ID} candidate_sha=${GITHUB_SHA} financial_ceiling=${VIDEO_PROVIDER_FINANCIAL_CEILING} publication=false scheduling=false paid_media=false" >/dev/null
           echo 'VIDEO_GENERATIVE_PROVIDER_AUTHORIZATION=CONSUMED'
 
       - name: Authenticate deployer to Google Cloud
@@ -375,9 +389,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -n "${JOB_NAME:-}" ]; then
-            ! gcloud run jobs describe "$JOB_NAME" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null 2>&1
+          if [ -z "${JOB_NAME:-}" ]; then
+            echo 'VIDEO_GENERATIVE_EPHEMERAL_JOB_ABSENT=NOT_CREATED'
+            exit 0
           fi
+          # A successful scoped provider read is required; errors never mean absence.
+          JOBS_JSON="$(gcloud run jobs list --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
+            --filter="metadata.name=${JOB_NAME}" --format=json)"
+          jq -e --arg job "$JOB_NAME" '
+            type == "array" and
+            all(.[]; ((.metadata.name // .name // null) | type == "string")) and
+            all(.[]; ((.metadata.name // .name) | length > 0)) and
+            ([.[] | select(((.metadata.name // .name) | split("/") | last) == $job)] | length == 0)
+          ' <<<"$JOBS_JSON" >/dev/null
           echo 'VIDEO_GENERATIVE_EPHEMERAL_JOB_ABSENT=PASS'
 
       - name: Upload exact candidate and sanitized evidence

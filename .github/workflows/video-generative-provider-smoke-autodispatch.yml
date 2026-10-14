@@ -53,14 +53,14 @@ jobs:
           read_key_once() {
             local key="$1" count actual
             count="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {count++} END {print count+0}' <<<"$BODY")"
-            test "$count" -eq 1
+            test "$count" -eq 1 || return 1
             actual="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {print substr($0,length(prefix)+1)}' <<<"$BODY")"
-            test -n "$actual"
+            test -n "$actual" || return 1
             printf '%s' "$actual"
           }
           require_key_value_once() {
             local key="$1" expected="$2" actual
-            actual="$(read_key_once "$key")"
+            actual="$(read_key_once "$key")" || return 1
             test "$actual" = "$expected"
           }
 
@@ -102,7 +102,7 @@ jobs:
           require_control_value_once() {
             local key="$1" expected="$2" count actual
             count="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {count++} END {print count+0}' <<<"$CONTROL_BODY")"
-            test "$count" -eq 1
+            test "$count" -eq 1 || return 1
             actual="$(awk -v prefix="${key}=" 'index($0,prefix)==1 {print substr($0,length(prefix)+1)}' <<<"$CONTROL_BODY")"
             test "$actual" = "$expected"
           }

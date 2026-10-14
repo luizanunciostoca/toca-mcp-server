@@ -105,3 +105,11 @@ The source master, source SHA, content item, provider, model and durable output 
 The workflow uploads the exact MP4 plus sanitized runtime-binding, provider-result and readback evidence as a short-retention Actions artifact.
 
 Successful smoke evidence is necessary but not sufficient to promote the capability from `IMPLEMENTED` to `PRODUCTION_VALIDATED`. Human source-vs-output QA and canonical finalization remain separate gates. No successful smoke authorizes publishing or scheduling.
+
+## Executable authorization and cleanup regressions
+
+The key parser explicitly returns on duplicate or empty values, including when Bash disables errexit in command substitution or conditional callers. Both dispatch and execution are covered by behavioral shell tests, not just string matching.
+
+Consumption compares the complete validated authorization body, issue identity, author, title and update timestamp against a fresh provider read. It rechecks the main-stability reservation and closes only the issue state; it never rewrites the owner body. A separate GET must prove closed state and unchanged full authority before an append-only consumption receipt is recorded. A concurrent revocation or reduced ceiling is preserved and blocks execution. Closed state is the one-shot barrier, even though the original body is preserved. Failure after closure is not permission to reopen and retry automatically.
+
+Cleanup requires a successful, project/region-scoped Cloud Run job list and an empty exact-name match. Permission failures, malformed responses and remaining jobs fail closed. A run that never assigned a job reports NOT_CREATED rather than manufacturing an absence PASS. These regression tests use local CLI doubles and prove controller behavior only; real provider generation and cleanup still require separate runtime evidence.
