@@ -4,13 +4,13 @@
 
 O AG-09 não usa **Adplane**, Windsor.ai nem outro agregador como origem ou fallback de Meta Ads. Disponibilidade de um conector do ChatGPT não comprova fonte de dados do TOCA OS.
 
-A implementação efetivamente localizada no GitHub é `luizanunciostoca/toca-mcp-server`. Em 2026-10-14 a referência solicitada `luizanunciostoca/toca-media-server` não foi localizada na conta ou no índice consultado; **não declarar sua identidade, conexão nem deploy comprovados**. Se for um apelido ou outro repositório, reconciliar por URL/ID confirmado em R21, sem criar serviço concorrente.
+O proprietário confirmou como repositório correto `luizanunciostoca/toca-mcp-server`. A integração Meta Ads deve permanecer neste código canônico, sem criar repositório ou serviço concorrente e sem depender de Adplane.
 
 Rota nativa verificada no código:
 
 `TOCA Core / MCP -> meta_ads.insights.get -> MetaAdsReadProvider.getInsights -> MetaApiClient GET -> Meta Marketing API act_{adAccountId}/insights`
 
-Identidade do código: `src/tools/register-meta-ads-read.ts`, `src/mcp/runtime-capability-resolver.ts`, `src/providers/meta-ads/meta-ads-read-provider.ts`, `src/providers/meta/meta-api-client.ts`. O adaptador `src/measurement/ag09-native-meta-insights.ts` acrescenta proveniência nativa, escopo, janela e distinção entre `NO_ROWS` e valores zero explícitos. A presença deste contrato **não** comprova token/conta conectados nem resposta LIVE.
+Identidade do código: `src/mcp/runtime-capability-resolver.ts` (caminho Core realmente executado por `toca.execute`), `src/tools/register-meta-ads-read.ts` (registro legado/alternativo), `src/providers/meta-ads/meta-ads-read-provider.ts` e `src/providers/meta/meta-api-client.ts`. O adaptador `src/measurement/ag09-native-meta-insights.ts` acrescenta proveniência nativa, escopo, janela e distinção entre `NO_ROWS` e valores zero explícitos. A presença deste contrato **não** comprova token/conta conectados nem resposta LIVE.
 
 Para hierarquia, utilizar `meta_ads.accounts.list`, `meta_ads.campaigns.list`, `meta_ads.adsets.list`, `meta_ads.ads.list` e `meta_ads.insights.get` com `level=account|campaign|adset|ad`. Confirmar conta alvo, permissão `ads_read`, moeda e IDs. Consulta Meta/Instagram não deve usar endpoints de escrita.
 
@@ -27,7 +27,7 @@ Fuso de apresentação: `America/Bahia`; preservar também fuso da conta do prov
 
 Ciclo normal horário: publicação, engagement, leads, alcance, CTR, frequência, investimento e CPL com escopo/denominador. Ciclo temporário de campanha autorizado por AG-01: acompanhar campanha/conjunto/anúncio e janela, comparar creative/copy/audience, detectar fadiga, atribuição fraca e sinal de stop/pause; retornar automaticamente ao painel normal após o encerramento confirmado. Não editar nem duplicar a definição de tarefas ChatGPT.
 
-Coletar cada janela uma vez por `provider + account + level + entity IDs + dates + breakdown`; descartar somente linhas **integralmente idênticas**, sem agregar breakdowns distintos. A ausência de linha de insights é `NO_ROWS` e **não** investimento 0. `spend=0` explícito pode ser valor real, mas `ACTIVE + spend=0` é hipótese para reconciliação de entrega/conta/janela, jamais sucesso.
+Identificar cada janela por `provider + account + level + entity IDs + dates + breakdown`. Descarta-se duplicata apenas quando **ID da entidade do nível consultado e limites de data estão presentes**, e o JSON completo (com chaves canônicas) é igual. Sem identidade suficiente, preservar linhas mesmo com valores aparentemente iguais, evitando perder campanhas/conjuntos/anúncios distintos. A ausência de linha de insights é `NO_ROWS` e **não** investimento 0. `spend=0` explícito pode ser valor real, mas `ACTIVE + spend=0` é hipótese para reconciliação de entrega/conta/janela, jamais sucesso.
 
 Taxas exigem denominador válido. Eventos `actions` da Meta não equivalem automaticamente a leads qualificados, conversões financeiras ou revenue CRM. ROAS só é exibível com gasto e receita realizados, mesma moeda, atribuição conciliada e janela compatível; caso contrário `NOT_PROVEN`. Não inventar metas, orçamento, período, histórico, vendas ou campanha.
 
