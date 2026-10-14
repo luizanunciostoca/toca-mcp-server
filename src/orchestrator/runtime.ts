@@ -27,6 +27,7 @@ import {
   summarizeRedactedMessages,
   withTimeout,
 } from './safety.js';
+import type { Ag01SpecialistMissionCoordinator } from './specialist-missions.js';
 
 export const DEFAULT_ORCHESTRATOR_BUDGET: OrchestratorBudget = {
   maxToolCalls: 12,
@@ -46,6 +47,7 @@ export interface TocaOrchestratorRuntimeDependencies {
   readonly artifacts: CanonicalArtifactResolver;
   readonly planner: PlanBuilder;
   readonly core: CoreCapabilityGateway;
+  readonly specialistMissions?: Ag01SpecialistMissionCoordinator;
   readonly deadLetters: DeadLetterSink;
   readonly budget?: Partial<OrchestratorBudget>;
   readonly now?: () => Date;
@@ -422,13 +424,30 @@ export class TocaOrchestratorRuntime {
 
       try {
         const execution = await withTimeout(
-          this.dependencies.core.execute({
-            capabilityId: inspection.canonicalCapabilityId,
-            payload: step.payload,
-            correlationId: checkpoint.correlationId,
-            identity,
-            ...(checkpoint.approvalId ? { approvalId: checkpoint.approvalId } : {}),
-          }),
+          this.dependencies.specialistMissions &&
+          !inspection.sideEffects &&
+          !inspection.approvalRequired &&
+          this.dependencies.specialistMissions.supports(inspection.canonicalCapabilityId)
+            ? this.dependencies.specialistMissions.executePlannedStep({
+                routeId: checkpoint.plan.routeId,
+                capabilityId: inspection.canonicalCapabilityId,
+                payload: step.payload,
+                owner: checkpoint.plan.primaryAgent,
+                priority: getRouteDefinition(checkpoint.plan.routeId).priority === 'UNSPECIFIED'
+                  ? 'P1'
+                  : getRouteDefinition(checkpoint.plan.routeId).priority,
+                correlationId: checkpoint.correlationId,
+                idempotencyKey: `${checkpoint.runId}:${step.stepId}`,
+                expiresAt: new Date(this.#now().getTime() + this.#budget.toolTimeoutMs + 60_000).toISOString(),
+                identity,
+              })
+            : this.dependencies.core.execute({
+                capabilityId: inspection.canonicalCapabilityId,
+                payload: step.payload,
+                correlationId: checkpoint.correlationId,
+                identity,
+                ...(checkpoint.approvalId ? { approvalId: checkpoint.approvalId } : {}),
+              }),
           this.#budget.toolTimeoutMs,
         );
         if (inspection.sideEffects && !execution.providerReadbackVerified) {
