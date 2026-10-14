@@ -27,7 +27,10 @@ import {
   summarizeRedactedMessages,
   withTimeout,
 } from './safety.js';
-import type { Ag01SpecialistMissionCoordinator } from './specialist-missions.js';
+import {
+  SPECIALIST_MISSION_MAX_TTL_MS,
+  type Ag01SpecialistMissionCoordinator,
+} from './specialist-missions.js';
 
 export const DEFAULT_ORCHESTRATOR_BUDGET: OrchestratorBudget = {
   maxToolCalls: 12,
@@ -224,6 +227,7 @@ export class TocaOrchestratorRuntime {
     const checkpoint: OrchestratorCheckpoint = {
       runId: deterministicId('ag01run', tenantId, messageId),
       messageId,
+      missionCreatedAt: this.#now().toISOString(),
       correlationId,
       causationId,
       plan,
@@ -425,6 +429,7 @@ export class TocaOrchestratorRuntime {
       try {
         const execution = await withTimeout(
           this.dependencies.specialistMissions &&
+            checkpoint.missionCreatedAt &&
             !inspection.sideEffects &&
             !inspection.approvalRequired &&
             this.dependencies.specialistMissions.supports(inspection.canonicalCapabilityId)
@@ -442,7 +447,7 @@ export class TocaOrchestratorRuntime {
                 correlationId: checkpoint.correlationId,
                 idempotencyKey: `${checkpoint.runId}:${step.stepId}`,
                 expiresAt: new Date(
-                  this.#now().getTime() + this.#budget.toolTimeoutMs + 60_000,
+                  Date.parse(checkpoint.missionCreatedAt!) + SPECIALIST_MISSION_MAX_TTL_MS,
                 ).toISOString(),
                 identity,
               })
