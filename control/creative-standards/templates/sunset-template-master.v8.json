@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "templateId": "SUNSET_TEMPLATE_MASTER_V8",
   "status": "APPROVED_VISUAL_CONTRACT",
   "runtimeEligible": false,
@@ -46,12 +46,7 @@
   },
   "cta": {
     "text": "Garanta seu ingresso",
-    "region": {
-      "x": 327,
-      "y": 329,
-      "w": 441,
-      "h": 57
-    },
+    "region": { "x": 327, "y": 329, "w": 441, "h": 57 },
     "background": "TRANSPARENT",
     "borderColor": "#FFFFFF",
     "textColor": "#FFFFFF",
@@ -61,21 +56,11 @@
     "lines": [
       {
         "text": "PÔR DO SOL",
-        "region": {
-          "x": 179,
-          "y": 430,
-          "w": 722,
-          "h": 112
-        }
+        "region": { "x": 179, "y": 430, "w": 722, "h": 112 }
       },
       {
         "text": "na Toca",
-        "region": {
-          "x": 341,
-          "y": 536,
-          "w": 410,
-          "h": 106
-        }
+        "region": { "x": 341, "y": 536, "w": 410, "h": 106 }
       }
     ],
     "fontRole": "HIGH_CONTRAST_EDITORIAL_SERIF_DIDONE",
@@ -85,91 +70,56 @@
   "supportStrips": [
     {
       "text": "Vem curtir um",
-      "region": {
-        "x": 89,
-        "y": 802,
-        "w": 350,
-        "h": 49
-      },
+      "region": { "x": 89, "y": 802, "w": 350, "h": 49 },
       "background": "#FFFFFF",
       "textColor": "#111111",
       "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
     },
     {
       "text": "dia inesquecível",
-      "region": {
-        "x": 89,
-        "y": 855,
-        "w": 401,
-        "h": 50
-      },
+      "region": { "x": 89, "y": 855, "w": 401, "h": 50 },
       "background": "#FFFFFF",
       "textColor": "#111111",
       "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
     },
     {
       "text": "na Toca!",
-      "region": {
-        "x": 89,
-        "y": 911,
-        "w": 222,
-        "h": 49
-      },
+      "region": { "x": 89, "y": 911, "w": 222, "h": 49 },
       "background": "#FFFFFF",
       "textColor": "#111111",
       "fontRole": "SANS_MEDIUM_OR_SEMIBOLD"
     }
   ],
   "footer": {
-    "region": {
-      "x": 170,
-      "y": 1690,
-      "w": 744,
-      "h": 128
-    },
-    "brandOrder": ["CORONA", "TOCA_DO_MORCEGO", "RED_BULL", "MORRO_DIGITAL"],
+    "region": { "x": 170, "y": 1690, "w": 744, "h": 128 },
+    "brandOrder": ["TOCA_DO_MORCEGO", "CORONA", "RED_BULL", "MORRO_DIGITAL"],
     "assetPolicy": "OFFICIAL_PINNED_ASSETS_ONLY",
     "allowAiBrandReconstruction": false,
     "colorMode": "WHITE"
   },
   "protectedRegions": [
-    {
-      "id": "CTA",
-      "x": 327,
-      "y": 329,
-      "w": 441,
-      "h": 57
-    },
-    {
-      "id": "HEADLINE",
-      "x": 179,
-      "y": 430,
-      "w": 722,
-      "h": 212
-    },
-    {
-      "id": "SUPPORT_COPY",
-      "x": 89,
-      "y": 802,
-      "w": 401,
-      "h": 158
-    },
-    {
-      "id": "FOOTER",
-      "x": 170,
-      "y": 1690,
-      "w": 744,
-      "h": 128
-    }
+    { "id": "CTA", "x": 327, "y": 329, "w": 441, "h": 57 },
+    { "id": "HEADLINE", "x": 179, "y": 430, "w": 722, "h": 212 },
+    { "id": "SUPPORT_COPY", "x": 89, "y": 802, "w": 401, "h": 158 },
+    { "id": "FOOTER", "x": 170, "y": 1690, "w": 744, "h": 128 }
   ],
+  "semanticEligibility": {
+    "MUSIC": {
+      "requiresAny": ["MUSIC_DJ", "DJ_GEAR"],
+      "personAloneIsSufficient": false
+    }
+  },
   "invariants": [
+    "FULLBLEED_HERO_FAMILY",
     "FIXED_CTA",
     "FIXED_TWO_LINE_HEADLINE",
     "FIXED_THREE_SUPPORT_STRIPS_COPY_AND_POSITIONS",
     "FIXED_FOOTER_ORDER",
     "FIXED_TYPOGRAPHY_ROLES",
     "NO_CROSS_TEMPLATE_COMPONENT_MIXING",
-    "NO_EDITOR_GUIDANCE_IN_FINAL_EXPORT"
+    "NO_EDITOR_GUIDANCE_IN_FINAL_EXPORT",
+    "NO_PROTECTED_FEATURE_OVERLAP",
+    "SAFE_AREA_HARD_GATE"
   ],
   "qualityGate": [
     "CANVAS_1080X1920",
@@ -183,6 +133,10 @@
     "FOOTER_ORDER_MATCHES",
     "EDITOR_GUIDANCE_REMOVED",
     "SUFFICIENT_CONTRAST",
+    "PROTECTED_FEATURE_AUDIT_PASS",
+    "SAFE_AREA_PASS",
+    "MOBILE_LEGIBILITY_PASS",
+    "SEMANTIC_ASSET_GATE_PASS",
     "NO_AI_RECONSTRUCTED_LOGOS",
     "NO_CROSS_TEMPLATE_MIXING",
     "NO_TECHNICAL_GUIDANCE_IN_EXPORT"
