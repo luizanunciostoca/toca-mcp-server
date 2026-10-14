@@ -18,6 +18,15 @@ const policy = JSON.parse(
     generalAutonomy?: boolean;
     limited?: { generalAutonomy?: boolean };
   };
+  bindings?: Record<
+    string,
+    {
+      [key: string]: unknown;
+      creativeTruthBinding: Record<string, unknown>;
+      brandDeterminism: Record<string, unknown>;
+      rightsClearance: Record<string, unknown>;
+    }
+  >;
   standingAuthorization?: {
     authority?: string;
     allowCopyMutation?: boolean;
@@ -25,12 +34,12 @@ const policy = JSON.parse(
   };
 };
 
-const productionCanaryId = 'MKT-20260917-SUNSET-FEED-0900';
+const productionCanaryId = 'MKT-20261015-SUNSET-FEED-0900';
 const canaryId = 'MKT-20260916-SUNSET-FEED-0900';
 const storyId = 'MKT-20260916-SUNSET-STORY-1100';
 const feedSha = '1c6c961dff3ed10ce0edfa13e2096c2849ade51ff99ade6a6fe14688cd2d1226';
 const storySha = 'c5fb0667575754c53c06e16fdda44db822dc0753f257c88ae8795f88ce564dda';
-const productionCanarySha = 'a495fa29db54dc2af24700b0556e8a6d1fb01472c333067c91ee6d613525e4e6';
+const productionCanarySha = '3685d9e86d86311fb98f7469fbb97ff7aa2023f26abe820d5033c3d4bcdcf973';
 
 function feedRow(overrides: Record<string, string> = {}) {
   return {
@@ -60,7 +69,7 @@ function feedRow(overrides: Record<string, string> = {}) {
     registry_revision: 'MKTREG-GCP-AUTOPILOT-20260916-0900-V1',
     scheduling_status: 'CANARY_READY',
     scheduling_policy: 'TOCA_MARKETING_AUTOPILOT_GCP_SCHEDULER_V1',
-    creative_standard_id: 'SUNSET_FEED_PHOTO_V1',
+    creative_standard_id: 'SUNSET_FEED_V1',
     creative_standard_version: '1.0',
     brand_asset_id: '',
     creative_truth_policy_id: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
@@ -117,25 +126,25 @@ function storyRow(overrides: Record<string, string> = {}) {
 function productionCanaryFeedRow(overrides: Record<string, string> = {}) {
   return {
     content_item_id: productionCanaryId,
-    scheduled_at: '2026-09-17T09:00:00-03:00',
+    scheduled_at: '2026-10-15T09:00:00-03:00',
     timezone: 'America/Bahia',
     operation: 'SUNSET',
     channel: 'INSTAGRAM',
     format: 'FEED',
     message:
-      'O fim de tarde começa no detalhe: um bom drink, a vista de Morro e o tempo desacelerando na Toca.',
-    cta: 'Salve este convite e venha viver o Sunset.',
+      'O horizonte dourado é um convite para esquecer as horas e acompanhar o sol até o mar. 🌅 #TocaDoMorcego #MorroDeSaoPaulo #PorDoSol',
+    cta: 'Salve para lembrar do próximo Sunset.',
     status: 'PRODUCED',
-    creative_id: 'CR-MKT-20260903-SUNSET-FEED-0900-V1',
-    copy_id: 'CP-MKT-20260903-SUNSET-FEED-0900-V1',
+    creative_id: 'CR-MKT-20261015-SUNSET-FEED-0900-PHOTO4X5-CANDIDATE-V1',
+    copy_id: 'CP-MKT-20261015-SUNSET-FEED-0900-V1',
     approval_status: 'APPROVED',
     approval_mode: 'EXPLICIT_APPROVAL',
     publication_id: '',
     provider_external_id: '',
     provider_status: '',
-    correlation_id: 'CORR-MKT-20260917-SUNSET-FEED-0900-ROLLOVER-V1',
-    master_asset_id: 'MM-SUN-0268-FEED4X5-V1',
-    master_drive_file_id: '1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK',
+    correlation_id: 'CORR-MKT-20261015-SUNSET-FEED-0900-V1',
+    master_asset_id: 'MM-SUN-0005-FEED4X5-202610-V1',
+    master_drive_file_id: '1L5vGFsdD1pXU-Fyqf3AZrsNEFevd1Cql',
     master_status: 'MASTER_READY',
     story_creative_id: '',
     story_drive_file_id: '',
@@ -143,7 +152,7 @@ function productionCanaryFeedRow(overrides: Record<string, string> = {}) {
     registry_revision: '',
     scheduling_status: '',
     scheduling_policy: '',
-    creative_standard_id: 'SUNSET_FEED_PHOTO_V1',
+    creative_standard_id: 'SUNSET_FEED_V1',
     creative_standard_version: '1.0',
     creative_truth_policy_id: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
     brand_integrity_status: 'PASSED',
@@ -187,6 +196,39 @@ function runScheduler({
   if (!useProductionPolicy) {
     testPolicy.dailyRollout.canaryContentItemId = canaryId;
     testPolicy.dailyRollout.canaryScheduledAt = '2026-09-16T09:00:00-03:00';
+    const productionBinding = testPolicy.bindings?.[productionCanaryId];
+    if (!productionBinding) throw new Error('AUTOPILOT_FIXTURE_PROTECTED_BINDING_REQUIRED');
+    const fixtureCanary = feedRow();
+    testPolicy.bindings = {
+      ...testPolicy.bindings,
+      [canaryId]: {
+        ...productionBinding,
+        expectedScheduledAt: fixtureCanary.scheduled_at,
+        masterAssetId: fixtureCanary.master_asset_id,
+        driveFileId: fixtureCanary.master_drive_file_id,
+        outputSha256: fixtureCanary.output_sha256,
+        creativeId: fixtureCanary.creative_id,
+        copyId: fixtureCanary.copy_id,
+        registryMessage: fixtureCanary.message,
+        registryCta: fixtureCanary.cta,
+        approvedCaption: `${fixtureCanary.message}\n\n${fixtureCanary.cta}`,
+        correlationId: fixtureCanary.correlation_id,
+        creativeTruthBinding: {
+          ...productionBinding.creativeTruthBinding,
+          creativeId: fixtureCanary.creative_id,
+          outputSha256: fixtureCanary.output_sha256,
+        },
+        brandDeterminism: {
+          ...productionBinding.brandDeterminism,
+          assetSha256: fixtureCanary.output_sha256,
+        },
+        rightsClearance: {
+          ...productionBinding.rightsClearance,
+          evidenceRef: `GOOGLE_DRIVE:${fixtureCanary.master_drive_file_id}`,
+          assetSha256: fixtureCanary.output_sha256,
+        },
+      },
+    };
   }
   writeFileSync(policyFixture, `${JSON.stringify(testPolicy)}\n`, 'utf8');
   return spawnSync('node', [script, mode], {
@@ -224,15 +266,16 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     expect(workflow).not.toContain('REQUESTED_MODE');
     expect(policy.dailyRollout).toMatchObject({
       canaryContentItemId: productionCanaryId,
-      canaryScheduledAt: '2026-09-17T09:00:00-03:00',
-      rollForwardFromContentItemId: 'MKT-20260916-SUNSET-STORY-2000',
-      rollForwardReason: 'PREVIOUS_CANARY_WINDOW_EXPIRED_NO_SCHEDULE_RUN',
+      canaryScheduledAt: '2026-10-15T09:00:00-03:00',
+      rollForwardFromContentItemId: 'MKT-20260917-SUNSET-FEED-0900',
+      rollForwardReason:
+        'EXPIRED_PRIOR_CANARY_NO_VERIFIED_PUBLICATION_FRESH_OWNER_APPROVED_QA_PASSED_OCTOBER',
       promoteToLimitedAfterVerifiedCanary: true,
       generalAutonomy: false,
       limited: { generalAutonomy: false },
     });
     expect(policy.standingAuthorization).toMatchObject({
-      authority: 'USER_EXPLICIT_DAILY_PUBLICATION_AUTHORIZATION_2026-09-16',
+      authority: 'OWNER_TOCA_OCT2026_ORGANIC_FEED_ISSUE_985_COMMENT_6171815962',
       allowCopyMutation: false,
       allowAssetMutation: false,
     });
@@ -240,7 +283,7 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
 
   it('selects the production next-day 09:00 Feed as the only CANARY candidate', () => {
     const result = runScheduler({
-      now: '2026-09-17T08:58:00-03:00',
+      now: '2026-10-15T08:58:00-03:00',
       rows: [productionCanaryFeedRow()],
       useProductionPolicy: true,
     });
@@ -251,7 +294,7 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
       canaryVerified: false,
       candidate: {
         contentItemId: productionCanaryId,
-        scheduledAt: '2026-09-17T09:00:00-03:00',
+        scheduledAt: '2026-10-15T09:00:00-03:00',
         waitSeconds: 120,
         format: 'FEED',
         expectedAssetSha256: productionCanarySha,
@@ -263,7 +306,7 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     const targetCodeSha = '3'.repeat(40);
     const result = runScheduler({
       mode: 'build-command',
-      now: '2026-09-17T09:00:00-03:00',
+      now: '2026-10-15T09:00:00-03:00',
       rows: [productionCanaryFeedRow()],
       useProductionPolicy: true,
       extraEnv: {
@@ -279,11 +322,11 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
         action: 'PUBLISH_NOW',
         contentItemId: productionCanaryId,
         format: 'FEED_IMAGE',
-        assetId: 'MM-SUN-0268-FEED4X5-V1',
-        driveFileId: '1uFK4y1fqUHi-m4qn6m-TB-ehBC0Y7JOK',
+        assetId: 'MM-SUN-0005-FEED4X5-202610-V1',
+        driveFileId: '1L5vGFsdD1pXU-Fyqf3AZrsNEFevd1Cql',
         expectedAssetSha256: productionCanarySha,
         caption:
-          'O fim de tarde começa no detalhe: um bom drink, a vista de Morro e o tempo desacelerando na Toca.\n\nSalve este convite e venha viver o Sunset.',
+          'O horizonte dourado é um convite para esquecer as horas e acompanhar o sol até o mar. 🌅 #TocaDoMorcego #MorroDeSaoPaulo #PorDoSol\n\nSalve para lembrar do próximo Sunset.',
         targetCodeSha,
         creativeTruthBinding: {
           qualityGateStatus: 'PASSED',
@@ -291,11 +334,91 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
         },
         schedulerBinding: {
           rolloutPhase: 'CANARY',
-          notBefore: '2026-09-17T09:00:00-03:00',
-          expiresAt: '2026-09-17T09:30:00-03:00',
+          notBefore: '2026-10-15T09:00:00-03:00',
+          expiresAt: '2026-10-15T09:30:00-03:00',
         },
       },
     });
+  });
+
+  it.each([
+    [
+      'Drive file',
+      { master_drive_file_id: 'tampered-drive-id' },
+      'AUTOPILOT_CANARY_PROTECTED_DRIVE_MISMATCH',
+    ],
+    ['asset SHA', { output_sha256: 'f'.repeat(64) }, 'AUTOPILOT_CANARY_PROTECTED_SHA256_MISMATCH'],
+    [
+      'caption copy',
+      { message: 'Texto alterado sem nova aprovação.' },
+      'AUTOPILOT_CANARY_PROTECTED_MESSAGE_MISMATCH',
+    ],
+    ['CTA copy', { cta: 'Compre outro produto.' }, 'AUTOPILOT_CANARY_PROTECTED_CTA_MISMATCH'],
+    [
+      'creative ID',
+      { creative_id: 'CR-UNAPPROVED' },
+      'AUTOPILOT_CANARY_PROTECTED_CREATIVE_ID_MISMATCH',
+    ],
+    [
+      'master asset',
+      { master_asset_id: 'MM-UNAPPROVED' },
+      'AUTOPILOT_CANARY_PROTECTED_ASSET_MISMATCH',
+    ],
+    ['copy ID', { copy_id: 'CP-UNAPPROVED' }, 'AUTOPILOT_CANARY_PROTECTED_COPY_ID_MISMATCH'],
+    [
+      'correlation ID',
+      { correlation_id: 'CORR-UNAPPROVED' },
+      'AUTOPILOT_CANARY_PROTECTED_CORRELATION_MISMATCH',
+    ],
+  ])(
+    'rejects unapproved %s drift for the protected October canary',
+    (_kind, rowChange, expectedError) => {
+      const attempt = runScheduler({
+        mode: 'build-command',
+        now: '2026-10-15T09:00:00-03:00',
+        rows: [productionCanaryFeedRow(rowChange)],
+        useProductionPolicy: true,
+        extraEnv: {
+          MARKETING_AUTOPILOT_CONTENT_ITEM_ID: productionCanaryId,
+          MARKETING_AUTOPILOT_TARGET_CODE_SHA: '3'.repeat(40),
+        },
+      });
+      expect(attempt.status).not.toBe(0);
+      expect(attempt.stderr).toContain(expectedError);
+    },
+  );
+
+  it('rejects an altered generated command even when the approved registry row has not changed', () => {
+    const env = {
+      MARKETING_AUTOPILOT_CONTENT_ITEM_ID: productionCanaryId,
+      MARKETING_AUTOPILOT_TARGET_CODE_SHA: '3'.repeat(40),
+    };
+    const built = runScheduler({
+      mode: 'build-command',
+      now: '2026-10-15T09:00:00-03:00',
+      rows: [productionCanaryFeedRow()],
+      useProductionPolicy: true,
+      extraEnv: env,
+    });
+    expect(built.status, built.stderr).toBe(0);
+    const approvedCommand = (parseOutput(built.stdout) as { command: Record<string, unknown> })
+      .command;
+    const path = join(mkdtempSync(join(tmpdir(), 'toca-canary-command-')), 'forged.json');
+    writeFileSync(
+      path,
+      JSON.stringify({ ...approvedCommand, caption: 'Legenda adulterada' }),
+      'utf8',
+    );
+
+    const verified = runScheduler({
+      mode: 'verify-command',
+      now: '2026-10-15T09:00:00-03:00',
+      rows: [productionCanaryFeedRow()],
+      useProductionPolicy: true,
+      extraEnv: { ...env, MARKETING_AUTOPILOT_COMMAND_PATH: path },
+    });
+    expect(verified.status).not.toBe(0);
+    expect(verified.stderr).toContain('AUTOPILOT_CANARY_COMMAND_PROTECTED_CAPTION_MISMATCH');
   });
 
   it('selects only the 09:00 canary before any provider-verified publication exists', () => {
@@ -349,7 +472,7 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
         approvalMode: 'EXPLICIT_APPROVAL',
         approvalStatus: 'APPROVED',
         rightsClearance: {
-          authority: 'USER_EXPLICIT_DAILY_PUBLICATION_AUTHORIZATION_2026-09-16',
+          authority: 'OWNER_TOCA_OCT2026_ORGANIC_FEED_ISSUE_985_COMMENT_6171815962',
           assetSha256: feedSha,
         },
         creativeTruthBinding: { qualityGateStatus: 'PASSED', exactAssetBinding: true },
@@ -380,12 +503,12 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
 
   it('reports an expired unverified canary without promoting future approved content', () => {
     const result = runScheduler({
-      now: '2026-10-14T08:15:00-03:00',
+      now: '2026-10-16T08:15:00-03:00',
       rows: [
         productionCanaryFeedRow(),
         feedRow({
-          content_item_id: 'MKT-20261014-SUNSET-FEED-1500',
-          scheduled_at: '2026-10-14T15:00:00-03:00',
+          content_item_id: 'MKT-20261016-SUNSET-FEED-1500',
+          scheduled_at: '2026-10-16T15:00:00-03:00',
         }),
       ],
       useProductionPolicy: true,

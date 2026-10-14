@@ -344,7 +344,7 @@ function validateItem(item) {
   const caption = `${text(item.message)}\n\n${text(item.cta)}`;
   const correlationId = text(item.correlation_id);
 
-  return {
+  const validated = {
     item,
     format,
     scheduledAt,
@@ -380,6 +380,94 @@ function validateItem(item) {
       assetSha256: outputSha256,
     },
   };
+  assertExactCanaryBoundItem(validated);
+  return validated;
+}
+
+function protectedCanaryBinding(contentItemId) {
+  if (contentItemId !== text(policy.dailyRollout.canaryContentItemId)) return null;
+  const binding = policy.bindings?.[contentItemId];
+  assert(
+    binding && typeof binding === 'object' && !Array.isArray(binding),
+    'AUTOPILOT_CANARY_PROTECTED_BINDING_REQUIRED',
+  );
+  return binding;
+}
+
+function assertExactCanaryBoundItem(validated) {
+  const item = validated.item;
+  const bound = protectedCanaryBinding(text(item.content_item_id));
+  if (!bound) return;
+
+  const comparisons = [
+    ['SCHEDULE', validated.scheduledAt, bound.expectedScheduledAt],
+    ['OPERATION', item.operation, bound.operation],
+    ['FORMAT', validated.format, bound.format],
+    ['PUBLISH_FORMAT', validated.delivery.publishNowFormat, bound.publishNowFormat],
+    ['CONTENT_TYPE', validated.delivery.contentType, bound.contentType],
+    ['ASSET', validated.delivery.assetId, bound.masterAssetId],
+    ['DRIVE', validated.delivery.driveFileId, bound.driveFileId],
+    ['SHA256', validated.outputSha256, bound.outputSha256],
+    ['CREATIVE_ID', validated.creativeId, bound.creativeId],
+    ['COPY_ID', item.copy_id, bound.copyId],
+    ['MESSAGE', item.message, bound.registryMessage],
+    ['CTA', item.cta, bound.registryCta],
+    ['CAPTION', validated.caption, bound.approvedCaption],
+    ['CORRELATION', validated.correlationId, bound.correlationId],
+    ['IDEMPOTENCY_VERSION', 'V1', bound.idempotencyVersion],
+  ];
+  for (const [field, actual, expected] of comparisons) {
+    assert(
+      typeof expected === 'string' && text(actual) === expected,
+      `AUTOPILOT_CANARY_PROTECTED_${field}_MISMATCH`,
+    );
+  }
+  assert(
+    deepEqual(validated.creativeTruthBinding, bound.creativeTruthBinding),
+    'AUTOPILOT_CANARY_PROTECTED_CREATIVE_TRUTH_MISMATCH',
+  );
+  assert(
+    deepEqual(validated.brandDeterminism, bound.brandDeterminism),
+    'AUTOPILOT_CANARY_PROTECTED_BRAND_MISMATCH',
+  );
+  assert(
+    deepEqual(validated.rightsClearance, bound.rightsClearance),
+    'AUTOPILOT_CANARY_PROTECTED_RIGHTS_MISMATCH',
+  );
+}
+
+function assertExactCanaryBoundCommand(command) {
+  const bound = protectedCanaryBinding(text(command.contentItemId));
+  if (!bound) return;
+  const comparisons = [
+    ['SCHEDULE', command.scheduledAt, bound.expectedScheduledAt],
+    ['OPERATION', command.operation, bound.operation],
+    ['FORMAT', command.format, bound.publishNowFormat],
+    ['ASSET', command.assetId, bound.masterAssetId],
+    ['DRIVE', command.driveFileId, bound.driveFileId],
+    ['CONTENT_TYPE', command.contentType, bound.contentType],
+    ['SHA256', command.expectedAssetSha256, bound.outputSha256],
+    ['CAPTION', command.caption, bound.approvedCaption],
+    ['CORRELATION', command.correlationId, bound.correlationId],
+  ];
+  for (const [field, actual, expected] of comparisons) {
+    assert(
+      typeof expected === 'string' && text(actual) === expected,
+      `AUTOPILOT_CANARY_COMMAND_PROTECTED_${field}_MISMATCH`,
+    );
+  }
+  assert(
+    deepEqual(command.creativeTruthBinding, bound.creativeTruthBinding),
+    'AUTOPILOT_CANARY_COMMAND_PROTECTED_CREATIVE_TRUTH_MISMATCH',
+  );
+  assert(
+    deepEqual(command.brandDeterminism, bound.brandDeterminism),
+    'AUTOPILOT_CANARY_COMMAND_PROTECTED_BRAND_MISMATCH',
+  );
+  assert(
+    deepEqual(command.rightsClearance, bound.rightsClearance),
+    'AUTOPILOT_CANARY_COMMAND_PROTECTED_RIGHTS_MISMATCH',
+  );
 }
 
 function resolveDelivery(item, format, required) {
@@ -422,7 +510,7 @@ function buildCommand(validated, targetCodeSha, rolloutPhase) {
     'AUTOPILOT_IDEMPOTENCY_KEY_INVALID',
   );
 
-  return {
+  const command = {
     schemaVersion: 1,
     commandId: `autopilot-${contentItemId}-${timestampKey}`.slice(0, 128),
     action: 'PUBLISH_NOW',
@@ -463,6 +551,8 @@ function buildCommand(validated, targetCodeSha, rolloutPhase) {
       approvalAuthority: policy.standingAuthorization.authority,
     },
   };
+  assertExactCanaryBoundCommand(command);
+  return command;
 }
 
 function verifyCommand(command, validated, rolloutPhase) {
@@ -471,6 +561,7 @@ function verifyCommand(command, validated, rolloutPhase) {
   const targetCodeSha = process.env.MARKETING_AUTOPILOT_TARGET_CODE_SHA?.trim() ?? '';
 
   assert(command.action === 'PUBLISH_NOW', 'AUTOPILOT_COMMAND_ACTION_INVALID');
+  assertExactCanaryBoundCommand(command);
   assert(command.contentItemId === contentItemId, 'AUTOPILOT_COMMAND_CONTENT_ITEM_MISMATCH');
   assert(command.scheduledAt === validated.scheduledAt, 'AUTOPILOT_COMMAND_SCHEDULE_MISMATCH');
   assert(
