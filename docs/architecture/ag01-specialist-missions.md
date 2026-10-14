@@ -1,0 +1,56 @@
+# AG-01 internal specialist missions — controlled WorkflowStore bridge
+
+## Proven base and scope
+
+Baseline: `luizanunciostoca/toca-mcp-server:main` at `d4dad13cdae4ff720a572adfe63f5d3d4f88b1a1` (2026-10-14).
+Control Plane claim: `#639`, `AG01-INTERNAL-SPECIALIST-MISSIONS-WORKFLOWSTORE-20261014`; separate from existing held GCP/webhook/publishing locks. Owner authorization: `#985` (repository-only). This package is an **unmerged candidate**; local code and test authoring are not deployment or runtime integration proof. A blocked GitHub branch creation is a safety gate, not a permission to use a substitute write path.
+
+## Supported interface, no external ChatGPT tasks
+
+Only the existing `WorkflowStore` + `CoreCapabilityGateway` are used. ChatGPT Tasks do not have an established external AG-01 task-create/task-trigger/status/ACK interface in this environment. `NOT_INTEGRATED` for ChatGPT-to-ChatGPT task invocation must remain distinct from internal Core runtime capability execution. ChatGPT-side scheduled tasks are not changed by this design.
+
+Flow (opt-in): `AG-01 checkpoint decision (existing) -> internal mission manifest -> WorkflowStore.create -> claimReadySteps(owner) -> Core.inspect/execute -> actual Core executionId -> WorkflowStore.completeStep -> AG-01 result`. Existing Core policy, approvals, provider paths, readback and audit remain authoritative. An executor acknowledges **only its own** actual invocation; creating/claiming a workflow is not provider ACK. `WorkflowStore` remains owner of step state and Postgres transactional outbox. This design introduces no scheduler, queue, event bus, provider adapter, registry, advisory GitHub-comment lock, or independent Approval Store.
+
+## Minimum envelope and state mapping
+
+| Mission property | Persisted location / rule |
+| --- | --- |
+| `mission_id` | deterministic WorkflowInstance.workflowId from tenant and idempotency key |
+| `routeId`, `capability`, `owner`, `priority`, `correlationId`, `idempotencyKey` | immutable WorkflowInstance.input manifest; identity principal/tenant/workspace/org bound to workflow |
+| `expiresAt` / TTL | manifest checked before claim (no new scheduler) |
+| `payloadSha256` and `immutableSha256` | replay conflict detection (no duplicate provider call) |
+| `READY` | step READY |
+| `CLAIMED` / `STARTED` | existing WorkflowStore atomic step claim immediately sets `claimedAt` **and** `startedAt`; STARTED is internal worker state, not provider ACK; no synthetic distinct claimed event |
+| `DONE` | only after `Core.execute` returns a valid executionId/capability and `WorkflowStore.completeStep` persists it |
+| `FAILED` | Core exception followed by `WorkflowStore.failStep`; post-Core storage uncertainty stays RUNNING until reconciled |
+| `providerReadbackVerified` | returned boolean from real Core execution; false is **not** provider verified |
+
+### Fail-closed boundaries
+
+- **Only registered, READ-risk Core capabilities** with sideEffects=false and approvalRequired=false are currently eligible. Generated media, publishing, Direct/Comment, Meta campaign creation/spend and irreversible actions stay on their pre-existing pathways, awaiting separate scoped approvals and provider proof.
+- Must pass route/capability catalog, runtime `Core.inspect`, tenant/principal/route/capability authorization, owner membership and unexpired TTL. No user prompt may grant itself a route or worker principal.
+- No `google_ads.*`, `whatsapp.*` or `email.*` dispatch.
+- At-most-one `Core.execute` attempt per claim (`maxAttempts=1`). No automatic reclaim from an ambiguous RUNNING state, no blind retry after timeout/disconnect. Core's existing idempotency/approval/provider reconciliation are not replaced.
+- Readable manifest does not contain provider secrets. Claim `executionId` is required for completion/failure. The canonical worker context is internal to the same AG-01 runtime and cannot be triggered from any new unauthenticated HTTP endpoint.
+- No runtime flag defaults to enabled. To enable **after protected merge and exact-head tests**, set existing runtime environment `TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED=true` via a separately authorized deployment/change process; default remains `false`. No production service mutation is in this package.
+
+## Cross-domain campaign example (design only)
+
+- Fotos / visual curation (`R03`, AG-06): read-only metadata/quality validation if runtime-bound.
+- Photo processing (`R04`, AG-07) and video (`Rxx` canonical): read-only inspections and QA; edits/generation need separate Core policy/approval and remain excluded here.
+- Copy (`R05`, AG-04): grounded READ-only brand/factual checks when runtime-bound; generated text needs approved future expansion.
+- QA (`R01/R04`, route-specific owner): read-only compliance, metadata and proof checks.
+- Meta Ads (`R08`, owner from live route registry): diagnostics/read-only analytics only, no new campaigns/spend/budget changes.
+- Analytics (canonical Rxx): verified READ-only metrics; no ungrounded reporting.
+
+Create a mission on its owning route, with a stable idempotency key per campaign/item/capability. Existing dependent workflow-step relationships, if needed, should remain within the **existing** WorkflowStore; do not create a global queue. A mission that is externally unclaimed/invalid/expired remains gated. Final activity returns to the original AG-01 checkpoint through the existing result path, not to a new scheduler. Priority is currently **metadata**, not a new preemptive scheduling algorithm: `WorkflowStore` retains its canonical claim selection ordering. There is no claim of simultaneous ChatGPT agent execution.
+
+## Required acceptance before turning on
+
+1. Open isolated branch from exact observed main using permitted GitHub writer, after checking #639 lane claim and conflicting active owners; protected `main` direct writes forbidden.
+2. Apply candidate, run pnpm Prettier, lint, typecheck, focused tests; require full `pnpm quality` plus protected PR Quality/Autonomy/Security/Dependency/CodeQL and review, no skipped proof treated as PASS.
+3. Cross-check PostgresWorkflowStore transactionally under multi-process contention, duplicate input, stale claims, expiration, disconnection and ownership/authorization revalidation. Validate no side-effecting/financial capability can enter the READ-only path.
+4. Merge through canonical #640 reservation, reconciliation readback in #639–#642 on the **new** main SHA. GitHub merge is not runtime promotion.
+5. Separately authorize change to existing AG-01 service if desired, with production identity, flag OFF/ON canary, Core runtime-bound READ-only proving real audit/readback without financial/provider writes, health and rollback. Any current GCP permissions or health blockers remain separate.
+
+Current results: ownership registered and read back (lane READY_PARALLEL, lock HELD); source branch creation and subsequent formal lock-release update blocked by client safety restriction. Human Control Tower gate: set lane BLOCKED_EXTERNAL and lock RELEASED (or reassign exclusively in the existing state-plane) before resuming; unmerged local candidate requires real exact-main CI. No production action, paid operation, ChatGPT task modification, new scheduler or provider call.
