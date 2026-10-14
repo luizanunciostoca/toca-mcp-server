@@ -112,6 +112,7 @@ describe('AG-09 native Meta Ads analytics source', () => {
     );
     expect(getInsights).toHaveBeenCalledTimes(1);
   });
+
   it('preserves projected identical metrics when campaign IDs were not requested', async () => {
     const projected = { date_start: '2026-10-08', date_stop: '2026-10-08', spend: '0' };
     const { provider } = fakeProvider([projected, { ...projected }]);
@@ -208,5 +209,4 @@ describe('AG-09 native Meta Ads analytics source', () => {
     });
     expect(getInsights).toHaveBeenCalledTimes(1);
   });
-
 });
