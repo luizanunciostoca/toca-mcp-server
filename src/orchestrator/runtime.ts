@@ -433,9 +433,11 @@ export class TocaOrchestratorRuntime {
                 capabilityId: inspection.canonicalCapabilityId,
                 payload: step.payload,
                 owner: checkpoint.plan.primaryAgent,
-                priority: getRouteDefinition(checkpoint.plan.routeId).priority === 'UNSPECIFIED'
-                  ? 'P1'
-                  : getRouteDefinition(checkpoint.plan.routeId).priority,
+                priority: getRouteDefinition(checkpoint.plan.routeId).priority === 'P0'
+                  ? 'P0'
+                  : getRouteDefinition(checkpoint.plan.routeId).priority === 'P2'
+                    ? 'P2'
+                    : 'P1',
                 correlationId: checkpoint.correlationId,
                 idempotencyKey: `${checkpoint.runId}:${step.stepId}`,
                 expiresAt: new Date(this.#now().getTime() + this.#budget.toolTimeoutMs + 60_000).toISOString(),
