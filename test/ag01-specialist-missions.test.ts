@@ -6,6 +6,10 @@ import {
 } from '../src/orchestrator/specialist-missions.js';
 import type { CoreCapabilityGateway } from '../src/orchestrator/contracts.js';
 import { InMemoryWorkflowStore } from '../src/workflow/in-memory-workflow-store.js';
+import { InMemoryConversationStore } from '../src/orchestrator/in-memory-conversation-store.js';
+import { TocaOrchestratorRuntime } from '../src/orchestrator/runtime.js';
+import type { Ag01SpecialistMissionCoordinator as SpecialistCoordinator } from '../src/orchestrator/specialist-missions.js';
+
 
 const T0 = '2026-10-14T20:00:00.000Z';
 const T1 = '2026-10-14T21:00:00.000Z';
@@ -267,6 +271,80 @@ describe('AG-01 internal specialized missions — existing WorkflowStore, produc
     const h = harness({ approvalRequired: true });
     await expect(h.coordinator.dispatch(h.request())).rejects.toThrow(
       'AG01_MISSION_CORE_READONLY_BOUNDARY',
+    );
+    expect(h.execute).not.toHaveBeenCalled();
+  });
+
+  it('keeps the opt-in planned mission expiry immutable after a failed execution and later resume', async () => {
+    let clock = T0;
+    const h = harness();
+    const dispatch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('TRANSIENT_READ_FAILURE'))
+      .mockResolvedValueOnce({
+        executionId: 'core-returned-on-retry',
+        capabilityId: 'media.scan',
+        result: { ok: true },
+        providerReadbackVerified: false,
+      });
+    const specialistMissions = {
+      supports: vi.fn(() => true),
+      executePlannedStep: dispatch,
+    } as unknown as SpecialistCoordinator;
+    const runtime = new TocaOrchestratorRuntime({
+      conversations: new InMemoryConversationStore(),
+      routeResolver: {
+        resolve: () =>
+          Promise.resolve({ routeId: 'R03', confidence: 1, evidence: ['route:readback'] }),
+      },
+      artifacts: {
+        resolveSop: () =>
+          Promise.resolve({
+            artifactId: 'SOP-R03',
+            version: '1.0',
+            sourceRef: 'toca-os:sop-r03',
+            evidence: ['sop:readback'],
+          }),
+        resolveTemplate: () => Promise.resolve(null),
+      },
+      planner: {
+        build: () =>
+          Promise.resolve([
+            {
+              stepId: 'scan',
+              name: 'Scan assets',
+              capabilityId: 'media.scan',
+              payload: { folderId: 'test-only' },
+              maxAttempts: 2,
+            },
+          ]),
+      },
+      core: h.core,
+      specialistMissions,
+      deadLetters: { put: vi.fn(() => Promise.resolve()) },
+      now: () => new Date(clock),
+      budget: {
+        maxToolCallsPerResume: 1,
+        toolTimeoutMs: 200,
+        circuitFailureThreshold: 100,
+      },
+    });
+    const first = await runtime.handle({
+      idempotencyKey: 'stable-runtime-ttl',
+      message: 'Classify this asset',
+      identity: identity(),
+    });
+    expect(first.status).toBe('READY');
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    clock = '2026-10-14T20:05:00.000Z';
+    const recovered = await runtime.resume(first.conversationId, identity());
+    expect(recovered.status).toBe('SUCCEEDED');
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    const initial = dispatch.mock.calls[0]?.[0] as { expiresAt: string } | undefined;
+    const resumed = dispatch.mock.calls[1]?.[0] as { expiresAt: string } | undefined;
+    expect(initial?.expiresAt).toBe(resumed?.expiresAt);
+    expect(initial?.expiresAt).toBe(
+      new Date(Date.parse(T0) + SPECIALIST_MISSION_MAX_TTL_MS).toISOString(),
     );
     expect(h.execute).not.toHaveBeenCalled();
   });
