@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as capabilityEvidence from '../src/governance/capability-validation-evidence.js';
 import { SERVER_NAME, SERVER_VERSION, createTocaServer } from '../src/server.js';
 
 describe('TOCA MCP production foundation', () => {
+  afterEach(() => vi.restoreAllMocks());
   it('exposes stable server metadata', () => {
     expect(SERVER_NAME).toBe('toca-mcp-server');
     expect(SERVER_VERSION).toBe('0.2.0');
@@ -14,7 +16,12 @@ describe('TOCA MCP production foundation', () => {
       }),
     ).toBeDefined();
   });
-  it('does not rebind provider-write evidence for runtimes without direct Instagram writes', () => {
+  it('isolates nonwriters even when provider-write evidence is unavailable', () => {
+    const loader = vi
+      .spyOn(capabilityEvidence, 'loadCapabilityValidationEvidenceManifest')
+      .mockImplementation(() => {
+        throw new Error('CAPABILITY_VALIDATION_EVIDENCE_MANIFEST_NOT_FOUND');
+      });
     expect(() =>
       createTocaServer({
         env: {
@@ -25,9 +32,16 @@ describe('TOCA MCP production foundation', () => {
         },
       }),
     ).not.toThrow();
+    expect(loader).not.toHaveBeenCalled();
   });
 
-  it('keeps provider-write evidence exact-head enforcement for direct Instagram writers', () => {
+  it('forwards the release SHA and preserves exact-head failures for configured direct writers', () => {
+    // The canonical manifest can be empty; test dependency enforcement independently of its contents.
+    const loader = vi
+      .spyOn(capabilityEvidence, 'loadCapabilityValidationEvidenceManifest')
+      .mockImplementation(() => {
+        throw new Error('CAPABILITY_EVIDENCE_MANIFEST_EXACT_HEAD_MISMATCH');
+      });
     expect(() =>
       createTocaServer({
         env: {
@@ -42,6 +56,7 @@ describe('TOCA MCP production foundation', () => {
         },
       }),
     ).toThrow('CAPABILITY_EVIDENCE_MANIFEST_EXACT_HEAD_MISMATCH');
+    expect(loader).toHaveBeenCalledOnce();
+    expect(loader).toHaveBeenCalledWith({ exactHeadSha: 'f'.repeat(40) });
   });
-
 });

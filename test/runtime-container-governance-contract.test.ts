@@ -21,13 +21,11 @@ describe('runtime container governance assets', () => {
     expect(server).toContain(
       'const capabilityValidationEvidenceManifest = instagramDirectPublicationEnabled',
     );
-    expect(server).toContain("...(releaseSha ? { exactHeadSha: releaseSha } : {})");
+    expect(server).toContain('...(releaseSha ? { exactHeadSha: releaseSha } : {})');
     expect(server).toContain(
       'instagramPublicationValidationEvidence: capabilityValidationEvidenceManifest.validations',
     );
-    expect(server).toContain(
-      'exactHeadSha: capabilityValidationEvidenceManifest.exactHeadSha',
-    );
+    expect(server).toContain('exactHeadSha: capabilityValidationEvidenceManifest.exactHeadSha');
   });
 
   it('keeps both required runtime governance manifests in the copied directory', () => {
