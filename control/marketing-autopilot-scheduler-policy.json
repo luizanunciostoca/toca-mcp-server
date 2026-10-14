@@ -57,13 +57,8 @@
     "promoteToLimitedAfterVerifiedCanary": true,
     "verifiedCanarySchedulingStatus": "PUBLISHED_VERIFIED",
     "limited": {
-      "allowedOperations": [
-        "SUNSET"
-      ],
-      "allowedFormats": [
-        "FEED",
-        "STORY"
-      ],
+      "allowedOperations": ["SUNSET"],
+      "allowedFormats": ["FEED", "STORY"],
       "allowedChannel": "INSTAGRAM",
       "maxCandidatesPerRun": 1,
       "generalAutonomy": false
