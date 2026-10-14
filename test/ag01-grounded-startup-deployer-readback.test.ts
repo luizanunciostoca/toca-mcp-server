@@ -124,6 +124,20 @@ describe('AG-01 grounded startup deployer readback', () => {
     expect(workflow).toContain('select(type == "string")');
   });
 
+  it('classifies real private probe failures using only the existing bounded Cloud Logging read', () => {
+    expect(workflow).toContain('--limit=200 --order=desc');
+    expect(workflow).toContain('node scripts/ag01-grounded-probe-log-summary.mjs "$logs_json"');
+    expect(workflow).toContain('SANITIZED_GROUNDED_PROBE_LOG_SUMMARY=$probe_summary');
+    expect(workflow).toContain('"probe_summary=$probe_summary"');
+    expect(workflow).toContain('PROBE_SUMMARY: ${{ steps.evidence.outputs.probe_summary }}');
+    expect(workflow).toContain('"SANITIZED_GROUNDED_PROBE_LOG_SUMMARY=$PROBE_SUMMARY"');
+    expect(workflow).toContain('SANITIZED_GROUNDED_PROBE_RAW_LOGS_PUBLISHED=false');
+    expect(workflow).not.toContain('cat "$logs_json"');
+    expect(workflow).not.toContain('curl ');
+    expect(workflow).not.toContain('gcloud run services update');
+    expect(workflow).not.toContain('gcloud run deploy');
+  });
+
   it('pins the machine-readable policy to a read-only fallback envelope', () => {
     expect(policy).toMatchObject({
       schemaVersion: 1,

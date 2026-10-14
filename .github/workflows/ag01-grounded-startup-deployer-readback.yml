@@ -167,7 +167,7 @@ jobs:
           gcloud run revisions describe "$TARGET_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > "$target_json"
           gcloud run revisions describe "$HEALTHY_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json > "$healthy_json"
           gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${SERVICE}\" AND resource.labels.revision_name=\"${TARGET_REVISION}\"" \
-            --project "$PROJECT_ID" --freshness=7d --limit=200 --order=asc --format=json > "$logs_json"
+            --project "$PROJECT_ID" --freshness=7d --limit=200 --order=desc --format=json > "$logs_json"
 
           ready_status="$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .status] | last // "UNKNOWN"' "$target_json")"
           ready_reason="$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .reason] | last // "UNKNOWN"' "$target_json")"
@@ -245,6 +245,10 @@ jobs:
             classification=CLOUD_RUN_STARTUP_PROBE_FAILURE
           fi
 
+          # Reuse the existing allowed Cloud Logging read. Report only enumerated
+          # status codes and approved response-shape markers, never body, tokens or IDs.
+          probe_summary="$(node scripts/ag01-grounded-probe-log-summary.mjs "$logs_json")"
+          jq -e '.schemaVersion == 1 and .rawLogPayloadPublished == false and (.classification | type == "string") and (.groundingResult | type == "string")' <<< "$probe_summary" >/dev/null
           rm -f "$target_json" "$healthy_json" "$logs_json"
           {
             echo "TARGET_READY_STATUS=$ready_status"
@@ -257,6 +261,8 @@ jobs:
             echo "STARTUP_PROBE_TYPE=$probe_type"
             echo "STARTUP_PROBE_PATH=$probe_path"
             echo "STARTUP_PROBE_PORT=$probe_port"
+            echo "SANITIZED_GROUNDED_PROBE_LOG_SUMMARY=$probe_summary"
+            echo "SANITIZED_GROUNDED_PROBE_RAW_LOGS_PUBLISHED=false"
             echo 'DIAGNOSTIC_IDENTITY=DEPLOYER_READ_ONLY_FALLBACK'
             echo 'RAW_LOG_PAYLOAD_PUBLISHED=false'
             echo 'TRAFFIC_MUTATION=false'
@@ -275,6 +281,7 @@ jobs:
           echo "probe_type=$probe_type" >> "$GITHUB_OUTPUT"
           echo "probe_path=$probe_path" >> "$GITHUB_OUTPUT"
           echo "probe_port=$probe_port" >> "$GITHUB_OUTPUT"
+          echo "probe_summary=$probe_summary" >> "$GITHUB_OUTPUT"
 
       - name: Publish sanitized diagnostic evidence
         if: steps.evidence.outcome == 'success'
@@ -293,6 +300,7 @@ jobs:
           PROBE_TYPE: ${{ steps.evidence.outputs.probe_type }}
           PROBE_PATH: ${{ steps.evidence.outputs.probe_path }}
           PROBE_PORT: ${{ steps.evidence.outputs.probe_port }}
+          PROBE_SUMMARY: ${{ steps.evidence.outputs.probe_summary }}
         shell: bash
         run: |
           set -euo pipefail
@@ -311,6 +319,7 @@ jobs:
             "STARTUP_PROBE_TYPE=$PROBE_TYPE" \
             "STARTUP_PROBE_PATH=$PROBE_PATH" \
             "STARTUP_PROBE_PORT=$PROBE_PORT" \
+            "SANITIZED_GROUNDED_PROBE_LOG_SUMMARY=$PROBE_SUMMARY" \
             'DIAGNOSTIC_IDENTITY=DEPLOYER_READ_ONLY_FALLBACK' \
             'DEDICATED_READER_UNAVAILABLE_REASON=PROJECT_IAM_BOOTSTRAP_AUTHORITY_UNAVAILABLE' \
             'RAW_LOG_PAYLOAD_PUBLISHED=false' \
