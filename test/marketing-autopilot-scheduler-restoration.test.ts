@@ -340,30 +340,52 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     });
   });
 
-
   it.each([
-    ['Drive file', { master_drive_file_id: 'tampered-drive-id' }, 'AUTOPILOT_CANARY_PROTECTED_DRIVE_MISMATCH'],
+    [
+      'Drive file',
+      { master_drive_file_id: 'tampered-drive-id' },
+      'AUTOPILOT_CANARY_PROTECTED_DRIVE_MISMATCH',
+    ],
     ['asset SHA', { output_sha256: 'f'.repeat(64) }, 'AUTOPILOT_CANARY_PROTECTED_SHA256_MISMATCH'],
-    ['caption copy', { message: 'Texto alterado sem nova aprovação.' }, 'AUTOPILOT_CANARY_PROTECTED_MESSAGE_MISMATCH'],
+    [
+      'caption copy',
+      { message: 'Texto alterado sem nova aprovação.' },
+      'AUTOPILOT_CANARY_PROTECTED_MESSAGE_MISMATCH',
+    ],
     ['CTA copy', { cta: 'Compre outro produto.' }, 'AUTOPILOT_CANARY_PROTECTED_CTA_MISMATCH'],
-    ['creative ID', { creative_id: 'CR-UNAPPROVED' }, 'AUTOPILOT_CANARY_PROTECTED_CREATIVE_ID_MISMATCH'],
-    ['master asset', { master_asset_id: 'MM-UNAPPROVED' }, 'AUTOPILOT_CANARY_PROTECTED_ASSET_MISMATCH'],
+    [
+      'creative ID',
+      { creative_id: 'CR-UNAPPROVED' },
+      'AUTOPILOT_CANARY_PROTECTED_CREATIVE_ID_MISMATCH',
+    ],
+    [
+      'master asset',
+      { master_asset_id: 'MM-UNAPPROVED' },
+      'AUTOPILOT_CANARY_PROTECTED_ASSET_MISMATCH',
+    ],
     ['copy ID', { copy_id: 'CP-UNAPPROVED' }, 'AUTOPILOT_CANARY_PROTECTED_COPY_ID_MISMATCH'],
-    ['correlation ID', { correlation_id: 'CORR-UNAPPROVED' }, 'AUTOPILOT_CANARY_PROTECTED_CORRELATION_MISMATCH'],
-  ])('rejects unapproved %s drift for the protected October canary', (_kind, rowChange, expectedError) => {
-    const attempt = runScheduler({
-      mode: 'build-command',
-      now: '2026-10-15T09:00:00-03:00',
-      rows: [productionCanaryFeedRow(rowChange)],
-      useProductionPolicy: true,
-      extraEnv: {
-        MARKETING_AUTOPILOT_CONTENT_ITEM_ID: productionCanaryId,
-        MARKETING_AUTOPILOT_TARGET_CODE_SHA: '3'.repeat(40),
-      },
-    });
-    expect(attempt.status).not.toBe(0);
-    expect(attempt.stderr).toContain(expectedError);
-  });
+    [
+      'correlation ID',
+      { correlation_id: 'CORR-UNAPPROVED' },
+      'AUTOPILOT_CANARY_PROTECTED_CORRELATION_MISMATCH',
+    ],
+  ])(
+    'rejects unapproved %s drift for the protected October canary',
+    (_kind, rowChange, expectedError) => {
+      const attempt = runScheduler({
+        mode: 'build-command',
+        now: '2026-10-15T09:00:00-03:00',
+        rows: [productionCanaryFeedRow(rowChange)],
+        useProductionPolicy: true,
+        extraEnv: {
+          MARKETING_AUTOPILOT_CONTENT_ITEM_ID: productionCanaryId,
+          MARKETING_AUTOPILOT_TARGET_CODE_SHA: '3'.repeat(40),
+        },
+      });
+      expect(attempt.status).not.toBe(0);
+      expect(attempt.stderr).toContain(expectedError);
+    },
+  );
 
   it('rejects an altered generated command even when the approved registry row has not changed', () => {
     const env = {
@@ -378,9 +400,14 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
       extraEnv: env,
     });
     expect(built.status, built.stderr).toBe(0);
-    const approvedCommand = (parseOutput(built.stdout) as { command: Record<string, unknown> }).command;
+    const approvedCommand = (parseOutput(built.stdout) as { command: Record<string, unknown> })
+      .command;
     const path = join(mkdtempSync(join(tmpdir(), 'toca-canary-command-')), 'forged.json');
-    writeFileSync(path, JSON.stringify({ ...approvedCommand, caption: 'Legenda adulterada' }), 'utf8');
+    writeFileSync(
+      path,
+      JSON.stringify({ ...approvedCommand, caption: 'Legenda adulterada' }),
+      'utf8',
+    );
 
     const verified = runScheduler({
       mode: 'verify-command',
@@ -390,7 +417,9 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
       extraEnv: { ...env, MARKETING_AUTOPILOT_COMMAND_PATH: path },
     });
     expect(verified.status).not.toBe(0);
-    expect(verified.stderr).toContain('AUTOPILOT_CANARY_COMMAND_PROTECTED_CAPTION_MISMATCH');
+    expect(verified.stderr).toContain(
+      'AUTOPILOT_CANARY_COMMAND_PROTECTED_CAPTION_MISMATCH',
+    );
   });
 
   it('selects only the 09:00 canary before any provider-verified publication exists', () => {
