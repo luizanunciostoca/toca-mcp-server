@@ -211,7 +211,7 @@ function runScheduler({
         copyId: fixtureCanary.copy_id,
         registryMessage: fixtureCanary.message,
         registryCta: fixtureCanary.cta,
-        approvedCaption: `${fixtureCanary.message}\\n\\n${fixtureCanary.cta}`,
+        approvedCaption: `${fixtureCanary.message}\n\n${fixtureCanary.cta}`,
         correlationId: fixtureCanary.correlation_id,
         creativeTruthBinding: {
           ...productionBinding.creativeTruthBinding,
