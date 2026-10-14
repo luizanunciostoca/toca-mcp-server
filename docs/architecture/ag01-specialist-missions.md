@@ -3,7 +3,7 @@
 ## Proven base and scope
 
 Baseline: `luizanunciostoca/toca-mcp-server:main` at `d4dad13cdae4ff720a572adfe63f5d3d4f88b1a1` (2026-10-14).
-Control Plane claim: `#639`, `AG01-INTERNAL-SPECIALIST-MISSIONS-WORKFLOWSTORE-20261014`; separate from existing held GCP/webhook/publishing locks. Owner authorization: `#985` (repository-only). This package is an **unmerged candidate**; local code and test authoring are not deployment or runtime integration proof. A blocked GitHub branch creation is a safety gate, not a permission to use a substitute write path.
+Control Plane claim: `#639`, `AG01-INTERNAL-SPECIALIST-MISSIONS-WORKFLOWSTORE-20261014`; separate from existing held GCP/webhook/publishing locks. Owner authorization: `#985` (repository-only). Source integration is tracked through protected GitHub PR [#1051](https://github.com/luizanunciostoca/toca-mcp-server/pull/1051). The initial client block on branch creation was subsequently cleared through the same authorized connector. Source review and CI do not imply deployment or runtime/provider execution proof.
 
 ## Supported interface, no external ChatGPT tasks
 
@@ -17,7 +17,7 @@ Flow (opt-in): `AG-01 checkpoint decision (existing) -> internal mission manifes
 | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mission_id`                                                                    | deterministic WorkflowInstance.workflowId from tenant and idempotency key                                                                                                          |
 | `routeId`, `capability`, `owner`, `priority`, `correlationId`, `idempotencyKey` | immutable WorkflowInstance.input manifest; identity principal/tenant/workspace/org bound to workflow                                                                               |
-| `expiresAt` / TTL                                                               | manifest checked before claim (no new scheduler)                                                                                                                                   |
+| `expiresAt` / TTL                                                               | manifest checked before claim (no new scheduler); the orchestration checkpoint persists an immutable `missionCreatedAt` anchor so replay cannot silently extend expiry                                                                                                                                   |
 | `payloadSha256` and `immutableSha256`                                           | replay conflict detection (no duplicate provider call)                                                                                                                             |
 | `READY`                                                                         | step READY                                                                                                                                                                         |
 | `CLAIMED` / `STARTED`                                                           | existing WorkflowStore atomic step claim immediately sets `claimedAt` **and** `startedAt`; STARTED is internal worker state, not provider ACK; no synthetic distinct claimed event |
@@ -27,7 +27,7 @@ Flow (opt-in): `AG-01 checkpoint decision (existing) -> internal mission manifes
 
 ### Fail-closed boundaries
 
-- **Only registered, READ-risk Core capabilities** with sideEffects=false and approvalRequired=false are currently eligible. Generated media, publishing, Direct/Comment, Meta campaign creation/spend and irreversible actions stay on their pre-existing pathways, awaiting separate scoped approvals and provider proof.
+- AG-01-primary routes retain the existing direct Core path; the specialized branch is used only when an eligible non-AG-01 route owner exists.\n- **Only registered, READ-risk Core capabilities** with sideEffects=false and approvalRequired=false are currently eligible. Generated media, publishing, Direct/Comment, Meta campaign creation/spend and irreversible actions stay on their pre-existing pathways, awaiting separate scoped approvals and provider proof.
 - Must pass route/capability catalog, runtime `Core.inspect`, tenant/principal/route/capability authorization, owner membership and unexpired TTL. No user prompt may grant itself a route or worker principal.
 - No `google_ads.*`, `whatsapp.*` or `email.*` dispatch.
 - At-most-one `Core.execute` attempt per claim (`maxAttempts=1`). No automatic reclaim from an ambiguous RUNNING state, no blind retry after timeout/disconnect. Core's existing idempotency/approval/provider reconciliation are not replaced.
@@ -53,4 +53,4 @@ Create a mission on its owning route, with a stable idempotency key per campaign
 4. Merge through canonical #640 reservation, reconciliation readback in #639–#642 on the **new** main SHA. GitHub merge is not runtime promotion.
 5. Separately authorize change to existing AG-01 service if desired, with production identity, flag OFF/ON canary, Core runtime-bound READ-only proving real audit/readback without financial/provider writes, health and rollback. Any current GCP permissions or health blockers remain separate.
 
-Current results: ownership registered and read back (lane READY_PARALLEL, lock HELD); source branch creation and subsequent formal lock-release update blocked by client safety restriction. Human Control Tower gate: set lane BLOCKED_EXTERNAL and lock RELEASED (or reassign exclusively in the existing state-plane) before resuming; unmerged local candidate requires real exact-main CI. No production action, paid operation, ChatGPT task modification, new scheduler or provider call.
+**Evidence freshness:** This design document is not a source of current PR/CI/merge status; use GitHub PR #1051, Control Plane #639–#642 and current exact-HEAD checks. As of this integration work, the lane is owned by TOCA_AGENTE_17 with its exclusive lock HELD, the PR is tracked as a repository-only candidate, and actual production/runtime specialist executions remain NOT_PROVEN. No production action, paid operation, ChatGPT task modification, new scheduler or provider call is authorized by this change.
