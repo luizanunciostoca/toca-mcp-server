@@ -11,6 +11,7 @@ import type {
   GoogleAdsCampaignPlan,
   GoogleAdsPaidMediaProvider,
 } from '../providers/google-ads/google-ads-paid-media.js';
+import { readAg09NativeMetaInsights } from '../measurement/ag09-native-meta-insights.js';
 import type { InstagramHistoryProvider } from '../providers/instagram/instagram-history-provider.js';
 import type { MetaAdsControlledGraphProvider } from '../providers/meta-ads/meta-ads-controlled-graph-provider.js';
 import {
@@ -562,7 +563,8 @@ function resolveBinding(
         ? binding(
             insightsSchema,
             (input) =>
-              services.metaAdsRead!.getInsights(
+              readAg09NativeMetaInsights(
+                services.metaAdsRead!,
                 { adAccountId: input.adAccountId, currency: input.currency },
                 {
                   level: input.level,

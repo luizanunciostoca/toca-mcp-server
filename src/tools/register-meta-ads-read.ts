@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
+import { readAg09NativeMetaInsights } from '../measurement/ag09-native-meta-insights.js';
 import type { MetaAdsReadProvider } from '../providers/meta-ads/meta-ads-read-provider.js';
 
 const accountInputSchema = z.object({
@@ -15,6 +16,22 @@ const insightsInputSchema = accountInputSchema.extend({
 });
 
 const outputSchema = z.object({ data: z.array(z.unknown()) });
+const insightsOutputSchema = outputSchema.extend({
+  source: z.object({
+    provider: z.literal('META_MARKETING_API'),
+    gateway: z.literal('TOCA_MCP_SERVER'),
+    repository: z.literal('luizanunciostoca/toca-mcp-server'),
+    capability: z.literal('meta_ads.insights.get'),
+    reportingTimeZone: z.literal('America/Bahia'),
+    externalAggregatorsAccepted: z.literal(false),
+  }),
+  accountId: z.string(),
+  currency: z.string(),
+  level: z.enum(['account', 'campaign', 'adset', 'ad']),
+  window: z.object({ since: z.string(), until: z.string() }),
+  observationState: z.enum(['ROWS_RETURNED', 'NO_ROWS']),
+  identicalRowsDiscarded: z.number().int().nonnegative(),
+});
 const annotations = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -57,16 +74,20 @@ export function registerMetaAdsReadTools(server: McpServer, provider: MetaAdsRea
     {
       title: 'Read Meta Ads Insights',
       inputSchema: insightsInputSchema,
-      outputSchema,
+      outputSchema: insightsOutputSchema,
       annotations,
     },
-    async (input) =>
-      response(
-        await provider.getInsights(
-          { adAccountId: input.adAccountId, currency: input.currency },
-          { level: input.level, fields: input.fields, since: input.since, until: input.until },
-        ),
-      ),
+    async (input) => {
+      const result = await readAg09NativeMetaInsights(
+        provider,
+        { adAccountId: input.adAccountId, currency: input.currency },
+        { level: input.level, fields: input.fields, since: input.since, until: input.until },
+      );
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+        structuredContent: { ...result, data: [...result.data] },
+      };
+    },
   );
 }
 
