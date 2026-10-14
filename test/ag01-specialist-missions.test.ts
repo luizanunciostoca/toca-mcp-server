@@ -17,7 +17,7 @@ const T1 = '2026-10-14T21:00:00.000Z';
 const T2 = '2026-10-14T22:00:00.000Z';
 
 function identity(
-  input: { tenantId?: string; routes?: ('R03' | 'R04')[]; capabilities?: string[] } = {},
+  input: { tenantId?: string; routes?: ('R03' | 'R04' | 'R19')[]; capabilities?: string[] } = {},
 ) {
   return createTrustedServiceExecutionIdentity({
     principalId: 'toca-ag01',
@@ -280,9 +280,9 @@ describe('AG-01 internal specialized missions — existing WorkflowStore, produc
     let clock = T0;
     const h = harness();
     const dispatch = vi
-      .fn(async (_input: SpecialistMissionInput): Promise<ExecutionResult> => {
-        throw new Error('UNEXPECTED_SPECIALIST_DISPATCH');
-      })
+      .fn((input: SpecialistMissionInput): Promise<ExecutionResult> =>
+        Promise.reject(new Error(`UNEXPECTED_SPECIALIST_DISPATCH:${input.capabilityId}`)),
+      )
       .mockRejectedValueOnce(new Error('TRANSIENT_READ_FAILURE'))
       .mockResolvedValueOnce({
         executionId: 'core-returned-on-retry',
@@ -350,5 +350,73 @@ describe('AG-01 internal specialized missions — existing WorkflowStore, produc
       new Date(Date.parse(T0) + SPECIALIST_MISSION_MAX_TTL_MS).toISOString(),
     );
     expect(h.execute).not.toHaveBeenCalled();
+  });
+
+  it('keeps AG-01-primary routes on the existing Core path when specialist opt-in is enabled', async () => {
+    const coreExecute = vi.fn((input: Parameters<CoreCapabilityGateway['execute']>[0]) =>
+      Promise.resolve({
+        executionId: 'core-ag01-own-route',
+        capabilityId: input.capabilityId,
+        result: { ok: true },
+        providerReadbackVerified: false,
+      }),
+    );
+    const core = {
+      inspect: (input: Parameters<CoreCapabilityGateway['inspect']>[0]) => ({
+        canonicalCapabilityId: input.capabilityId,
+        routeId: 'R19' as const,
+        sideEffects: false,
+        approvalRequired: false,
+        idempotent: true,
+      }),
+      execute: coreExecute,
+      requestApproval: vi.fn(),
+      getApproval: vi.fn(),
+    } as unknown as CoreCapabilityGateway;
+    const specialist = {
+      supports: vi.fn(() => true),
+      executePlannedStep: vi.fn(),
+    } as unknown as SpecialistCoordinator;
+    const runtime = new TocaOrchestratorRuntime({
+      conversations: new InMemoryConversationStore(),
+      routeResolver: {
+        resolve: () =>
+          Promise.resolve({ routeId: 'R19', confidence: 1, evidence: ['route:r19'] }),
+      },
+      artifacts: {
+        resolveSop: () =>
+          Promise.resolve({
+            artifactId: 'SOP-R19',
+            version: '1.0',
+            sourceRef: 'toca-os:sop-r19',
+            evidence: ['sop:r19'],
+          }),
+        resolveTemplate: () => Promise.resolve(null),
+      },
+      planner: {
+        build: () =>
+          Promise.resolve([
+            {
+              stepId: 'read-autopilot',
+              name: 'Inspect automation',
+              capabilityId: 'autopilot.state.inspect',
+              payload: { id: 'test' },
+              maxAttempts: 1,
+            },
+          ]),
+      },
+      core,
+      specialistMissions: specialist,
+      deadLetters: { put: vi.fn(() => Promise.resolve()) },
+      now: () => new Date(T0),
+    });
+    const outcome = await runtime.handle({
+      idempotencyKey: 'ag01-primary-not-specialist',
+      message: 'Inspect existing state only',
+      identity: identity({ routes: ['R19'], capabilities: ['autopilot.state.inspect'] }),
+    });
+    expect(outcome.status).toBe('SUCCEEDED');
+    expect(coreExecute).toHaveBeenCalledTimes(1);
+    expect(specialist.executePlannedStep).not.toHaveBeenCalled();
   });
 });
