@@ -63,6 +63,8 @@ export interface BuildLiveCapabilityMatrixOptions {
   readonly observedRuntimeBindingIds?: readonly string[];
   readonly providerEvidence?: readonly ProviderCapabilityValidationEvidence[];
   readonly finalProviderPhaseOpen?: boolean;
+  /** Owner-scoped projection only: never grants provider access or changes final certification. */
+  readonly inScopeFinalProviderPrefixes?: readonly string[];
 }
 
 interface RuntimeAssessment {
@@ -107,6 +109,9 @@ export function buildLiveCapabilityMatrix(
     throw new Error('LIVE_CAPABILITY_MATRIX_DUPLICATE_CAPABILITY');
   }
 
+  const inScopeFinalProviderPrefixes = validateInScopeFinalProviderPrefixes(
+    options.inScopeFinalProviderPrefixes ?? [],
+  );
   const runtimeByCapability = indexRuntimeTools(options.observedRuntimeTools ?? []);
   const runtimeBindingIds = new Set(options.observedRuntimeBindingIds ?? []);
   const evidenceByCapability = indexRawEvidence(options.providerEvidence ?? [], definitionIds);
@@ -128,6 +133,7 @@ export function buildLiveCapabilityMatrix(
         exactHeadSha: options.exactHeadSha,
         runtimeIdentity: options.runtimeIdentity ?? null,
         finalProviderPhaseOpen: options.finalProviderPhaseOpen ?? false,
+        inScopeFinalProviderPrefixes,
         runtime,
         evidence,
       });
@@ -145,19 +151,41 @@ export function buildLiveCapabilityMatrix(
   };
 }
 
+function validateInScopeFinalProviderPrefixes(prefixes: readonly string[]): ReadonlySet<string> {
+  const allowed = new Set<string>(DEFERRED_FINAL_PREFIXES);
+  const inScope = new Set<string>();
+
+  for (const prefix of prefixes) {
+    if (!allowed.has(prefix)) {
+      throw new Error(`LIVE_CAPABILITY_MATRIX_IN_SCOPE_PREFIX_UNKNOWN:${prefix}`);
+    }
+    if (inScope.has(prefix)) {
+      throw new Error(`LIVE_CAPABILITY_MATRIX_IN_SCOPE_PREFIX_DUPLICATE:${prefix}`);
+    }
+    inScope.add(prefix);
+  }
+
+  return inScope;
+}
+
 function projectCapability(
   definition: CapabilityDefinition,
   context: {
     readonly exactHeadSha: string;
     readonly runtimeIdentity: string | null;
     readonly finalProviderPhaseOpen: boolean;
+    readonly inScopeFinalProviderPrefixes: ReadonlySet<string>;
     readonly runtime: RuntimeAssessment;
     readonly evidence: EvidenceAssessment;
   },
 ): LiveCapabilityMatrixRecord {
   const deferred =
     !context.finalProviderPhaseOpen &&
-    DEFERRED_FINAL_PREFIXES.some((prefix) => definition.capability_id.startsWith(prefix));
+    DEFERRED_FINAL_PREFIXES.some(
+      (prefix) =>
+        definition.capability_id.startsWith(prefix) &&
+        !context.inScopeFinalProviderPrefixes.has(prefix),
+    );
   const closureState = resolveClosureState(definition, {
     deferred,
     runtime: context.runtime,
