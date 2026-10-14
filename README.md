@@ -66,6 +66,6 @@ Windsor.ai or any other external reporting connector is not an AG-09 data source
 or automatic fallback. Missing data must not be converted to zero or invented
 revenue/ROAS. See `docs/operations/ag09-native-analytics-source.md`.
 
-The verified repository for this executable route is `luizanunciostoca/toca-mcp-server`.
-The separately requested name `toca-media-server` is not a verified repository
-identity as of 2026-10-14 and must not be assumed to imply another endpoint.
+The owner confirmed `luizanunciostoca/toca-mcp-server` as the canonical repository
+for this native TOCA Meta Ads route. AG-09 does not require a separate `toca-media-server`
+repository or an external reporting service.
