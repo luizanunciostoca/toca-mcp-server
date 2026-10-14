@@ -77,8 +77,14 @@ describe('TOCA-MAX live capability matrix projection', () => {
     for (const prefix of ['google_ads.', 'whatsapp.', 'email.']) {
       const excluded = matrix.records.filter((record) => record.capability_id.startsWith(prefix));
       expect(excluded.length, prefix).toBeGreaterThan(0);
-      expect(excluded.every((record) => record.deferred_final_provider_phase), prefix).toBe(true);
-      expect(excluded.every((record) => record.closure_state === 'DEFERRED'), prefix).toBe(true);
+      expect(
+        excluded.every((record) => record.deferred_final_provider_phase),
+        prefix,
+      ).toBe(true);
+      expect(
+        excluded.every((record) => record.closure_state === 'DEFERRED'),
+        prefix,
+      ).toBe(true);
     }
   });
 
