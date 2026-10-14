@@ -52,13 +52,18 @@
   },
   "dailyRollout": {
     "phase": "CANARY",
-    "canaryContentItemId": "MKT-20260917-SUNSET-FEED-0900",
-    "canaryScheduledAt": "2026-09-17T09:00:00-03:00",
+    "canaryContentItemId": "MKT-20261015-SUNSET-FEED-0900",
+    "canaryScheduledAt": "2026-10-15T09:00:00-03:00",
     "promoteToLimitedAfterVerifiedCanary": true,
     "verifiedCanarySchedulingStatus": "PUBLISHED_VERIFIED",
     "limited": {
-      "allowedOperations": ["SUNSET"],
-      "allowedFormats": ["FEED", "STORY"],
+      "allowedOperations": [
+        "SUNSET"
+      ],
+      "allowedFormats": [
+        "FEED",
+        "STORY"
+      ],
       "allowedChannel": "INSTAGRAM",
       "maxCandidatesPerRun": 1,
       "generalAutonomy": false
@@ -66,16 +71,16 @@
     "generalAutonomy": false,
     "blindRetryAuthorized": false,
     "automaticFallbackAuthorized": false,
-    "rollForwardFromContentItemId": "MKT-20260916-SUNSET-STORY-2000",
-    "rollForwardReason": "PREVIOUS_CANARY_WINDOW_EXPIRED_NO_SCHEDULE_RUN",
-    "rollForwardAuthorizedAt": "2026-09-16T21:03:29-03:00",
-    "rollForwardAuthority": "USER_EXPLICIT_DAILY_PUBLICATION_AUTHORIZATION_2026-09-16"
+    "rollForwardFromContentItemId": "MKT-20260917-SUNSET-FEED-0900",
+    "rollForwardReason": "EXPIRED_PRIOR_CANARY_NO_VERIFIED_PUBLICATION_FRESH_OWNER_APPROVED_QA_PASSED_OCTOBER",
+    "rollForwardAuthorizedAt": "2026-10-14T18:03:31.120Z",
+    "rollForwardAuthority": "OWNER_TOCA_OCT2026_ORGANIC_FEED_ISSUE_985_COMMENT_6171815962"
   },
   "standingAuthorization": {
     "enabled": true,
-    "grantedAt": "2026-09-16T08:07:56-03:00",
-    "authority": "USER_EXPLICIT_DAILY_PUBLICATION_AUTHORIZATION_2026-09-16",
-    "scope": "TOCA_OS_APPROVED_INSTAGRAM_ORGANIC_DAILY_PLAN",
+    "grantedAt": "2026-10-14T18:03:31.120Z",
+    "authority": "OWNER_TOCA_OCT2026_ORGANIC_FEED_ISSUE_985_COMMENT_6171815962",
+    "scope": "TOCA_OWNER_APPROVED_OCTOBER_2026_ORGANIC_FEED_QA_PASSED_ONLY",
     "rightsScope": "INSTAGRAM_ORGANIC_PUBLICATION",
     "requireExistingApprovalStatus": "APPROVED",
     "requireExactAssetSha256": true,
@@ -147,6 +152,54 @@
         "kind": "PROTECTED_GITHUB_HISTORY",
         "commit": "87c5dcff748f69459925e4904cef686f171dfda9",
         "note": "Reuses only exact asset/copy/Creative Truth/brand/rights bindings from the previously approved envelope; runtime identity, issuedAt, targetCodeSha and GCP idempotency are regenerated."
+      }
+    },
+    "MKT-20261015-SUNSET-FEED-0900": {
+      "expectedScheduledAt": "2026-10-15T09:00:00-03:00",
+      "operation": "SUNSET",
+      "format": "FEED",
+      "publishNowFormat": "FEED_IMAGE",
+      "contentType": "image/jpeg",
+      "masterAssetId": "MM-SUN-0005-FEED4X5-202610-V1",
+      "driveFileId": "1L5vGFsdD1pXU-Fyqf3AZrsNEFevd1Cql",
+      "outputSha256": "3685d9e86d86311fb98f7469fbb97ff7aa2023f26abe820d5033c3d4bcdcf973",
+      "creativeId": "CR-MKT-20261015-SUNSET-FEED-0900-PHOTO4X5-CANDIDATE-V1",
+      "copyId": "CP-MKT-20261015-SUNSET-FEED-0900-V1",
+      "registryMessage": "O horizonte dourado é um convite para esquecer as horas e acompanhar o sol até o mar. 🌅 #TocaDoMorcego #MorroDeSaoPaulo #PorDoSol",
+      "registryCta": "Salve para lembrar do próximo Sunset.",
+      "approvedCaption": "O horizonte dourado é um convite para esquecer as horas e acompanhar o sol até o mar. 🌅 #TocaDoMorcego #MorroDeSaoPaulo #PorDoSol\n\nSalve para lembrar do próximo Sunset.",
+      "correlationId": "CORR-MKT-20261015-SUNSET-FEED-0900-V1",
+      "idempotencyVersion": "V1",
+      "creativeTruthBinding": {
+        "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+        "standardId": "SUNSET_FEED_V1",
+        "creativeId": "CR-MKT-20261015-SUNSET-FEED-0900-PHOTO4X5-CANDIDATE-V1",
+        "outputSha256": "3685d9e86d86311fb98f7469fbb97ff7aa2023f26abe820d5033c3d4bcdcf973",
+        "brandIntegrityStatus": "PASSED",
+        "venueFidelityStatus": "PASSED",
+        "qualityGateStatus": "PASSED",
+        "exactAssetBinding": true
+      },
+      "brandDeterminism": {
+        "status": "VERIFIED",
+        "standardRef": "TOCA_CREATIVE_TRUTH:SUNSET_FEED_V1:1.0",
+        "typographyRef": "EDITORIAL_TEXT_V1",
+        "assetSha256": "3685d9e86d86311fb98f7469fbb97ff7aa2023f26abe820d5033c3d4bcdcf973"
+      },
+      "rightsClearance": {
+        "status": "CLEARED",
+        "scope": "INSTAGRAM_ORGANIC_PUBLICATION",
+        "evidenceRef": "GOOGLE_DRIVE:1L5vGFsdD1pXU-Fyqf3AZrsNEFevd1Cql",
+        "authority": "OWNER_TOCA_OCT2026_ORGANIC_FEED_ISSUE_985_COMMENT_6171815962",
+        "clearedAt": "2026-10-14T18:03:31.120Z",
+        "assetSha256": "3685d9e86d86311fb98f7469fbb97ff7aa2023f26abe820d5033c3d4bcdcf973"
+      },
+      "bindingSource": {
+        "kind": "CANONICAL_MARKETING_REGISTRY_AND_EXISTING_PHOTO_QA",
+        "contentItemId": "MKT-20261015-SUNSET-FEED-0900",
+        "approvedQaEvidenceId": "SQA-TOCA-20261014-SUN-0005-FEED",
+        "rightsEvidence": "https://github.com/luizanunciostoca/toca-mcp-server/issues/985#issuecomment-6171815962",
+        "note": "Bounded one-item canary only; legacy Sep17 baseline preserved for historical reconciliation; no automatic broad autonomy."
       }
     }
   }
