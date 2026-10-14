@@ -48,13 +48,13 @@ export async function readAg09NativeMetaInsights(
   if (query.since > query.until) throw new Error('AG09_META_INSIGHTS_WINDOW_REVERSED');
   if (query.fields.length === 0) throw new Error('AG09_META_INSIGHTS_FIELDS_REQUIRED');
 
-  const rows = await provider.getInsights(account, query);
+  const rows: unknown = await provider.getInsights(account, query);
   if (!Array.isArray(rows)) throw new Error('AG09_META_INSIGHTS_PROVIDER_RESPONSE_INVALID');
 
   const seen = new Set<string>();
   const uniqueRows: Readonly<Record<string, unknown>>[] = [];
   let identicalRowsDiscarded = 0;
-  for (const row of rows) {
+  for (const row of rows as readonly Readonly<Record<string, unknown>>[]) {
     if (row === null || typeof row !== 'object' || Array.isArray(row))
       throw new Error('AG09_META_INSIGHTS_ROW_INVALID');
     const fingerprint = JSON.stringify(row);
