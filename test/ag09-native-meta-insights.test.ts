@@ -37,7 +37,8 @@ describe('AG-09 native Meta Ads analytics source', () => {
     ]);
     const report = await readAg09NativeMetaInsights(provider, account, query);
 
-    expect(getInsights).toHaveBeenCalledExactlyOnceWith(account, query);
+    expect(getInsights).toHaveBeenCalledTimes(1);
+    expect(getInsights).toHaveBeenCalledWith(account, query);
     expect(report.source).toEqual(AG09_NATIVE_META_ANALYTICS_SOURCE);
     expect(report.source.gateway).toBe('TOCA_MCP_SERVER');
     expect(report.source.provider).toBe('META_MARKETING_API');
