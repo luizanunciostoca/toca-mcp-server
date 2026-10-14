@@ -158,6 +158,9 @@ jobs:
             ' "$authorization" >/dev/null
 
           if [ "$source_event" = workflow_run ]; then
+            # A precheck-only heartbeat can never create a valid writer authorization.
+            # Independently deny any stale/artifact replay even when its SHA appears valid.
+            jq -e '.schedulerAuthority.redundantHeartbeatMode == "ACTIVE"' "$MARKETING_AUTOPILOT_POLICY_PATH" >/dev/null
             upstream_run_id="$(jq -r .upstreamRunId "$authorization")"
             printf '%s' "$upstream_run_id" | grep -Eq '^[0-9]+$'
             gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${upstream_run_id}" > /tmp/upstream-run.json

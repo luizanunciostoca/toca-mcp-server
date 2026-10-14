@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -77,6 +77,18 @@ function verify({
 }
 
 describe('Marketing Autopilot trusted schedule heartbeat', () => {
+  it('keeps a verified fallback as PRECHECK-only under GitHub-only owner scope', () => {
+    const autopilot = readFileSync('.github/workflows/marketing-autopilot-publication.yml', 'utf8');
+    const writer = readFileSync('.github/workflows/marketing-publish-now.yml', 'utf8');
+    const policy = JSON.parse(
+      readFileSync('control/marketing-autopilot-scheduler-policy.json', 'utf8'),
+    ) as { schedulerAuthority: { redundantHeartbeatMode: string } };
+    expect(policy.schedulerAuthority.redundantHeartbeatMode).toBe('PRECHECK_ONLY');
+    expect(autopilot).toContain('trigger_kind=TRUSTED_HEARTBEAT_PRECHECK_ONLY');
+    expect(autopilot).not.toContain('trigger_kind=REDUNDANT_SCHEDULE_HEARTBEAT');
+    expect(writer).toContain('.schedulerAuthority.redundantHeartbeatMode == "ACTIVE"');
+  });
+
   it('accepts a fresh scheduled main run only after canonical REST-shape readback', () => {
     const result = verify();
     expect(result.status, result.stderr).toBe(0);

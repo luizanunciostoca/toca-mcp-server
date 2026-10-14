@@ -14,7 +14,8 @@
     "directCloudRunPublicationAuthorized": false,
     "canonicalWriterDispatchAuthorized": true,
     "requireScheduledRunProvenance": true,
-    "manualAutopilotAuthorized": false
+    "manualAutopilotAuthorized": false,
+    "redundantHeartbeatMode": "PRECHECK_ONLY"
   },
   "canonicalWriter": {
     "transport": "gcp-instagram-publish-now",

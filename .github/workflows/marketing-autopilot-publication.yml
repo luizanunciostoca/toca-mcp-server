@@ -80,8 +80,11 @@ jobs:
               heartbeat_verification="$(node scripts/marketing-autopilot-heartbeat-verify.mjs)"
               jq -e '.status == "VERIFIED" and (.upstreamRunId | test("^[0-9]+$"))' \
                 <<<"$heartbeat_verification" >/dev/null
-              mode=AUTOPILOT
-              trigger_kind=REDUNDANT_SCHEDULE_HEARTBEAT
+              # The redundant heartbeat is observational under the current GitHub-only owner scope.
+              # It must never acquire a provider-writer authorization or dispatch GCP.
+              test "$(jq -r '.schedulerAuthority.redundantHeartbeatMode // empty' "$POLICY_PATH")" = PRECHECK_ONLY
+              mode=PRECHECK
+              trigger_kind=TRUSTED_HEARTBEAT_PRECHECK_ONLY
               upstream_run_id="$(jq -r .upstreamRunId <<<"$heartbeat_verification")"
               echo "MARKETING_AUTOPILOT_HEARTBEAT_READBACK=$heartbeat_verification"
               ;;
@@ -113,6 +116,7 @@ jobs:
             .schedulerAuthority.metaCredentialAccessAuthorized == false and
             .schedulerAuthority.directCloudRunPublicationAuthorized == false and
             .schedulerAuthority.manualAutopilotAuthorized == false and
+            .schedulerAuthority.redundantHeartbeatMode == "PRECHECK_ONLY" and
             .rollout.phase == "CANARY" and
             .generalAutonomy == false and
             .rollout.blindRetryAuthorized == false and
@@ -153,6 +157,12 @@ jobs:
           cat marketing-autopilot-scheduler-decision.json
           status="$(jq -r .status marketing-autopilot-scheduler-decision.json)"
           echo "status=$status" >> "$GITHUB_OUTPUT"
+          {
+            echo "MARKETING_AUTOPILOT_SCAN_STATUS=$status"
+            if [ "$status" = NO_CANDIDATE ]; then
+              jq -r '"MARKETING_AUTOPILOT_EXECUTION=NOT_EXECUTED", "MARKETING_AUTOPILOT_BLOCKER=\(.blocker // "UNKNOWN")", "MARKETING_AUTOPILOT_NEXT_ACTION=\(.nextAction // "REVIEW_CANONICAL_CONTENT")", "MARKETING_AUTOPILOT_FUTURE_SLOTS=\(.futureSlots // 0)", "MARKETING_AUTOPILOT_FUTURE_SOURCE_APPROVED=\(.futureSourceApproved // 0)"' marketing-autopilot-scheduler-decision.json
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
           if [ "$status" = READY ]; then
             echo "content_item_id=$(jq -r .candidate.contentItemId marketing-autopilot-scheduler-decision.json)" >> "$GITHUB_OUTPUT"
             echo "scheduled_at=$(jq -r .candidate.scheduledAt marketing-autopilot-scheduler-decision.json)" >> "$GITHUB_OUTPUT"
