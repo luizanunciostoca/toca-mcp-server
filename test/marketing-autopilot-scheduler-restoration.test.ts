@@ -18,6 +18,15 @@ const policy = JSON.parse(
     generalAutonomy?: boolean;
     limited?: { generalAutonomy?: boolean };
   };
+  bindings?: Record<
+    string,
+    {
+      [key: string]: unknown;
+      creativeTruthBinding: Record<string, unknown>;
+      brandDeterminism: Record<string, unknown>;
+      rightsClearance: Record<string, unknown>;
+    }
+  >;
   standingAuthorization?: {
     authority?: string;
     allowCopyMutation?: boolean;
@@ -187,6 +196,39 @@ function runScheduler({
   if (!useProductionPolicy) {
     testPolicy.dailyRollout.canaryContentItemId = canaryId;
     testPolicy.dailyRollout.canaryScheduledAt = '2026-09-16T09:00:00-03:00';
+    const productionBinding = testPolicy.bindings?.[productionCanaryId];
+    if (!productionBinding) throw new Error('AUTOPILOT_FIXTURE_PROTECTED_BINDING_REQUIRED');
+    const fixtureCanary = feedRow();
+    testPolicy.bindings = {
+      ...testPolicy.bindings,
+      [canaryId]: {
+        ...productionBinding,
+        expectedScheduledAt: fixtureCanary.scheduled_at,
+        masterAssetId: fixtureCanary.master_asset_id,
+        driveFileId: fixtureCanary.master_drive_file_id,
+        outputSha256: fixtureCanary.output_sha256,
+        creativeId: fixtureCanary.creative_id,
+        copyId: fixtureCanary.copy_id,
+        registryMessage: fixtureCanary.message,
+        registryCta: fixtureCanary.cta,
+        approvedCaption: `${fixtureCanary.message}\\n\\n${fixtureCanary.cta}`,
+        correlationId: fixtureCanary.correlation_id,
+        creativeTruthBinding: {
+          ...productionBinding.creativeTruthBinding,
+          creativeId: fixtureCanary.creative_id,
+          outputSha256: fixtureCanary.output_sha256,
+        },
+        brandDeterminism: {
+          ...productionBinding.brandDeterminism,
+          assetSha256: fixtureCanary.output_sha256,
+        },
+        rightsClearance: {
+          ...productionBinding.rightsClearance,
+          evidenceRef: `GOOGLE_DRIVE:${fixtureCanary.master_drive_file_id}`,
+          assetSha256: fixtureCanary.output_sha256,
+        },
+      },
+    };
   }
   writeFileSync(policyFixture, `${JSON.stringify(testPolicy)}\n`, 'utf8');
   return spawnSync('node', [script, mode], {
@@ -296,6 +338,59 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
         },
       },
     });
+  });
+
+
+  it.each([
+    ['Drive file', { master_drive_file_id: 'tampered-drive-id' }, 'AUTOPILOT_CANARY_PROTECTED_DRIVE_MISMATCH'],
+    ['asset SHA', { output_sha256: 'f'.repeat(64) }, 'AUTOPILOT_CANARY_PROTECTED_SHA256_MISMATCH'],
+    ['caption copy', { message: 'Texto alterado sem nova aprovação.' }, 'AUTOPILOT_CANARY_PROTECTED_MESSAGE_MISMATCH'],
+    ['CTA copy', { cta: 'Compre outro produto.' }, 'AUTOPILOT_CANARY_PROTECTED_CTA_MISMATCH'],
+    ['creative ID', { creative_id: 'CR-UNAPPROVED' }, 'AUTOPILOT_CANARY_PROTECTED_CREATIVE_ID_MISMATCH'],
+    ['master asset', { master_asset_id: 'MM-UNAPPROVED' }, 'AUTOPILOT_CANARY_PROTECTED_ASSET_MISMATCH'],
+    ['copy ID', { copy_id: 'CP-UNAPPROVED' }, 'AUTOPILOT_CANARY_PROTECTED_COPY_ID_MISMATCH'],
+    ['correlation ID', { correlation_id: 'CORR-UNAPPROVED' }, 'AUTOPILOT_CANARY_PROTECTED_CORRELATION_MISMATCH'],
+  ])('rejects unapproved %s drift for the protected October canary', (_kind, rowChange, expectedError) => {
+    const attempt = runScheduler({
+      mode: 'build-command',
+      now: '2026-10-15T09:00:00-03:00',
+      rows: [productionCanaryFeedRow(rowChange)],
+      useProductionPolicy: true,
+      extraEnv: {
+        MARKETING_AUTOPILOT_CONTENT_ITEM_ID: productionCanaryId,
+        MARKETING_AUTOPILOT_TARGET_CODE_SHA: '3'.repeat(40),
+      },
+    });
+    expect(attempt.status).not.toBe(0);
+    expect(attempt.stderr).toContain(expectedError);
+  });
+
+  it('rejects an altered generated command even when the approved registry row has not changed', () => {
+    const env = {
+      MARKETING_AUTOPILOT_CONTENT_ITEM_ID: productionCanaryId,
+      MARKETING_AUTOPILOT_TARGET_CODE_SHA: '3'.repeat(40),
+    };
+    const built = runScheduler({
+      mode: 'build-command',
+      now: '2026-10-15T09:00:00-03:00',
+      rows: [productionCanaryFeedRow()],
+      useProductionPolicy: true,
+      extraEnv: env,
+    });
+    expect(built.status, built.stderr).toBe(0);
+    const approvedCommand = (parseOutput(built.stdout) as { command: Record<string, unknown> }).command;
+    const path = join(mkdtempSync(join(tmpdir(), 'toca-canary-command-')), 'forged.json');
+    writeFileSync(path, JSON.stringify({ ...approvedCommand, caption: 'Legenda adulterada' }), 'utf8');
+
+    const verified = runScheduler({
+      mode: 'verify-command',
+      now: '2026-10-15T09:00:00-03:00',
+      rows: [productionCanaryFeedRow()],
+      useProductionPolicy: true,
+      extraEnv: { ...env, MARKETING_AUTOPILOT_COMMAND_PATH: path },
+    });
+    expect(verified.status).not.toBe(0);
+    expect(verified.stderr).toContain('AUTOPILOT_CANARY_COMMAND_PROTECTED_CAPTION_MISMATCH');
   });
 
   it('selects only the 09:00 canary before any provider-verified publication exists', () => {
