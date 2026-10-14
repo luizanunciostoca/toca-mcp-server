@@ -54,7 +54,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: deploy-gcp-next-${{ inputs.environment }}
+  group: ${{ inputs.environment == 'production' && 'instagram-engagement-webhook-callback-control' || format('deploy-gcp-next-{0}', inputs.environment) }}
   cancel-in-progress: false
 
 jobs:
@@ -166,6 +166,26 @@ jobs:
           node-version: 24
           cache: ${{ inputs.operation == 'deploy' && 'pnpm' || '' }}
 
+      - name: Load repository-canonical staging coordinates for governed recovery
+        if: inputs.environment == 'staging'
+        id: staging_config
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging-recovery.env
+          cat /tmp/staging-recovery.env >> "$GITHUB_ENV"
+          set -a
+          source /tmp/staging-recovery.env
+          set +a
+          test "$DEPLOY_ENVIRONMENT" = staging
+          test "$GCP_PROJECT_ID" = toca-mcp-next-staging
+          test "$GCP_PROJECT_NUMBER" = 729069789107
+          test "$STAGING_DATABASE_ISOLATION_MODE" = DEDICATED_CLOUD_SQL
+          test "$STAGING_PROVIDER_MODE" = DISABLED
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+          echo 'STAGING_RECOVERY_CONFIG=PASS'
+
       - name: Install and run exact-head Quality
         if: inputs.operation == 'deploy'
         run: |
@@ -261,7 +281,15 @@ jobs:
             [[ "$META_PROVIDER_VERIFIED" == true ]] || { echo 'Meta-backed capability requires META_PROVIDER_VERIFIED=true' >&2; exit 1; }
           fi
 
-      - name: Authenticate with environment-specific WIF
+      - name: Authenticate isolated staging WIF from canonical config
+        if: inputs.environment == 'staging'
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.staging_config.outputs.wif }}
+          service_account: ${{ steps.staging_config.outputs.deployer_sa }}
+
+      - name: Authenticate production WIF from production coordinates
+        if: inputs.environment == 'production'
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -1296,40 +1324,363 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$ROLLBACK_MCP_REVISION"; test -n "$ROLLBACK_WEBHOOK_REVISION"; test -n "$ROLLBACK_COMPATIBILITY_REF"
+
+          verify_exact_traffic() {
+            local service="$1" expected_revision="$2" snapshot="$3"
+            gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "$snapshot"
+            jq -e --arg revision "$expected_revision" '
+              . as $service |
+              ([($service.status.traffic // [])[] | select((.percent // 0) > 0)] | length) == 1 and
+              ([($service.status.traffic // [])[]
+                | select((.percent // 0) == 100)
+                | if ((.revisionName // "") | length) > 0 then .revisionName
+                  elif (.latestRevision // false) == true then ($service.status.latestReadyRevisionName // empty)
+                  else empty end
+              ] | unique) == [$revision]
+            ' "$snapshot" >/dev/null
+          }
+
+          verify_closed_webhook() {
+            local service_snapshot="$1" policy_snapshot="$2"
+            gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "$service_snapshot"
+            jq -e '(.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false") == "true"' "$service_snapshot" >/dev/null
+            gcloud run services get-iam-policy "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "$policy_snapshot"
+            jq -e 'all(.bindings[]?; .role != "roles/run.invoker" or all(.members[]?; . != "allUsers"))' "$policy_snapshot" >/dev/null
+          }
+
           gcloud run revisions list --service "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter "metadata.name=${ROLLBACK_MCP_REVISION}" --format='value(metadata.name)' | grep -Fx "$ROLLBACK_MCP_REVISION"
           gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${ROLLBACK_MCP_REVISION}=100"
+          verify_exact_traffic "$GCP_CLOUD_RUN_MCP_SERVICE" "$ROLLBACK_MCP_REVISION" /tmp/explicit-rollback-mcp.json
+
           if [[ "$ROLLBACK_WEBHOOK_REVISION" == ABSENT ]]; then
             gcloud run services update "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url
             gcloud run services remove-iam-policy-binding "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \
               --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
               --member=allUsers --role=roles/run.invoker --quiet
+            verify_closed_webhook /tmp/explicit-rollback-webhook.json /tmp/explicit-rollback-webhook-iam.json
             echo 'WEBHOOK_ROLLBACK_MODE=ABSENT_CLOSED' >> "$GITHUB_STEP_SUMMARY"
           else
             gcloud run revisions list --service "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --filter "metadata.name=${ROLLBACK_WEBHOOK_REVISION}" --format='value(metadata.name)' | grep -Fx "$ROLLBACK_WEBHOOK_REVISION"
             gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${ROLLBACK_WEBHOOK_REVISION}=100"
+            verify_exact_traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$ROLLBACK_WEBHOOK_REVISION" /tmp/explicit-rollback-webhook.json
           fi
+          echo 'EXPLICIT_ROLLBACK_READBACK=PASS' >> "$GITHUB_STEP_SUMMARY"
           echo "ROLLBACK_COMPATIBILITY_REF=$ROLLBACK_COMPATIBILITY_REF" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Activate emergency mutation kill switch
         if: inputs.operation == 'kill_switch'
         run: |
           set -euo pipefail
-          for service in "$GCP_CLOUD_RUN_MCP_SERVICE" "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"; do
-            gcloud run services update "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --update-env-vars TOCA_PLATFORM_KILL_SWITCH=true
-          done
+
+          serving_revision() {
+            local service="$1" payload count traffic_sum revision
+            payload="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            count="$(jq '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "")] | length' <<<"$payload")"
+            traffic_sum="$(jq '[.status.traffic[]?.percent // 0] | add // 0' <<<"$payload")"
+            revision="$(jq -r 'first(.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName) // empty' <<<"$payload")"
+            test "$count" = 1
+            test "$traffic_sum" = 100
+            test -n "$revision"
+            printf '%s\n' "$revision"
+          }
+
+          verify_exact_traffic() {
+            local service="$1" revision="$2" payload count traffic_sum
+            payload="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            count="$(jq --arg revision "$revision" '[.status.traffic[]? | select((.percent // 0) == 100 and .revisionName == $revision)] | length' <<<"$payload")"
+            traffic_sum="$(jq '[.status.traffic[]?.percent // 0] | add // 0' <<<"$payload")"
+            test "$count" = 1
+            test "$traffic_sum" = 100
+          }
+
+          normalized_revision_spec() {
+            jq -c '
+              .spec
+              | .containers[0].env = (
+                  [.containers[0].env[]? | select(.name != "TOCA_PLATFORM_KILL_SWITCH")]
+                  | sort_by(.name)
+                )
+            '
+          }
+
+          verify_candidate() {
+            local service="$1" candidate="$2" previous="$3" expected="$4"
+            local previous_json candidate_json previous_spec candidate_spec service_json
+            previous_json="$(gcloud run revisions describe "$previous" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            candidate_json="$(gcloud run revisions describe "$candidate" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+
+            printf '%s' "$candidate_json" | jq -e --arg candidate "$candidate" --arg expected "$expected" '
+              (.metadata.name == $candidate) and
+              (([.status.conditions[]? | select(.type == "Ready") | .status] | last) == "True") and
+              (([.spec.containers[0].env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH")] | length) == 1) and
+              (([.spec.containers[0].env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH") | .value] | last) == $expected)
+            ' >/dev/null
+
+            previous_spec="$(printf '%s' "$previous_json" | normalized_revision_spec)"
+            candidate_spec="$(printf '%s' "$candidate_json" | normalized_revision_spec)"
+            test "$candidate_spec" = "$previous_spec"
+
+            service_json="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            printf '%s' "$service_json" | jq -e --arg candidate "$candidate" --arg previous "$previous" '
+              ([.status.traffic[]? | select(.revisionName == $candidate) | (.percent // 0)] | add // 0) == 0 and
+              ([.status.traffic[]? | select(.revisionName == $previous and (.percent // 0) == 100)] | length) == 1 and
+              ([.status.traffic[]?.percent // 0] | add // 0) == 100
+            ' >/dev/null
+          }
+
+          stage_candidate() {
+            local service="$1" role="$2" expected="$3" previous="$4" output_var="$5"
+            local suffix candidate previous_json previous_image previous_release_sha_count previous_release_sha
+            previous_json="$(gcloud run revisions describe "$previous" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            previous_image="$(printf '%s' "$previous_json" | jq -r '.spec.containers[0].image // empty')"
+            previous_release_sha_count="$(printf '%s' "$previous_json" | jq '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA")] | length')"
+            previous_release_sha="$(printf '%s' "$previous_json" | jq -r '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value] | last // empty')"
+            test -n "$previous_image"
+            [[ "$previous_image" =~ @sha256:[0-9a-f]{64}$ ]]
+            test "$previous_release_sha_count" = 1
+            [[ "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]
+
+            suffix="ks-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${role}"
+            candidate="${service}-${suffix}"
+            gcloud run services update "$service" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --image "$previous_image" \
+              --revision-suffix "$suffix" \
+              --no-traffic \
+              --update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected,TOCA_RELEASE_SHA=$previous_release_sha" \
+              --quiet
+            verify_candidate "$service" "$candidate" "$previous" "$expected"
+            printf -v "$output_var" '%s' "$candidate"
+          }
+
+          rollback_pair() {
+            local mcp_previous="$1" webhook_previous="$2" rc=0
+            set +e
+            gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${mcp_previous}=100" --quiet || rc=1
+            gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${webhook_previous}=100" --quiet || rc=1
+            verify_exact_traffic "$GCP_CLOUD_RUN_MCP_SERVICE" "$mcp_previous" || rc=1
+            verify_exact_traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$webhook_previous" || rc=1
+            set -e
+            return "$rc"
+          }
+
+          verify_serving_kill_switch() {
+            local service="$1" revision="$2" expected="$3" revision_json
+            verify_exact_traffic "$service" "$revision"
+            revision_json="$(gcloud run revisions describe "$revision" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            printf '%s' "$revision_json" | jq -e --arg expected "$expected" '
+              (([.spec.containers[0].env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH")] | length) == 1) and
+              (([.spec.containers[0].env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH") | .value] | last) == $expected)
+            ' >/dev/null
+          }
+
+          MCP_PREVIOUS_REVISION="$(serving_revision "$GCP_CLOUD_RUN_MCP_SERVICE")"
+          WEBHOOK_PREVIOUS_REVISION="$(serving_revision "$GCP_CLOUD_RUN_WEBHOOK_SERVICE")"
+          MCP_CANDIDATE_REVISION=''
+          WEBHOOK_CANDIDATE_REVISION=''
+
+          stage_candidate "$GCP_CLOUD_RUN_MCP_SERVICE" mcp true "$MCP_PREVIOUS_REVISION" MCP_CANDIDATE_REVISION
+          stage_candidate "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" webhook true "$WEBHOOK_PREVIOUS_REVISION" WEBHOOK_CANDIDATE_REVISION
+
+          verify_exact_traffic "$GCP_CLOUD_RUN_MCP_SERVICE" "$MCP_PREVIOUS_REVISION"
+          verify_exact_traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_PREVIOUS_REVISION"
+
+          if ! gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${MCP_CANDIDATE_REVISION}=100" --quiet; then
+            if ! rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"; then
+              echo 'PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL' >&2
+            fi
+            exit 1
+          fi
+          if ! gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${WEBHOOK_CANDIDATE_REVISION}=100" --quiet; then
+            if ! rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"; then
+              echo 'PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL' >&2
+            fi
+            exit 1
+          fi
+
+          if ! verify_serving_kill_switch "$GCP_CLOUD_RUN_MCP_SERVICE" "$MCP_CANDIDATE_REVISION" true ||
+             ! verify_serving_kill_switch "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_CANDIDATE_REVISION" true; then
+            if ! rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"; then
+              echo 'PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL' >&2
+            fi
+            exit 1
+          fi
+
+          echo "PLATFORM_KILL_SWITCH_CANDIDATES mcp=$MCP_CANDIDATE_REVISION webhook=$WEBHOOK_CANDIDATE_REVISION" >> "$GITHUB_STEP_SUMMARY"
+          echo 'PLATFORM_KILL_SWITCH_READBACK=true' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Clear emergency mutation kill switch
         if: inputs.operation == 'clear_kill_switch'
         run: |
           set -euo pipefail
-          for service in "$GCP_CLOUD_RUN_MCP_SERVICE" "$GCP_CLOUD_RUN_WEBHOOK_SERVICE"; do
-            gcloud run services update "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --update-env-vars TOCA_PLATFORM_KILL_SWITCH=false
-          done
+
+          serving_revision() {
+            local service="$1" payload count traffic_sum revision
+            payload="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            count="$(jq '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "")] | length' <<<"$payload")"
+            traffic_sum="$(jq '[.status.traffic[]?.percent // 0] | add // 0' <<<"$payload")"
+            revision="$(jq -r 'first(.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName) // empty' <<<"$payload")"
+            test "$count" = 1
+            test "$traffic_sum" = 100
+            test -n "$revision"
+            printf '%s\n' "$revision"
+          }
+
+          verify_exact_traffic() {
+            local service="$1" revision="$2" payload count traffic_sum
+            payload="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            count="$(jq --arg revision "$revision" '[.status.traffic[]? | select((.percent // 0) == 100 and .revisionName == $revision)] | length' <<<"$payload")"
+            traffic_sum="$(jq '[.status.traffic[]?.percent // 0] | add // 0' <<<"$payload")"
+            test "$count" = 1
+            test "$traffic_sum" = 100
+          }
+
+          normalized_revision_spec() {
+            jq -c '
+              .spec
+              | .containers[0].env = (
+                  [.containers[0].env[]? | select(.name != "TOCA_PLATFORM_KILL_SWITCH")]
+                  | sort_by(.name)
+                )
+            '
+          }
+
+          verify_candidate() {
+            local service="$1" candidate="$2" previous="$3" expected="$4"
+            local previous_json candidate_json previous_spec candidate_spec service_json
+            previous_json="$(gcloud run revisions describe "$previous" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            candidate_json="$(gcloud run revisions describe "$candidate" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+
+            printf '%s' "$candidate_json" | jq -e --arg candidate "$candidate" --arg expected "$expected" '
+              (.metadata.name == $candidate) and
+              (([.status.conditions[]? | select(.type == "Ready") | .status] | last) == "True") and
+              (([.spec.containers[0].env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH")] | length) == 1) and
+              (([.spec.containers[0].env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH") | .value] | last) == $expected)
+            ' >/dev/null
+
+            previous_spec="$(printf '%s' "$previous_json" | normalized_revision_spec)"
+            candidate_spec="$(printf '%s' "$candidate_json" | normalized_revision_spec)"
+            test "$candidate_spec" = "$previous_spec"
+
+            service_json="$(gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            printf '%s' "$service_json" | jq -e --arg candidate "$candidate" --arg previous "$previous" '
+              ([.status.traffic[]? | select(.revisionName == $candidate) | (.percent // 0)] | add // 0) == 0 and
+              ([.status.traffic[]? | select(.revisionName == $previous and (.percent // 0) == 100)] | length) == 1 and
+              ([.status.traffic[]?.percent // 0] | add // 0) == 100
+            ' >/dev/null
+          }
+
+          stage_candidate() {
+            local service="$1" role="$2" expected="$3" previous="$4" output_var="$5"
+            local suffix candidate previous_json previous_image previous_release_sha_count previous_release_sha
+            previous_json="$(gcloud run revisions describe "$previous" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            previous_image="$(printf '%s' "$previous_json" | jq -r '.spec.containers[0].image // empty')"
+            previous_release_sha_count="$(printf '%s' "$previous_json" | jq '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA")] | length')"
+            previous_release_sha="$(printf '%s' "$previous_json" | jq -r '[.spec.containers[0].env[]? | select(.name == "TOCA_RELEASE_SHA") | .value] | last // empty')"
+            test -n "$previous_image"
+            [[ "$previous_image" =~ @sha256:[0-9a-f]{64}$ ]]
+            test "$previous_release_sha_count" = 1
+            [[ "$previous_release_sha" =~ ^[0-9a-f]{40}$ ]]
+
+            suffix="ks-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${role}"
+            candidate="${service}-${suffix}"
+            gcloud run services update "$service" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --image "$previous_image" \
+              --revision-suffix "$suffix" \
+              --no-traffic \
+              --update-env-vars "TOCA_PLATFORM_KILL_SWITCH=$expected,TOCA_RELEASE_SHA=$previous_release_sha" \
+              --quiet
+            verify_candidate "$service" "$candidate" "$previous" "$expected"
+            printf -v "$output_var" '%s' "$candidate"
+          }
+
+          rollback_pair() {
+            local mcp_previous="$1" webhook_previous="$2" rc=0
+            set +e
+            gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${mcp_previous}=100" --quiet || rc=1
+            gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${webhook_previous}=100" --quiet || rc=1
+            verify_exact_traffic "$GCP_CLOUD_RUN_MCP_SERVICE" "$mcp_previous" || rc=1
+            verify_exact_traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$webhook_previous" || rc=1
+            set -e
+            return "$rc"
+          }
+
+          verify_serving_kill_switch() {
+            local service="$1" revision="$2" expected="$3" revision_json
+            verify_exact_traffic "$service" "$revision"
+            revision_json="$(gcloud run revisions describe "$revision" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+            printf '%s' "$revision_json" | jq -e --arg expected "$expected" '
+              (([.spec.containers[0].env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH")] | length) == 1) and
+              (([.spec.containers[0].env[]? | select(.name == "TOCA_PLATFORM_KILL_SWITCH") | .value] | last) == $expected)
+            ' >/dev/null
+          }
+
+          MCP_PREVIOUS_REVISION="$(serving_revision "$GCP_CLOUD_RUN_MCP_SERVICE")"
+          WEBHOOK_PREVIOUS_REVISION="$(serving_revision "$GCP_CLOUD_RUN_WEBHOOK_SERVICE")"
+          MCP_CANDIDATE_REVISION=''
+          WEBHOOK_CANDIDATE_REVISION=''
+
+          stage_candidate "$GCP_CLOUD_RUN_MCP_SERVICE" mcp false "$MCP_PREVIOUS_REVISION" MCP_CANDIDATE_REVISION
+          stage_candidate "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" webhook false "$WEBHOOK_PREVIOUS_REVISION" WEBHOOK_CANDIDATE_REVISION
+
+          verify_exact_traffic "$GCP_CLOUD_RUN_MCP_SERVICE" "$MCP_PREVIOUS_REVISION"
+          verify_exact_traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_PREVIOUS_REVISION"
+
+          if ! gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${MCP_CANDIDATE_REVISION}=100" --quiet; then
+            if ! rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"; then
+              echo 'PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL' >&2
+            fi
+            exit 1
+          fi
+          if ! gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${WEBHOOK_CANDIDATE_REVISION}=100" --quiet; then
+            if ! rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"; then
+              echo 'PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL' >&2
+            fi
+            exit 1
+          fi
+
+          if ! verify_serving_kill_switch "$GCP_CLOUD_RUN_MCP_SERVICE" "$MCP_CANDIDATE_REVISION" false ||
+             ! verify_serving_kill_switch "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$WEBHOOK_CANDIDATE_REVISION" false; then
+            if ! rollback_pair "$MCP_PREVIOUS_REVISION" "$WEBHOOK_PREVIOUS_REVISION"; then
+              echo 'PLATFORM_KILL_SWITCH_COMPENSATING_ROLLBACK=FAIL' >&2
+            fi
+            exit 1
+          fi
+
+          echo "PLATFORM_KILL_SWITCH_CANDIDATES mcp=$MCP_CANDIDATE_REVISION webhook=$WEBHOOK_CANDIDATE_REVISION" >> "$GITHUB_STEP_SUMMARY"
+          echo 'PLATFORM_KILL_SWITCH_READBACK=false' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Automatic rollback after failed promotion
         if: failure() && inputs.operation == 'deploy' && env.PREVIOUS_MCP_REVISION != ''
         run: |
           set -euo pipefail
+
+          verify_exact_traffic() {
+            local service="$1" expected_revision="$2" snapshot="$3"
+            gcloud run services describe "$service" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "$snapshot"
+            jq -e --arg revision "$expected_revision" '
+              . as $service |
+              ([($service.status.traffic // [])[] | select((.percent // 0) > 0)] | length) == 1 and
+              ([($service.status.traffic // [])[]
+                | select((.percent // 0) == 100)
+                | if ((.revisionName // "") | length) > 0 then .revisionName
+                  elif (.latestRevision // false) == true then ($service.status.latestReadyRevisionName // empty)
+                  else empty end
+              ] | unique) == [$revision]
+            ' "$snapshot" >/dev/null
+          }
+
+          verify_closed_webhook() {
+            local service_snapshot="$1" policy_snapshot="$2"
+            gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "$service_snapshot"
+            jq -e '(.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false") == "true"' "$service_snapshot" >/dev/null
+            gcloud run services get-iam-policy "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > "$policy_snapshot"
+            jq -e 'all(.bindings[]?; .role != "roles/run.invoker" or all(.members[]?; . != "allUsers"))' "$policy_snapshot" >/dev/null
+          }
+
           if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
             gcloud run services update "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url --quiet
             gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/mcp-endpoint-rollback.json
@@ -1340,21 +1691,27 @@ jobs:
             if [[ "${PREVIOUS_WEBHOOK_SERVICE_EXISTED:-false}" != true ]] && \
               gcloud run services describe "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(metadata.name)' >/dev/null 2>&1; then
               gcloud run services delete "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --quiet
+              bash scripts/verify-cloud-run-service-absence.sh \
+                "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$GCP_PROJECT_ID" "$GCP_REGION"
               echo 'WEBHOOK_BOOTSTRAP_CLEANUP=DELETED_UNPROMOTED_SERVICE' >> "$GITHUB_STEP_SUMMARY"
             fi
             echo 'AUTOMATIC_ROLLBACK=SKIPPED_NO_PROMOTION' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           gcloud run services update-traffic "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${PREVIOUS_MCP_REVISION}=100"
+          verify_exact_traffic "$GCP_CLOUD_RUN_MCP_SERVICE" "$PREVIOUS_MCP_REVISION" /tmp/automatic-rollback-mcp.json
           if [[ -n "${PREVIOUS_WEBHOOK_REVISION:-}" ]]; then
             gcloud run services update-traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --to-revisions "${PREVIOUS_WEBHOOK_REVISION}=100"
+            verify_exact_traffic "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" "$PREVIOUS_WEBHOOK_REVISION" /tmp/automatic-rollback-webhook.json
           else
             gcloud run services update "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --no-default-url
             gcloud run services remove-iam-policy-binding "$GCP_CLOUD_RUN_WEBHOOK_SERVICE" \
               --project "$GCP_PROJECT_ID" --region "$GCP_REGION" \
               --member=allUsers --role=roles/run.invoker --quiet
+            verify_closed_webhook /tmp/automatic-rollback-webhook.json /tmp/automatic-rollback-webhook-iam.json
             echo 'WEBHOOK_AUTOMATIC_ROLLBACK_MODE=ABSENT_CLOSED' >> "$GITHUB_STEP_SUMMARY"
           fi
+          echo 'AUTOMATIC_ROLLBACK_READBACK=PASS' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deployment evidence summary
         if: always()

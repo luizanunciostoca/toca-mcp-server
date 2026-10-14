@@ -17,7 +17,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: instagram-engagement-production-shadow
+  group: instagram-engagement-webhook-callback-control
   cancel-in-progress: false
 
 env:

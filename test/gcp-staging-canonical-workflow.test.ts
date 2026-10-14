@@ -89,6 +89,58 @@ describe('canonical isolated staging deployment workflow', () => {
     expect(workflow).toContain('steps.config.outputs.deployer_sa');
   });
 
+  it('supports a governed schema-sync-only path without service or provider mutation', () => {
+    expect(workflow).toContain('schema_sync_only:');
+    expect(workflow).toContain('schema_sync_authorization_issue:');
+    expect(workflow).toContain('  schema-sync:');
+    expect(workflow).toContain('if: ${{ inputs.schema_sync_only }}');
+    expect(workflow).toContain('if: ${{ !inputs.schema_sync_only }}');
+    expect(workflow).toContain('read_key_once()');
+    expect(workflow).toContain('require_key_value_once()');
+    expect(workflow).toContain('awk -v prefix="${key}="');
+    expect(workflow).toContain('test "$count" -eq 1');
+    expect(workflow).toContain('test "$actual" = "$expected"');
+    expect(workflow).toContain(
+      'EXPECTED_BEFORE_MAX_MIGRATION="$(read_key_once EXPECTED_BEFORE_MAX_MIGRATION)"',
+    );
+    expect(workflow).toContain('test "$BEFORE_MAX" = "$EXPECTED_BEFORE_MAX_MIGRATION"');
+    expect(workflow).toContain(
+      'diff -u staging-schema-sync-evidence/expected-before-prefix.txt staging-schema-sync-evidence/before-migrations.txt',
+    );
+    expect(workflow).toContain('STAGING_SCHEMA_SYNC_BEFORE_STATE=PASS');
+    expect(workflow).toContain('require_key_value_once STAGING_SCHEMA_SYNC_AUTHORIZATION ACTIVE');
+    expect(workflow).toContain('require_key_value_once DATABASE_MUTATION_AUTHORIZED true');
+    expect(workflow).toContain('require_key_value_once PRODUCTION_MUTATION_AUTHORIZED false');
+    expect(workflow).toContain('require_key_value_once PROVIDER_MUTATION_AUTHORIZED false');
+    expect(workflow).toContain('require_key_value_once TRAFFIC_MUTATION_AUTHORIZED false');
+    expect(workflow).toContain('require_key_value_once CLOUD_RUN_MUTATION_AUTHORIZED false');
+    expect(workflow).toContain('require_key_value_once DATABASE_SECRET_READ_AUTHORIZED true');
+    expect(workflow).toContain('require_key_value_once SECRETS_DISCLOSURE_AUTHORIZED false');
+    expect(workflow).toContain(
+      'require_key_value_once FINANCIAL_CEILING NO_NEW_PAID_RESOURCE_ALLOCATION',
+    );
+    const schemaSyncStart = workflow.indexOf('  schema-sync:\n');
+    expect(schemaSyncStart).toBeGreaterThanOrEqual(0);
+    const schemaSyncBlock = workflow.slice(schemaSyncStart);
+    expect(schemaSyncBlock).toContain('pnpm migrate');
+    expect(schemaSyncBlock).toContain(
+      'diff -u staging-schema-sync-evidence/repository-migrations.txt staging-schema-sync-evidence/after-migrations.txt',
+    );
+    expect(schemaSyncBlock).toContain('STAGING_SCHEMA_SYNC=PASS');
+    expect(schemaSyncBlock).toContain('databaseMutation:true');
+    expect(schemaSyncBlock).toContain('productionMutation:false');
+    expect(schemaSyncBlock).toContain('providerMutation:false');
+    expect(schemaSyncBlock).toContain('trafficMutation:false');
+    expect(schemaSyncBlock).toContain('cloudRunMutation:false');
+    expect(schemaSyncBlock).toContain('databaseSecretRead:true');
+    expect(schemaSyncBlock).toContain('secretPayloadDisclosed:false');
+    expect(schemaSyncBlock).toContain('beforeStateExactPrefix:true');
+    expect(schemaSyncBlock).toContain('expectedBeforeMaxMigration:$expectedBeforeMax');
+    expect(schemaSyncBlock).not.toContain('gcloud run deploy');
+    expect(schemaSyncBlock).not.toContain('gcloud run services update-traffic');
+    expect(schemaSyncBlock).not.toContain('graph.facebook.com');
+  });
+
   it('uses an attestation-capable BuildKit builder without dropping provenance or SBOM', () => {
     const setupBuildx = workflow.indexOf('Setup Docker Buildx for attestations');
     const build = workflow.indexOf('Build push and resolve immutable candidate digest');

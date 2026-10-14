@@ -66,6 +66,7 @@ describe('MetaAdsControlledGraphProvider campaign guardrails', () => {
             },
           },
           promotedObject: { pixel_id: '461233076843065', custom_event_type: 'PURCHASE' },
+          attributionSpec: [{ event_type: 'CLICK_THROUGH', window_days: 7 }],
           startTime: '2026-08-14T04:00:00.000Z',
           endTime: '2026-08-15T05:00:00.000Z',
           status: 'PAUSED',
@@ -98,6 +99,7 @@ describe('MetaAdsControlledGraphProvider campaign guardrails', () => {
         pixel_id: '461233076843065',
         custom_event_type: 'PURCHASE',
       }),
+      attribution_spec: JSON.stringify([{ event_type: 'CLICK_THROUGH', window_days: 7 }]),
       start_time: '2026-08-14T04:00:00.000Z',
       end_time: '2026-08-15T05:00:00.000Z',
     });

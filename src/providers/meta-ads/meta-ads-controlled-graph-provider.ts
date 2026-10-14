@@ -72,6 +72,7 @@ export class MetaAdsControlledGraphProvider implements MetaAdsProvider {
     if (draft.billingEvent) values.billing_event = draft.billingEvent;
     if (draft.optimizationGoal) values.optimization_goal = draft.optimizationGoal;
     if (draft.promotedObject) values.promoted_object = JSON.stringify(draft.promotedObject);
+    if (draft.attributionSpec) values.attribution_spec = JSON.stringify(draft.attributionSpec);
     if (draft.startTime) values.start_time = draft.startTime;
     if (draft.endTime) values.end_time = draft.endTime;
     const result = await this.api.post(`act_${account.adAccountId}/adsets`, values);
