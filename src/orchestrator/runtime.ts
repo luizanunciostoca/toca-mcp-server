@@ -430,6 +430,7 @@ export class TocaOrchestratorRuntime {
         const execution = await withTimeout(
           this.dependencies.specialistMissions &&
             checkpoint.missionCreatedAt &&
+            checkpoint.plan.primaryAgent !== 'AG-01' &&
             !inspection.sideEffects &&
             !inspection.approvalRequired &&
             this.dependencies.specialistMissions.supports(inspection.canonicalCapabilityId)
@@ -447,7 +448,7 @@ export class TocaOrchestratorRuntime {
                 correlationId: checkpoint.correlationId,
                 idempotencyKey: `${checkpoint.runId}:${step.stepId}`,
                 expiresAt: new Date(
-                  Date.parse(checkpoint.missionCreatedAt!) + SPECIALIST_MISSION_MAX_TTL_MS,
+                  Date.parse(checkpoint.missionCreatedAt) + SPECIALIST_MISSION_MAX_TTL_MS,
                 ).toISOString(),
                 identity,
               })
