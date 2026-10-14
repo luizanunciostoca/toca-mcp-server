@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "diagnosticId": "AG01_STARTUP_DEPLOYER_READBACK_20260917",
+  "projectId": "toca-mcp-production",
+  "projectNumber": "990081828836",
+  "region": "southamerica-east1",
+  "service": "toca-ag01-orchestrator",
+  "diagnosticIdentity": "toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com",
+  "dedicatedReaderUnavailableReason": "PROJECT_IAM_BOOTSTRAP_AUTHORITY_UNAVAILABLE",
+  "singleUseAuthorizationRequired": true,
+  "claimAuthorizationBeforeReadRequired": true,
+  "exactMainShaRequired": true,
+  "rawLogPayloadPublicationAllowed": false,
+  "allowedReads": ["run.revisions.describe", "logging.entries.read"],
+  "forbid": {
+    "projectIamMutation": true,
+    "serviceAccountMutation": true,
+    "serviceAccountCreate": true,
+    "serviceAccountKeys": true,
+    "cloudRunServiceMutation": true,
+    "trafficMutation": true,
+    "databaseMutation": true,
+    "schedulerMutation": true,
+    "providerCalls": true,
+    "generalAutonomyPromotion": true
+  }
+}

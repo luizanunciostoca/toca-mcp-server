@@ -79,6 +79,7 @@ describe('VertexVeoSceneContinuationVideoProvider', () => {
         expect(body.parameters).toMatchObject({
           aspectRatio: '9:16',
           durationSeconds: 8,
+          generateAudio: false,
           sampleCount: 1,
           resizeMode: 'crop',
           resolution: '720p',

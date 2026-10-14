@@ -1,0 +1,110 @@
+name: AG-01 Grounded Startup Failure Diagnostics
+
+on:
+  workflow_run:
+    workflows:
+      - AG-01 Grounded Runtime Activation
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: ag01-grounded-startup-failure-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Read and classify failed workflow evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILED_RUN_ID: ${{ github.event.workflow_run.id }}
+          FAILED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          FAILED_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$FAILED_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$FAILED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$FAILED_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          mkdir -p ag01-startup-diagnostic
+
+          LOG_READ_STATUS=FAILED
+          if gh run view "$FAILED_RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed > /tmp/failed-run.log 2>/dev/null; then
+            LOG_READ_STATUS=PASS
+          else
+            : > /tmp/failed-run.log
+          fi
+
+          CLASSIFICATION=STARTUP_FAILURE_UNCLASSIFIED
+          APPROVED_TOKENS=()
+          classify_token() {
+            local token="$1"
+            if grep -Fq "$token" /tmp/failed-run.log; then
+              APPROVED_TOKENS+=("$token")
+              return 0
+            fi
+            return 1
+          }
+
+          if classify_token 'AG01_PERSISTENCE_NOT_READY'; then
+            CLASSIFICATION=AG01_PERSISTENCE_NOT_READY
+          elif classify_token 'AG01_PRODUCTION_MODEL_PROVIDER_REQUIRED'; then
+            CLASSIFICATION=AG01_PRODUCTION_MODEL_PROVIDER_REQUIRED
+          elif classify_token 'AG01_PRODUCTION_VERTEX_PROVIDER_REQUIRED'; then
+            CLASSIFICATION=AG01_PRODUCTION_VERTEX_PROVIDER_REQUIRED
+          elif classify_token 'AG01_PRODUCTION_GOOGLE_AUTH_MODE_REQUIRED'; then
+            CLASSIFICATION=AG01_PRODUCTION_GOOGLE_AUTH_MODE_REQUIRED
+          elif classify_token 'AG01_PRODUCTION_GCP_METADATA_REQUIRED'; then
+            CLASSIFICATION=AG01_PRODUCTION_GCP_METADATA_REQUIRED
+          elif classify_token 'AG01_VERTEX_PROJECT_ID_REQUIRED'; then
+            CLASSIFICATION=AG01_VERTEX_PROJECT_ID_REQUIRED
+          elif grep -Fq 'The user-provided container failed the configured startup probe checks' /tmp/failed-run.log; then
+            CLASSIFICATION=CLOUD_RUN_STARTUP_PROBE_FAILURE
+          elif grep -Eq 'ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT' /tmp/failed-run.log; then
+            CLASSIFICATION=STARTUP_DEPENDENCY_CONNECTIVITY_FAILURE
+          fi
+
+          if [[ "$LOG_READ_STATUS" == PASS ]]; then
+            DIAGNOSTIC_STATUS=PASS
+          else
+            DIAGNOSTIC_STATUS=UNAVAILABLE
+          fi
+
+          ERROR_TOKENS=NONE
+          if (( ${#APPROVED_TOKENS[@]} > 0 )); then
+            ERROR_TOKENS="$(IFS=,; echo "${APPROVED_TOKENS[*]}")"
+          fi
+
+          cat > ag01-startup-diagnostic/sanitized.env <<EOF
+          AG01_STARTUP_DIAGNOSTIC_STATUS=$DIAGNOSTIC_STATUS
+          FAILED_SOURCE_SHA=$FAILED_HEAD_SHA
+          FAILED_RUN_ID=$FAILED_RUN_ID
+          FAILED_RUN_ATTEMPT=$FAILED_RUN_ATTEMPT
+          WORKFLOW_LOG_READ_STATUS=$LOG_READ_STATUS
+          CLASSIFICATION=$CLASSIFICATION
+          APPROVED_ERROR_TOKENS=$ERROR_TOKENS
+          RAW_LOG_PAYLOAD_PUBLISHED=false
+          GCP_CREDENTIALS_USED=false
+          TRAFFIC_MUTATION=false
+          PROVIDER_CALLS=false
+          DATABASE_MUTATION=false
+          EOF
+
+          cat ag01-startup-diagnostic/sanitized.env >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized diagnostic evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ag01-grounded-startup-diagnostic-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: ag01-startup-diagnostic/sanitized.env
+          if-no-files-found: error
+          retention-days: 90
