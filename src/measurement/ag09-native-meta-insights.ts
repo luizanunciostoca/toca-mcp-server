@@ -33,8 +33,8 @@ export interface Ag09NativeMetaInsightsEnvelope {
 
 /**
  * Provider-backed READ only. Never infers spend, leads or revenue from missing
- * rows. Exact duplicate records are discarded, but distinct breakdowns are
- * preserved: campaign/ad/date alone is not a safe deduplication key.
+ * rows. Duplicate records are discarded only with confirmed level-specific ID
+ * and date bounds; missing identity preserves rows rather than guessing.
  */
 export async function readAg09NativeMetaInsights(
   provider: Pick<MetaAdsReadProvider, 'getInsights'>,
@@ -51,13 +51,31 @@ export async function readAg09NativeMetaInsights(
   const rows: unknown = await provider.getInsights(account, query);
   if (!Array.isArray(rows)) throw new Error('AG09_META_INSIGHTS_PROVIDER_RESPONSE_INVALID');
 
+  // A projected record cannot be deduplicated if its source identity is unknown.
+  // Equal metrics from two campaigns must never be mistaken for the same entity.
+  const entityIdField = {
+    account: 'account_id',
+    campaign: 'campaign_id',
+    adset: 'adset_id',
+    ad: 'ad_id',
+  } as const satisfies Record<MetaAdsReadInsightsQuery['level'], string>;
   const seen = new Set<string>();
   const uniqueRows: Readonly<Record<string, unknown>>[] = [];
   let identicalRowsDiscarded = 0;
   for (const row of rows as readonly Readonly<Record<string, unknown>>[]) {
     if (row === null || typeof row !== 'object' || Array.isArray(row))
       throw new Error('AG09_META_INSIGHTS_ROW_INVALID');
-    const fingerprint = JSON.stringify(row);
+    const entityId = row[entityIdField[query.level]];
+    if (
+      typeof entityId !== 'string' ||
+      !entityId.trim() ||
+      typeof row.date_start !== 'string' ||
+      typeof row.date_stop !== 'string'
+    ) {
+      uniqueRows.push(row);
+      continue;
+    }
+    const fingerprint = JSON.stringify(canonicalizeProviderJson(row));
     if (seen.has(fingerprint)) {
       identicalRowsDiscarded += 1;
       continue;
@@ -83,4 +101,17 @@ function assertCalendarDate(value: string): void {
   const parsed = new Date(`${value}T00:00:00.000Z`);
   if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value)
     throw new Error('AG09_META_INSIGHTS_DATE_INVALID');
+}
+
+function canonicalizeProviderJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item: unknown) => canonicalizeProviderJson(item));
+  if (value !== null && typeof value === 'object') {
+    const record = value as Readonly<Record<string, unknown>>;
+    return Object.fromEntries(
+      Object.keys(record)
+        .sort()
+        .map((key) => [key, canonicalizeProviderJson(record[key])]),
+    );
+  }
+  return value;
 }
