@@ -87,8 +87,8 @@ if jq -e '
   exit 1
 fi
 
-HEALTH_STATUS="$(curl --silent --show-error --connect-timeout 5 --max-time 15   --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/healthz")"
-READY_STATUS="$(curl --silent --show-error --connect-timeout 5 --max-time 20   --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/readyz")"
+HEALTH_STATUS="$(curl --silent --show-error --connect-timeout 5 --max-time 15   --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/health")"
+READY_STATUS="$(curl --silent --show-error --connect-timeout 5 --max-time 20   --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/ready")"
 [[ "$HEALTH_STATUS" == '200' ]] || {
   echo "INSTAGRAM_WEBHOOK_INGRESS_HEALTH_FAILED:HTTP_$HEALTH_STATUS" >&2
   exit 1
