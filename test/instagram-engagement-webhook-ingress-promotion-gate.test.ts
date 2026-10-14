@@ -25,6 +25,15 @@ function countOccurrences(source: string, value: string): number {
 }
 
 describe('Instagram engagement ingress promotion gate', () => {
+  it('probes Cloud Run-safe public health and readiness aliases instead of reserved z-ending paths', () => {
+    expect(verifier).toContain('"$WEBHOOK_URL/health"');
+    expect(verifier).toContain('"$WEBHOOK_URL/ready"');
+    expect(verifier).not.toContain('"$WEBHOOK_URL/healthz"');
+    expect(verifier).not.toContain('"$WEBHOOK_URL/readyz"');
+    expect(verifier).toContain('INSTAGRAM_WEBHOOK_INGRESS_HEALTH_FAILED:HTTP_$HEALTH_STATUS');
+    expect(verifier).toContain('INSTAGRAM_WEBHOOK_INGRESS_READINESS_FAILED:HTTP_$READY_STATUS');
+  });
+
   it('uses existing resources only and proves runtime, DB, provider and callback readiness', () => {
     for (const marker of [
       'run.googleapis.com/ingress',
@@ -34,8 +43,8 @@ describe('Instagram engagement ingress promotion gate', () => {
       'META_WEBHOOK_ENABLED',
       'META_WEBHOOK_PERSISTENCE_ENABLED',
       'DATABASE_URL',
-      '/healthz',
-      '/readyz',
+      '"$WEBHOOK_URL/health"',
+      '"$WEBHOOK_URL/ready"',
       'gcloud secrets versions access latest',
       'TOCA_META_WEBHOOK_VERIFY_TOKEN_V1',
       '/subscriptions',
