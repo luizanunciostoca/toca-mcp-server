@@ -113,7 +113,7 @@ jobs:
           jq -e \
             --arg repository "$GITHUB_REPOSITORY" \
             --arg sha "$GITHUB_SHA" '
-              .name == "Marketing Autopilot Publication" and
+              .path == ".github/workflows/marketing-autopilot-publication.yml" and
               (.event == "schedule" or .event == "workflow_run") and
               .head_branch == "main" and
               .head_sha == $sha and

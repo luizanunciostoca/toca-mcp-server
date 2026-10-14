@@ -89,6 +89,21 @@ describe('Marketing Autopilot trusted schedule heartbeat', () => {
     expect(writer).toContain('.schedulerAuthority.redundantHeartbeatMode == "ACTIVE"');
   });
 
+  it('uses stable GitHub REST workflow path rather than dynamic run-name for writer source identity', () => {
+    const writer = readFileSync('.github/workflows/marketing-publish-now.yml', 'utf8');
+    const scheduler = readFileSync('.github/workflows/marketing-autopilot-publication.yml', 'utf8');
+    const realRestRun = {
+      name: 'Marketing Autopilot — schedule — 38544384353',
+      path: '.github/workflows/marketing-autopilot-publication.yml',
+      event: 'schedule',
+    };
+    expect(realRestRun.name).not.toBe('Marketing Autopilot Publication');
+    expect(scheduler).toContain('run-name: Marketing Autopilot');
+    expect(writer).toContain('.path == ".github/workflows/marketing-autopilot-publication.yml"');
+    expect(writer).not.toContain('.name == "Marketing Autopilot Publication"');
+    expect(realRestRun.path).toBe('.github/workflows/marketing-autopilot-publication.yml');
+  });
+
   it('accepts a fresh scheduled main run only after canonical REST-shape readback', () => {
     const result = verify();
     expect(result.status, result.stderr).toBe(0);
