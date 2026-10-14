@@ -280,7 +280,7 @@ jobs:
           echo "healthy_sa_ok=$healthy_sa_ok" >> "$GITHUB_OUTPUT"
           echo "probe_type=$probe_type" >> "$GITHUB_OUTPUT"
           echo "probe_path=$probe_path" >> "$GITHUB_OUTPUT"
-          echo "probe_port=$probe_port"
+          echo "probe_port=$probe_port" >> "$GITHUB_OUTPUT"
           echo "probe_summary=$probe_summary" >> "$GITHUB_OUTPUT"
 
       - name: Publish sanitized diagnostic evidence
