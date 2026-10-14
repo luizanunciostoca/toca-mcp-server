@@ -4,6 +4,10 @@ import type { MetaApiClient } from '../meta/meta-api-client.js';
 const dataResponseSchema = z.object({
   data: z.array(z.record(z.string(), z.unknown())).default([]),
 });
+// A missing insights envelope is not a verified zero-result response.
+const insightsResponseSchema = z.object({
+  data: z.array(z.record(z.string(), z.unknown())),
+});
 const deliveryEstimateResponseSchema = z.object({
   data: z
     .array(
@@ -90,7 +94,7 @@ export class MetaAdsReadProvider {
       fields: query.fields.join(','),
       time_range: JSON.stringify({ since: query.since, until: query.until }),
     });
-    return dataResponseSchema.parse(result).data;
+    return insightsResponseSchema.parse(result).data;
   }
 
   async getDeliveryEstimate(
