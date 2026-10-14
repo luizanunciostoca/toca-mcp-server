@@ -76,8 +76,7 @@ export function summarizeAg01ProbeLogs(rawEntries) {
           ? payload.status
           : 'UNKNOWN';
         const count = Number(payload.citedResourceCount);
-        citedResourceCount =
-          Number.isSafeInteger(count) && count >= 0 && count <= 1000 ? count : 0;
+        citedResourceCount = Number.isSafeInteger(count) && count >= 0 && count <= 1000 ? count : 0;
       }
     }
     if (

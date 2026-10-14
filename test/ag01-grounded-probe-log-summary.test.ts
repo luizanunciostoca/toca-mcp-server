@@ -20,7 +20,12 @@ const event = (status: string, citedResourceCount: number, secret = 'private-gue
   }),
 });
 
-function runLogs(entries: unknown): { exit: number | null; output: Record<string, unknown>; stdout: string; stderr: string } {
+function runLogs(entries: unknown): {
+  exit: number | null;
+  output: Record<string, unknown>;
+  stdout: string;
+  stderr: string;
+} {
   const dir = mkdtempSync(join(tmpdir(), 'ag01-sanitized-probe-'));
   const fixture = join(dir, 'private-cloud-run-logs.json');
   writeFileSync(fixture, JSON.stringify(entries), 'utf8');
@@ -59,7 +64,13 @@ describe('AG-01 sanitized private probe log classifier', () => {
 
   it('differentiates a verified grounding event with citations from a full semantic proof', () => {
     const result = runLogs([
-      { jsonPayload: { event: 'ag01.grounded_knowledge.completed', status: 'GROUNDED', citedResourceCount: 2 } },
+      {
+        jsonPayload: {
+          event: 'ag01.grounded_knowledge.completed',
+          status: 'GROUNDED',
+          citedResourceCount: 2,
+        },
+      },
       http('POST', '/v1/knowledge/answer', 200),
     ]);
     expect(result.exit).toBe(0);

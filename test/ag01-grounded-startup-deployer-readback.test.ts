@@ -126,9 +126,7 @@ describe('AG-01 grounded startup deployer readback', () => {
 
   it('classifies real private probe failures using only the existing bounded Cloud Logging read', () => {
     expect(workflow).toContain('--limit=200 --order=desc');
-    expect(workflow).toContain(
-      'node scripts/ag01-grounded-probe-log-summary.mjs "$logs_json"',
-    );
+    expect(workflow).toContain('node scripts/ag01-grounded-probe-log-summary.mjs "$logs_json"');
     expect(workflow).toContain('SANITIZED_GROUNDED_PROBE_LOG_SUMMARY=$probe_summary');
     expect(workflow).toContain('"probe_summary=$probe_summary"');
     expect(workflow).toContain('PROBE_SUMMARY: ${{ steps.evidence.outputs.probe_summary }}');
