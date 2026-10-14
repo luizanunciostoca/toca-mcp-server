@@ -2,7 +2,11 @@
  * AG-01 -> canonical WorkflowStore -> existing Core gateway.
  * Internal, opt-in READ-only bridge. No ChatGPT Tasks integration and no scheduler.
  */
-import { assertExecutionIdentity, authorizeExecution, type ExecutionIdentity } from '../core/identity.js';
+import {
+  assertExecutionIdentity,
+  authorizeExecution,
+  type ExecutionIdentity,
+} from '../core/identity.js';
 import { resolveCapabilityDefinition } from '../governance/capability-resolution.js';
 import { getRouteDefinition } from '../governance/route-catalog.js';
 import type { RouteId } from '../governance/types.js';
@@ -97,33 +101,55 @@ export class Ag01SpecialistMissionCoordinator {
     if (!resolved || !this.supports(resolved.canonical_id))
       throw new Error('AG01_MISSION_CAPABILITY_NOT_ELIGIBLE');
     const capability = resolved.canonical_id;
-    if (!route.capabilityIds.includes(capability) && !route.capabilityIds.includes(input.capabilityId))
+    if (
+      !route.capabilityIds.includes(capability) &&
+      !route.capabilityIds.includes(input.capabilityId)
+    )
       throw new Error('AG01_MISSION_CAPABILITY_ROUTE_MISMATCH');
-    const allowed = authorizeExecution(identity, { routeId: input.routeId, capabilityId: capability, riskClass: 'READ', now });
+    const allowed = authorizeExecution(identity, {
+      routeId: input.routeId,
+      capabilityId: capability,
+      riskClass: 'READ',
+      now,
+    });
     if (!allowed.allowed) throw new Error(`AG01_MISSION_AUTHORIZATION_DENIED:${allowed.reason}`);
-    const inspection = this.core.inspect({ capabilityId: capability, payload: input.payload, identity });
-    if (inspection.canonicalCapabilityId !== capability || inspection.sideEffects || inspection.approvalRequired)
+    const inspection = this.core.inspect({
+      capabilityId: capability,
+      payload: input.payload,
+      identity,
+    });
+    if (
+      inspection.canonicalCapabilityId !== capability ||
+      inspection.sideEffects ||
+      inspection.approvalRequired
+    )
       throw new Error('AG01_MISSION_CORE_READONLY_BOUNDARY');
     if (inspection.routeId && inspection.routeId !== input.routeId)
       throw new Error('AG01_MISSION_CORE_ROUTE_MISMATCH');
 
     // Reject unserializable inputs before deriving idempotency evidence.
     if (input.payload === undefined) throw new Error('AG01_MISSION_PAYLOAD_REQUIRED');
-    const mission_id = deterministicId('ag01mission', identity.principal.tenantId, input.idempotencyKey);
-    const immutableSha256 = sourceContentSha256(JSON.stringify({
-      routeId: input.routeId,
-      capability,
-      owner: input.owner,
-      priority: input.priority,
-      correlationId: input.correlationId,
-      idempotencyKey: input.idempotencyKey,
-      expiresAt,
-      requesterPrincipalId: identity.principal.principalId,
-      tenantId: identity.principal.tenantId,
-      workspaceId: identity.principal.workspaceId,
-      organizationId: identity.principal.organizationId,
-      payload: input.payload,
-    }));
+    const mission_id = deterministicId(
+      'ag01mission',
+      identity.principal.tenantId,
+      input.idempotencyKey,
+    );
+    const immutableSha256 = sourceContentSha256(
+      JSON.stringify({
+        routeId: input.routeId,
+        capability,
+        owner: input.owner,
+        priority: input.priority,
+        correlationId: input.correlationId,
+        idempotencyKey: input.idempotencyKey,
+        expiresAt,
+        requesterPrincipalId: identity.principal.principalId,
+        tenantId: identity.principal.tenantId,
+        workspaceId: identity.principal.workspaceId,
+        organizationId: identity.principal.organizationId,
+        payload: input.payload,
+      }),
+    );
     const manifest: Manifest = {
       mission_id,
       routeId: input.routeId,
@@ -137,26 +163,31 @@ export class Ag01SpecialistMissionCoordinator {
       payloadSha256: sourceContentSha256(JSON.stringify(input.payload ?? null)),
       immutableSha256,
     };
-    const snapshot = await this.workflows.create({
-      workflowId: mission_id,
-      routeId: input.routeId,
-      definitionId: SPECIALIST_MISSION_DEFINITION_ID,
-      definitionVersion: SPECIALIST_MISSION_DEFINITION_VERSION,
-      idempotencyKey: `ag01-internal-specialist:${input.idempotencyKey}`,
-      correlationId: input.correlationId,
-      tenantId: identity.principal.tenantId,
-      workspaceId: identity.principal.workspaceId,
-      organizationId: identity.principal.organizationId,
-      requesterPrincipalId: identity.principal.principalId,
-      input: manifest,
-      steps: [{
-        stepId: SPECIALIST_MISSION_STEP_ID,
-        name: `Internal ${input.owner} Core capability`,
-        capabilityId: capability,
-        input: input.payload,
-        maxAttempts: 1,
-      }],
-    }, now);
+    const snapshot = await this.workflows.create(
+      {
+        workflowId: mission_id,
+        routeId: input.routeId,
+        definitionId: SPECIALIST_MISSION_DEFINITION_ID,
+        definitionVersion: SPECIALIST_MISSION_DEFINITION_VERSION,
+        idempotencyKey: `ag01-internal-specialist:${input.idempotencyKey}`,
+        correlationId: input.correlationId,
+        tenantId: identity.principal.tenantId,
+        workspaceId: identity.principal.workspaceId,
+        organizationId: identity.principal.organizationId,
+        requesterPrincipalId: identity.principal.principalId,
+        input: manifest,
+        steps: [
+          {
+            stepId: SPECIALIST_MISSION_STEP_ID,
+            name: `Internal ${input.owner} Core capability`,
+            capabilityId: capability,
+            input: input.payload,
+            maxAttempts: 1,
+          },
+        ],
+      },
+      now,
+    );
     const persisted = readManifest(snapshot);
     if (persisted.immutableSha256 !== immutableSha256)
       throw new Error('AG01_MISSION_IDEMPOTENCY_CONFLICT');
@@ -171,7 +202,11 @@ export class Ag01SpecialistMissionCoordinator {
   }
 
   /** The owning internal worker, not AG-01/ChatGPT Tasks, claims and produces Core ACK. */
-  async executeOwned(missionId: string, owner: string, identity: ExecutionIdentity): Promise<CoreResult> {
+  async executeOwned(
+    missionId: string,
+    owner: string,
+    identity: ExecutionIdentity,
+  ): Promise<CoreResult> {
     const snapshot = await this.requireSnapshot(missionId);
     const manifest = readManifest(snapshot);
     this.assertScope(snapshot, identity);
@@ -183,11 +218,25 @@ export class Ag01SpecialistMissionCoordinator {
     if (step.status !== 'READY') throw new Error('AG01_MISSION_ALREADY_CLAIMED');
     const now = this.now().toISOString();
     requireFutureTimestamp(manifest.expiresAt, now);
-    const inspection = this.core.inspect({capabilityId: manifest.capability, payload: step.input, identity});
-    if (!this.supports(manifest.capability) || inspection.canonicalCapabilityId !== manifest.capability || inspection.sideEffects || inspection.approvalRequired)
+    const inspection = this.core.inspect({
+      capabilityId: manifest.capability,
+      payload: step.input,
+      identity,
+    });
+    if (
+      !this.supports(manifest.capability) ||
+      inspection.canonicalCapabilityId !== manifest.capability ||
+      inspection.sideEffects ||
+      inspection.approvalRequired
+    )
       throw new Error('AG01_MISSION_CORE_READONLY_BOUNDARY');
     const workerId = `ag01-internal:${owner}`;
-    const claims = await this.workflows.claimReadySteps({workflowId:missionId, workerId, now, limit:1});
+    const claims = await this.workflows.claimReadySteps({
+      workflowId: missionId,
+      workerId,
+      now,
+      limit: 1,
+    });
     const claim = claims[0];
     if (!claim) throw new Error('AG01_MISSION_ALREADY_CLAIMED');
     if (claim.workerId !== workerId || claim.stepId !== SPECIALIST_MISSION_STEP_ID)
@@ -200,11 +249,15 @@ export class Ag01SpecialistMissionCoordinator {
         correlationId: manifest.correlationId,
         identity,
       });
-      if (!execution.executionId?.trim() || execution.capabilityId !== manifest.capability ||
-          typeof execution.providerReadbackVerified !== 'boolean')
+      if (
+        !execution.executionId?.trim() ||
+        execution.capabilityId !== manifest.capability ||
+        typeof execution.providerReadbackVerified !== 'boolean'
+      )
         throw new Error('AG01_MISSION_CORE_ACK_INVALID');
     } catch (error) {
-      const code = error instanceof Error ? error.message.split(':')[0] : 'AG01_MISSION_CORE_EXECUTION_FAILED';
+      const code =
+        error instanceof Error ? error.message.split(':')[0] : 'AG01_MISSION_CORE_EXECUTION_FAILED';
       await this.workflows.failStep({
         workflowId: missionId,
         stepId: claim.stepId,
@@ -224,7 +277,9 @@ export class Ag01SpecialistMissionCoordinator {
       evidence: [
         `ag01:worker:${owner}`,
         `ag01:core-execution:${execution.executionId}`,
-        execution.providerReadbackVerified ? 'ag01:provider-readback-verified' : 'ag01:provider-readback-not-verified',
+        execution.providerReadbackVerified
+          ? 'ag01:provider-readback-verified'
+          : 'ag01:provider-readback-not-verified',
       ],
       now: this.now().toISOString(),
     });
@@ -247,8 +302,12 @@ export class Ag01SpecialistMissionCoordinator {
   private assertScope(snapshot: WorkflowSnapshot, identity: ExecutionIdentity): void {
     assertExecutionIdentity(identity, this.now().toISOString());
     const { principal } = identity;
-    if (snapshot.instance.tenantId !== principal.tenantId || snapshot.instance.workspaceId !== principal.workspaceId ||
-        snapshot.instance.organizationId !== principal.organizationId || snapshot.instance.requesterPrincipalId !== principal.principalId)
+    if (
+      snapshot.instance.tenantId !== principal.tenantId ||
+      snapshot.instance.workspaceId !== principal.workspaceId ||
+      snapshot.instance.organizationId !== principal.organizationId ||
+      snapshot.instance.requesterPrincipalId !== principal.principalId
+    )
       throw new Error('AG01_MISSION_SCOPE_DENIED');
   }
 
@@ -259,17 +318,23 @@ export class Ag01SpecialistMissionCoordinator {
       riskClass: 'READ',
       now: this.now().toISOString(),
     });
-    if (!allowed.allowed)
-      throw new Error(`AG01_MISSION_AUTHORIZATION_DENIED:${allowed.reason}`);
+    if (!allowed.allowed) throw new Error(`AG01_MISSION_AUTHORIZATION_DENIED:${allowed.reason}`);
   }
 
   private toView(snapshot: WorkflowSnapshot, identity: ExecutionIdentity): SpecialistMissionView {
     this.assertScope(snapshot, identity);
     const m = readManifest(snapshot);
     const s = onlyStep(snapshot);
-    const status: SpecialistMissionStatus = s.status === 'READY' ? 'READY' :
-      s.status === 'RUNNING' ? (s.startedAt ? 'STARTED' : 'CLAIMED') :
-      s.status === 'SUCCEEDED' ? 'DONE' : 'FAILED';
+    const status: SpecialistMissionStatus =
+      s.status === 'READY'
+        ? 'READY'
+        : s.status === 'RUNNING'
+          ? s.startedAt
+            ? 'STARTED'
+            : 'CLAIMED'
+          : s.status === 'SUCCEEDED'
+            ? 'DONE'
+            : 'FAILED';
     const output = s.status === 'SUCCEEDED' ? resultFrom(s.output) : null;
     return {
       mission_id: m.mission_id,
@@ -290,7 +355,7 @@ export class Ag01SpecialistMissionCoordinator {
 }
 
 function onlyStep(snapshot: WorkflowSnapshot) {
-  const step = snapshot.steps.find(item => item.stepId === SPECIALIST_MISSION_STEP_ID);
+  const step = snapshot.steps.find((item) => item.stepId === SPECIALIST_MISSION_STEP_ID);
   if (!step || snapshot.steps.length !== 1) throw new Error('AG01_MISSION_STEP_INVALID');
   return step;
 }
@@ -299,22 +364,32 @@ function readManifest(snapshot: WorkflowSnapshot): Manifest {
   if (snapshot.instance.definitionId !== SPECIALIST_MISSION_DEFINITION_ID)
     throw new Error('AG01_MISSION_DEFINITION_INVALID');
   const value = snapshot.instance.input as Manifest;
-  if (!value || typeof value !== 'object' || value.mission_id !== snapshot.instance.workflowId ||
-      typeof value.immutableSha256 !== 'string') throw new Error('AG01_MISSION_MANIFEST_INVALID');
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    value.mission_id !== snapshot.instance.workflowId ||
+    typeof value.immutableSha256 !== 'string'
+  )
+    throw new Error('AG01_MISSION_MANIFEST_INVALID');
   return value;
 }
 
 function resultFrom(value: unknown): CoreResult {
   const result = value as CoreResult | null;
-  if (!result || typeof result.executionId !== 'string' || typeof result.capabilityId !== 'string' ||
-      typeof result.providerReadbackVerified !== 'boolean')
+  if (
+    !result ||
+    typeof result.executionId !== 'string' ||
+    typeof result.capabilityId !== 'string' ||
+    typeof result.providerReadbackVerified !== 'boolean'
+  )
     throw new Error('AG01_MISSION_CORE_ACK_NOT_PROVEN');
   return result;
 }
 
 function requireFutureTimestamp(value: string, now: string): string {
   const ms = Date.parse(value);
-  if (!Number.isFinite(ms) || ms <= Date.parse(now)) throw new Error('AG01_MISSION_TTL_EXPIRED_OR_INVALID');
+  if (!Number.isFinite(ms) || ms <= Date.parse(now))
+    throw new Error('AG01_MISSION_TTL_EXPIRED_OR_INVALID');
   return new Date(ms).toISOString();
 }
 

@@ -425,22 +425,25 @@ export class TocaOrchestratorRuntime {
       try {
         const execution = await withTimeout(
           this.dependencies.specialistMissions &&
-          !inspection.sideEffects &&
-          !inspection.approvalRequired &&
-          this.dependencies.specialistMissions.supports(inspection.canonicalCapabilityId)
+            !inspection.sideEffects &&
+            !inspection.approvalRequired &&
+            this.dependencies.specialistMissions.supports(inspection.canonicalCapabilityId)
             ? this.dependencies.specialistMissions.executePlannedStep({
                 routeId: checkpoint.plan.routeId,
                 capabilityId: inspection.canonicalCapabilityId,
                 payload: step.payload,
                 owner: checkpoint.plan.primaryAgent,
-                priority: getRouteDefinition(checkpoint.plan.routeId).priority === 'P0'
-                  ? 'P0'
-                  : getRouteDefinition(checkpoint.plan.routeId).priority === 'P2'
-                    ? 'P2'
-                    : 'P1',
+                priority:
+                  getRouteDefinition(checkpoint.plan.routeId).priority === 'P0'
+                    ? 'P0'
+                    : getRouteDefinition(checkpoint.plan.routeId).priority === 'P2'
+                      ? 'P2'
+                      : 'P1',
                 correlationId: checkpoint.correlationId,
                 idempotencyKey: `${checkpoint.runId}:${step.stepId}`,
-                expiresAt: new Date(this.#now().getTime() + this.#budget.toolTimeoutMs + 60_000).toISOString(),
+                expiresAt: new Date(
+                  this.#now().getTime() + this.#budget.toolTimeoutMs + 60_000,
+                ).toISOString(),
                 identity,
               })
             : this.dependencies.core.execute({

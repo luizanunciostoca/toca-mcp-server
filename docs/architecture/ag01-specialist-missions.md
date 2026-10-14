@@ -13,17 +13,17 @@ Flow (opt-in): `AG-01 checkpoint decision (existing) -> internal mission manifes
 
 ## Minimum envelope and state mapping
 
-| Mission property | Persisted location / rule |
-| --- | --- |
-| `mission_id` | deterministic WorkflowInstance.workflowId from tenant and idempotency key |
-| `routeId`, `capability`, `owner`, `priority`, `correlationId`, `idempotencyKey` | immutable WorkflowInstance.input manifest; identity principal/tenant/workspace/org bound to workflow |
-| `expiresAt` / TTL | manifest checked before claim (no new scheduler) |
-| `payloadSha256` and `immutableSha256` | replay conflict detection (no duplicate provider call) |
-| `READY` | step READY |
-| `CLAIMED` / `STARTED` | existing WorkflowStore atomic step claim immediately sets `claimedAt` **and** `startedAt`; STARTED is internal worker state, not provider ACK; no synthetic distinct claimed event |
-| `DONE` | only after `Core.execute` returns a valid executionId/capability and `WorkflowStore.completeStep` persists it |
-| `FAILED` | Core exception followed by `WorkflowStore.failStep`; post-Core storage uncertainty stays RUNNING until reconciled |
-| `providerReadbackVerified` | returned boolean from real Core execution; false is **not** provider verified |
+| Mission property                                                                | Persisted location / rule                                                                                                                                                          |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mission_id`                                                                    | deterministic WorkflowInstance.workflowId from tenant and idempotency key                                                                                                          |
+| `routeId`, `capability`, `owner`, `priority`, `correlationId`, `idempotencyKey` | immutable WorkflowInstance.input manifest; identity principal/tenant/workspace/org bound to workflow                                                                               |
+| `expiresAt` / TTL                                                               | manifest checked before claim (no new scheduler)                                                                                                                                   |
+| `payloadSha256` and `immutableSha256`                                           | replay conflict detection (no duplicate provider call)                                                                                                                             |
+| `READY`                                                                         | step READY                                                                                                                                                                         |
+| `CLAIMED` / `STARTED`                                                           | existing WorkflowStore atomic step claim immediately sets `claimedAt` **and** `startedAt`; STARTED is internal worker state, not provider ACK; no synthetic distinct claimed event |
+| `DONE`                                                                          | only after `Core.execute` returns a valid executionId/capability and `WorkflowStore.completeStep` persists it                                                                      |
+| `FAILED`                                                                        | Core exception followed by `WorkflowStore.failStep`; post-Core storage uncertainty stays RUNNING until reconciled                                                                  |
+| `providerReadbackVerified`                                                      | returned boolean from real Core execution; false is **not** provider verified                                                                                                      |
 
 ### Fail-closed boundaries
 

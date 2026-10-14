@@ -203,9 +203,10 @@ export function createAg01ProductionRuntime(
   const artifacts = new TocaOsCanonicalArtifactResolver(tocaOs, decisionContext);
   const planner = new StructuredDecisionPlanBuilder(decisionContext, () => runtimeCapabilityIds);
   // Opt-in only: no new scheduler, ChatGPT Tasks API or externally callable worker route.
-  const specialistMissions = env.TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED === 'true'
-    ? new Ag01SpecialistMissionCoordinator(coreComposition.workflowStore, core)
-    : undefined;
+  const specialistMissions =
+    env.TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED === 'true'
+      ? new Ag01SpecialistMissionCoordinator(coreComposition.workflowStore, core)
+      : undefined;
   const orchestrator = new TocaOrchestratorRuntime({
     conversations,
     routeResolver,
