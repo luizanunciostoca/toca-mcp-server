@@ -56,6 +56,50 @@ describe('TOCA-MAX live capability matrix projection', () => {
     }
   });
 
+  it('makes Google Business in-scope by explicit owner opt-in without opening excluded providers', () => {
+    const matrix = buildLiveCapabilityMatrix(CAPABILITY_CATALOG, {
+      exactHeadSha: SHA,
+      now: NOW,
+      inScopeFinalProviderPrefixes: ['google_business.'],
+    });
+
+    expect(matrix.final_provider_phase_open).toBe(false);
+    const googleBusiness = matrix.records.filter((record) =>
+      record.capability_id.startsWith('google_business.'),
+    );
+    expect(googleBusiness.length).toBeGreaterThan(0);
+    expect(googleBusiness.every((record) => !record.deferred_final_provider_phase)).toBe(true);
+    expect(googleBusiness.every((record) => record.closure_state !== 'DEFERRED')).toBe(true);
+    expect(googleBusiness.some((record) => record.closure_state === 'PRODUCTION_VERIFIED')).toBe(
+      false,
+    );
+
+    for (const prefix of ['google_ads.', 'whatsapp.', 'email.']) {
+      const excluded = matrix.records.filter((record) => record.capability_id.startsWith(prefix));
+      expect(excluded.length, prefix).toBeGreaterThan(0);
+      expect(excluded.every((record) => record.deferred_final_provider_phase), prefix).toBe(true);
+      expect(excluded.every((record) => record.closure_state === 'DEFERRED'), prefix).toBe(true);
+    }
+  });
+
+  it.each([
+    ['unknown provider', ['instagram.'], 'LIVE_CAPABILITY_MATRIX_IN_SCOPE_PREFIX_UNKNOWN'],
+    [
+      'duplicate provider',
+      ['google_business.', 'google_business.'],
+      'LIVE_CAPABILITY_MATRIX_IN_SCOPE_PREFIX_DUPLICATE',
+    ],
+    ['wildcard prefix', [''], 'LIVE_CAPABILITY_MATRIX_IN_SCOPE_PREFIX_UNKNOWN'],
+  ])('rejects %s in owner-scoped provider phase input', (_name, prefixes, error) => {
+    expect(() =>
+      buildLiveCapabilityMatrix(CAPABILITY_CATALOG, {
+        exactHeadSha: SHA,
+        now: NOW,
+        inScopeFinalProviderPrefixes: prefixes,
+      }),
+    ).toThrow(error);
+  });
+
   it('opens the final provider phase explicitly without manufacturing provider proof', () => {
     const closed = buildLiveCapabilityMatrix(CAPABILITY_CATALOG, {
       exactHeadSha: SHA,
