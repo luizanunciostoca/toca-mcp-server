@@ -218,7 +218,9 @@ function readStringPath(value: unknown, path: string[]): string | undefined {
 describe('Marketing Autopilot daily scheduler restoration', () => {
   it('keeps manual execution PRECHECK-only and daily autonomy bounded', () => {
     expect(workflow).toContain('workflow_dispatch:');
-    expect(workflow).toContain('workflow_dispatch|push) mode=PRECHECK');
+    expect(workflow).toContain('workflow_dispatch|push)');
+    expect(workflow).toContain('mode=PRECHECK');
+    expect(workflow).toContain('trigger_kind=NON_EXECUTING_PRECHECK');
     expect(workflow).not.toContain('REQUESTED_MODE');
     expect(policy.dailyRollout).toMatchObject({
       canaryContentItemId: productionCanaryId,
@@ -373,6 +375,69 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
       rolloutPhase: 'CANARY',
       canaryVerified: false,
       rejected: [{ contentItemId: canaryId, reason: 'STALE_WINDOW' }],
+    });
+  });
+
+  it('reports an expired unverified canary without promoting future approved content', () => {
+    const result = runScheduler({
+      now: '2026-10-14T08:15:00-03:00',
+      rows: [
+        productionCanaryFeedRow(),
+        feedRow({
+          content_item_id: 'MKT-20261014-SUNSET-FEED-1500',
+          scheduled_at: '2026-10-14T15:00:00-03:00',
+        }),
+      ],
+      useProductionPolicy: true,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(parseOutput(result.stdout)).toMatchObject({
+      status: 'NO_CANDIDATE',
+      rolloutPhase: 'CANARY',
+      canaryVerified: false,
+      blocker: 'EXPIRED_UNVERIFIED_CANARY',
+      nextAction: 'RECONCILE_CANARY_WITH_META_AND_CREATE_FRESH_EXPLICIT_APPROVAL',
+      futureSlots: 1,
+      futureSourceApproved: 1,
+      rejected: [{ contentItemId: productionCanaryId, reason: 'STALE_WINDOW' }],
+    });
+  });
+
+  it('reports no future editorial slots without making new ones or replaying expired slots', () => {
+    const result = runScheduler({
+      now: '2026-10-14T08:15:00-03:00',
+      rows: [publishedCanary()],
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(parseOutput(result.stdout)).toMatchObject({
+      status: 'NO_CANDIDATE',
+      rolloutPhase: 'LIMITED',
+      blocker: 'NO_FUTURE_EDITORIAL_SLOTS',
+      futureSlots: 0,
+      futureSourceApproved: 0,
+    });
+  });
+
+  it('reports future source rows that are still only ideas, not approved publish targets', () => {
+    const result = runScheduler({
+      now: '2026-10-14T08:15:00-03:00',
+      rows: [
+        publishedCanary(),
+        storyRow({
+          content_item_id: 'MKT-20261015-SUNSET-STORY-1100',
+          scheduled_at: '2026-10-15T11:00:00-03:00',
+          status: 'IDEA',
+          approval_status: '',
+        }),
+      ],
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(parseOutput(result.stdout)).toMatchObject({
+      status: 'NO_CANDIDATE',
+      rolloutPhase: 'LIMITED',
+      blocker: 'NO_FUTURE_SOURCE_APPROVED',
+      futureSlots: 1,
+      futureSourceApproved: 0,
     });
   });
 

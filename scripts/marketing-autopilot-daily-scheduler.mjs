@@ -193,11 +193,52 @@ function selectCandidate(
         );
   assert(eligible.length <= maximum, 'AUTOPILOT_MULTIPLE_CANDIDATES_FAIL_CLOSED');
   if (eligible.length === 0) {
+    const future = registryRows.filter((item) => {
+      if (text(item.channel) !== 'INSTAGRAM') return false;
+      if (!['FEED', 'STORY'].includes(text(item.format))) return false;
+      try {
+        return Date.parse(canonicalScheduledAt(item.scheduled_at)) > now.getTime();
+      } catch {
+        return false;
+      }
+    });
+    // These counts describe source planning, not eligibility or provider authorization.
+    const futureSourceApproved = future.filter(
+      (item) =>
+        text(item.status) === 'PRODUCED' &&
+        text(item.approval_status) === 'APPROVED' &&
+        text(item.approval_mode) === 'EXPLICIT_APPROVAL',
+    ).length;
+    const expiredCanary =
+      rolloutState.phase === 'CANARY' &&
+      !rolloutState.canaryVerified &&
+      rejected.some(
+        (record) =>
+          record.contentItemId === rolloutState.canaryId && record.reason === 'STALE_WINDOW',
+      );
+    const blocker = expiredCanary
+      ? 'EXPIRED_UNVERIFIED_CANARY'
+      : future.length === 0
+        ? 'NO_FUTURE_EDITORIAL_SLOTS'
+        : futureSourceApproved === 0
+          ? 'NO_FUTURE_SOURCE_APPROVED'
+          : 'NO_DUE_ELIGIBLE_APPROVED_CONTENT';
+    const nextAction = expiredCanary
+      ? 'RECONCILE_CANARY_WITH_META_AND_CREATE_FRESH_EXPLICIT_APPROVAL'
+      : future.length === 0
+        ? 'PREPARE_FUTURE_EDITORIAL_CONTENT_FOR_REVIEW'
+        : futureSourceApproved === 0
+          ? 'PRODUCE_VALIDATE_RIGHTS_AND_REQUEST_APPROVAL'
+          : 'CHECK_ROLLOUT_WINDOW_EXACT_BINDINGS_AND_PROVIDER_RECONCILIATION';
     return {
       status: 'NO_CANDIDATE',
       now: formatBahia(now),
       rolloutPhase: rolloutState.phase,
       canaryVerified: rolloutState.canaryVerified,
+      blocker,
+      nextAction,
+      futureSlots: future.length,
+      futureSourceApproved,
       rejected,
     };
   }
