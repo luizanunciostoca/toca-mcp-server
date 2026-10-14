@@ -54,7 +54,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: deploy-gcp-next-${{ inputs.environment }}
+  group: ${{ inputs.environment == 'production' && 'instagram-engagement-webhook-callback-control' || format('deploy-gcp-next-{0}', inputs.environment) }}
   cancel-in-progress: false
 
 jobs:
