@@ -41,20 +41,15 @@ export async function readAg09NativeMetaInsights(
   account: MetaAdsReadAccountRef,
   query: MetaAdsReadInsightsQuery,
 ): Promise<Ag09NativeMetaInsightsEnvelope> {
-  if (!/^\d+$/.test(account.adAccountId))
-    throw new Error('AG09_META_AD_ACCOUNT_ID_INVALID');
-  if (!/^[A-Z]{3}$/.test(account.currency))
-    throw new Error('AG09_META_CURRENCY_INVALID');
+  if (!/^\d+$/.test(account.adAccountId)) throw new Error('AG09_META_AD_ACCOUNT_ID_INVALID');
+  if (!/^[A-Z]{3}$/.test(account.currency)) throw new Error('AG09_META_CURRENCY_INVALID');
   assertCalendarDate(query.since);
   assertCalendarDate(query.until);
-  if (query.since > query.until)
-    throw new Error('AG09_META_INSIGHTS_WINDOW_REVERSED');
-  if (query.fields.length === 0)
-    throw new Error('AG09_META_INSIGHTS_FIELDS_REQUIRED');
+  if (query.since > query.until) throw new Error('AG09_META_INSIGHTS_WINDOW_REVERSED');
+  if (query.fields.length === 0) throw new Error('AG09_META_INSIGHTS_FIELDS_REQUIRED');
 
   const rows = await provider.getInsights(account, query);
-  if (!Array.isArray(rows))
-    throw new Error('AG09_META_INSIGHTS_PROVIDER_RESPONSE_INVALID');
+  if (!Array.isArray(rows)) throw new Error('AG09_META_INSIGHTS_PROVIDER_RESPONSE_INVALID');
 
   const seen = new Set<string>();
   const uniqueRows: Readonly<Record<string, unknown>>[] = [];
@@ -84,8 +79,7 @@ export async function readAg09NativeMetaInsights(
 }
 
 function assertCalendarDate(value: string): void {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value))
-    throw new Error('AG09_META_INSIGHTS_DATE_INVALID');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('AG09_META_INSIGHTS_DATE_INVALID');
   const parsed = new Date(`${value}T00:00:00.000Z`);
   if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value)
     throw new Error('AG09_META_INSIGHTS_DATE_INVALID');
