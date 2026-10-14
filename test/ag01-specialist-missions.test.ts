@@ -3,6 +3,7 @@ import { createTrustedServiceExecutionIdentity } from '../src/core/identity.js';
 import {
   Ag01SpecialistMissionCoordinator,
   SPECIALIST_MISSION_MAX_TTL_MS,
+  type SpecialistMissionInput,
 } from '../src/orchestrator/specialist-missions.js';
 import type { CoreCapabilityGateway } from '../src/orchestrator/contracts.js';
 import { InMemoryWorkflowStore } from '../src/workflow/in-memory-workflow-store.js';
@@ -279,7 +280,9 @@ describe('AG-01 internal specialized missions — existing WorkflowStore, produc
     let clock = T0;
     const h = harness();
     const dispatch = vi
-      .fn()
+      .fn(async (_input: SpecialistMissionInput): Promise<ExecutionResult> => {
+        throw new Error('UNEXPECTED_SPECIALIST_DISPATCH');
+      })
       .mockRejectedValueOnce(new Error('TRANSIENT_READ_FAILURE'))
       .mockResolvedValueOnce({
         executionId: 'core-returned-on-retry',
