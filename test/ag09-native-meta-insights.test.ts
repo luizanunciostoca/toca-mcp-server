@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { InMemoryAuditSink } from '../src/core/audit.js';
+import { createTrustedServiceExecutionIdentity } from '../src/core/identity.js';
+import { executeCoreCapability } from '../src/mcp/core-execution.js';
+import { createRuntimeCapabilityResolver } from '../src/mcp/runtime-capability-resolver.js';
+import { createToolRegistry } from '../src/registry.js';
 import {
   AG09_NATIVE_META_ANALYTICS_SOURCE,
   readAg09NativeMetaInsights,
@@ -107,4 +112,101 @@ describe('AG-09 native Meta Ads analytics source', () => {
     );
     expect(getInsights).toHaveBeenCalledTimes(1);
   });
+  it('preserves projected identical metrics when campaign IDs were not requested', async () => {
+    const projected = { date_start: '2026-10-08', date_stop: '2026-10-08', spend: '0' };
+    const { provider } = fakeProvider([projected, { ...projected }]);
+    const report = await readAg09NativeMetaInsights(provider, account, {
+      ...query,
+      fields: ['spend', 'date_start', 'date_stop'],
+    });
+    expect(report.data).toHaveLength(2);
+    expect(report.identicalRowsDiscarded).toBe(0);
+  });
+
+  it('preserves equal projected rows without dates even when campaign ID is present', async () => {
+    const projected = { campaign_id: 'campaign-a', spend: '0' };
+    const { provider } = fakeProvider([projected, { ...projected }]);
+    const report = await readAg09NativeMetaInsights(provider, account, {
+      ...query,
+      fields: ['campaign_id', 'spend'],
+    });
+    expect(report.data).toHaveLength(2);
+    expect(report.identicalRowsDiscarded).toBe(0);
+  });
+
+  it('deduplicates key-order variants of the same fully identified Meta observation', async () => {
+    const first = {
+      campaign_id: 'campaign-a',
+      date_start: '2026-10-08',
+      date_stop: '2026-10-08',
+      spend: '10.00',
+      nested: { details: { action: 'lead', value: '2' }, breakdown: 'feed' },
+    };
+    const equivalent = {
+      nested: { breakdown: 'feed', details: { value: '2', action: 'lead' } },
+      spend: '10.00',
+      date_stop: '2026-10-08',
+      date_start: '2026-10-08',
+      campaign_id: 'campaign-a',
+    };
+    const { provider } = fakeProvider([first, equivalent]);
+    const report = await readAg09NativeMetaInsights(provider, account, query);
+    expect(report.data).toEqual([first]);
+    expect(report.identicalRowsDiscarded).toBe(1);
+  });
+
+  it('exposes the native provenance through the governed TOCA Core execute path', async () => {
+    const { provider, getInsights } = fakeProvider([
+      { campaign_id: 'campaign-a', date_start: '2026-10-08', date_stop: '2026-10-08', spend: '0' },
+    ]);
+    const identity = createTrustedServiceExecutionIdentity({
+      principalId: 'test:ag09-native-reader',
+      tenantId: 'toca-do-morcego',
+      roles: ['READER'],
+      allowedCapabilityIds: ['meta_ads.insights.get'],
+      allowedTargetAccounts: [account.adAccountId],
+      evidence: ['test:ag09-native-meta-core'],
+      now: new Date().toISOString(),
+    });
+    const deps = {
+      registry: createToolRegistry({ metaAdsReadsEnabled: true }),
+      runtimeResolver: createRuntimeCapabilityResolver({
+        metaAdsRead: provider as MetaAdsReadProvider,
+      }),
+      auditSink: new InMemoryAuditSink(),
+    };
+    const result = await executeCoreCapability(
+      {
+        capabilityId: 'meta_ads.insights.get',
+        payload: { ...account, ...query },
+        correlationId: 'test:ag09-core-read',
+      },
+      identity,
+      deps,
+    );
+    expect(getInsights).toHaveBeenCalledTimes(1);
+    expect(result.capabilityId).toBe('meta_ads.insights.get');
+    expect(result.result).toMatchObject({
+      source: AG09_NATIVE_META_ANALYTICS_SOURCE,
+      observationState: 'ROWS_RETURNED',
+      accountId: account.adAccountId,
+      data: [{ spend: '0' }],
+    });
+
+    await expect(
+      executeCoreCapability(
+        {
+          capabilityId: 'meta_ads.insights.get',
+          payload: { ...account, adAccountId: '999888777', ...query },
+          correlationId: 'test:ag09-wrong-target',
+        },
+        identity,
+        deps,
+      ),
+    ).rejects.toMatchObject({
+      code: 'POLICY_DENIED',
+    });
+    expect(getInsights).toHaveBeenCalledTimes(1);
+  });
+
 });
