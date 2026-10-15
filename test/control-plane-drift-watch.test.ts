@@ -14,6 +14,11 @@ type DriftWatchInput = {
 
 const checker = checkerModule as unknown as {
   readonly evaluateControlPlaneDrift: (input: DriftWatchInput) => string[];
+  readonly evaluateRequiredWorkflowJobs: (input: {
+    readonly workflowName: string;
+    readonly runId: number;
+    readonly jobsResponse: unknown;
+  }) => string[];
   readonly parseEvidenceRecord: (body: string) => {
     readonly mainSha: string;
     readonly qualityRunId: number;
@@ -21,7 +26,7 @@ const checker = checkerModule as unknown as {
     readonly securityRunId: number;
   } | null;
 };
-const { evaluateControlPlaneDrift, parseEvidenceRecord } = checker;
+const { evaluateControlPlaneDrift, parseEvidenceRecord, evaluateRequiredWorkflowJobs } = checker;
 
 const SHA = 'a'.repeat(40);
 const OWNER = 'luizanunciostoca';
@@ -146,4 +151,89 @@ describe('control-plane drift watch', () => {
     })}`;
     expect(parseEvidenceRecord(body)).toBeNull();
   });
+  it('accepts all critical jobs while allowing push-only optional jobs to be skipped', () => {
+    const jobs = [
+      { name: 'codeql', run_id: 77, status: 'completed', conclusion: 'success' },
+      { name: 'vulnerability-secret-container-sbom', run_id: 77, status: 'completed', conclusion: 'success' },
+      { name: 'dependency-review', run_id: 77, status: 'completed', conclusion: 'skipped' },
+    ];
+    expect(
+      evaluateRequiredWorkflowJobs({
+        workflowName: 'Security Supply Chain',
+        runId: 77,
+        jobsResponse: { total_count: jobs.length, jobs },
+      }),
+    ).toEqual([]);
+  });
+
+  it('rejects a workflow-success result with a skipped CodeQL job', () => {
+    const jobs = [
+      { name: 'codeql', run_id: 77, status: 'completed', conclusion: 'skipped' },
+      { name: 'vulnerability-secret-container-sbom', run_id: 77, status: 'completed', conclusion: 'success' },
+    ];
+    expect(
+      evaluateRequiredWorkflowJobs({
+        workflowName: 'Security Supply Chain',
+        runId: 77,
+        jobsResponse: { total_count: jobs.length, jobs },
+      }),
+    ).toContain('CONTROL_PLANE_ACTIONS_REQUIRED_JOB_INVALID:Security Supply Chain:77:codeql:skipped');
+  });
+
+  it('rejects missing, duplicated and failed required jobs', () => {
+    const good = { name: 'quality', run_id: 77, status: 'completed', conclusion: 'success' };
+    for (const jobs of [
+      [{ ...good, name: 'unrelated' }],
+      [good, good],
+      [{ ...good, conclusion: 'failure' }],
+      [{ ...good, status: 'queued', conclusion: null }],
+    ]) {
+      expect(
+        evaluateRequiredWorkflowJobs({
+          workflowName: 'Quality Gate',
+          runId: 77,
+          jobsResponse: { total_count: jobs.length, jobs },
+        }),
+      ).not.toEqual([]);
+    }
+  });
+
+  it('rejects a required job returned from a different workflow run', () => {
+    expect(
+      evaluateRequiredWorkflowJobs({
+        workflowName: 'Autonomy Safety',
+        runId: 77,
+        jobsResponse: {
+          total_count: 1,
+          jobs: [{ name: 'autonomy-safety', run_id: 78, status: 'completed', conclusion: 'success' }],
+        },
+      }),
+    ).toContain('CONTROL_PLANE_ACTIONS_REQUIRED_JOB_INVALID:Autonomy Safety:77:autonomy-safety:WRONG_RUN');
+  });
+
+  it('fails closed on truncated, empty or invalid job API responses', () => {
+    const good = { name: 'quality', run_id: 77, status: 'completed', conclusion: 'success' };
+    for (const jobsResponse of [
+      { total_count: 2, jobs: [good] },
+      { total_count: 0, jobs: [] },
+      { total_count: '1', jobs: [good] },
+      { jobs: [good] },
+      null,
+    ]) {
+      expect(
+        evaluateRequiredWorkflowJobs({ workflowName: 'Quality Gate', runId: 77, jobsResponse }),
+      ).toContain('CONTROL_PLANE_ACTIONS_JOBS_INCOMPLETE:Quality Gate:77');
+    }
+  });
+
+  it('rejects unexpected workflow names rather than accepting no required jobs', () => {
+    expect(
+      evaluateRequiredWorkflowJobs({
+        workflowName: 'Unknown Workflow',
+        runId: 77,
+        jobsResponse: { total_count: 0, jobs: [] },
+      }),
+    ).toEqual(['CONTROL_PLANE_ACTIONS_WORKFLOW_UNKNOWN:Unknown Workflow']);
+  });
+
 });
