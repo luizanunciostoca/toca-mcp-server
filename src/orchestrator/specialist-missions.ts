@@ -213,11 +213,7 @@ export class Ag01SpecialistMissionCoordinator {
     if (owner !== manifest.owner) throw new Error('AG01_MISSION_WORKER_OWNER_MISMATCH');
     this.assertAuthorized(identity, manifest);
     const step = onlyStep(snapshot);
-    if (step.status === 'SUCCEEDED') return resultFrom(step.output);
-    if (step.status === 'FAILED') throw new Error('AG01_MISSION_ALREADY_FAILED');
-    if (step.status !== 'READY') throw new Error('AG01_MISSION_ALREADY_CLAIMED');
-    const now = this.now().toISOString();
-    requireFutureTimestamp(manifest.expiresAt, now);
+    // Saved results retain the current Core target-account authorization boundary.
     const inspection = this.core.inspect({
       capabilityId: manifest.capability,
       payload: step.input,
@@ -230,6 +226,11 @@ export class Ag01SpecialistMissionCoordinator {
       inspection.approvalRequired
     )
       throw new Error('AG01_MISSION_CORE_READONLY_BOUNDARY');
+    if (step.status === 'SUCCEEDED') return resultFrom(step.output);
+    if (step.status === 'FAILED') throw new Error('AG01_MISSION_ALREADY_FAILED');
+    if (step.status !== 'READY') throw new Error('AG01_MISSION_ALREADY_CLAIMED');
+    const now = this.now().toISOString();
+    requireFutureTimestamp(manifest.expiresAt, now);
     const workerId = `ag01-internal:${owner}`;
     const claims = await this.workflows.claimReadySteps({
       workflowId: missionId,
@@ -395,4 +396,32 @@ function requireFutureTimestamp(value: string, now: string): string {
 
 function requireText(value: string, code: string): void {
   if (!value.trim()) throw new Error(code);
+}
+
+/** Authorize access to persisted specialist inputs and outputs, including legacy snapshots. */
+export function authorizeSpecialistMissionRead(
+  snapshot: WorkflowSnapshot,
+  identity: ExecutionIdentity,
+  inspect: (capabilityId: string, payload: unknown) => void,
+  now: string = new Date().toISOString(),
+): void {
+  assertExecutionIdentity(identity, now);
+  const { principal } = identity;
+  if (
+    snapshot.instance.tenantId !== principal.tenantId ||
+    snapshot.instance.workspaceId !== principal.workspaceId ||
+    snapshot.instance.organizationId !== principal.organizationId ||
+    snapshot.instance.requesterPrincipalId !== principal.principalId
+  )
+    throw new Error('AG01_MISSION_SCOPE_DENIED');
+  const manifest = readManifest(snapshot);
+  const allowed = authorizeExecution(identity, {
+    routeId: manifest.routeId,
+    capabilityId: manifest.capability,
+    riskClass: 'READ',
+    now,
+  });
+  if (!allowed.allowed) throw new Error(`AG01_MISSION_AUTHORIZATION_DENIED:${allowed.reason}`);
+  // Inspection must use the persisted payload and the current caller, never stored identity.
+  inspect(manifest.capability, onlyStep(snapshot).input);
 }
