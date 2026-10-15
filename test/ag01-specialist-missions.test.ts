@@ -11,7 +11,6 @@ import { InMemoryConversationStore } from '../src/orchestrator/in-memory-convers
 import { TocaOrchestratorRuntime } from '../src/orchestrator/runtime.js';
 import type { Ag01SpecialistMissionCoordinator as SpecialistCoordinator } from '../src/orchestrator/specialist-missions.js';
 
-
 const T0 = '2026-10-14T20:00:00.000Z';
 const T1 = '2026-10-14T21:00:00.000Z';
 const T2 = '2026-10-14T22:00:00.000Z';
@@ -373,15 +372,15 @@ describe('AG-01 internal specialized missions — existing WorkflowStore, produc
       requestApproval: vi.fn(),
       getApproval: vi.fn(),
     } as unknown as CoreCapabilityGateway;
+    const specialistExecute = vi.fn();
     const specialist = {
       supports: vi.fn(() => true),
-      executePlannedStep: vi.fn(),
+      executePlannedStep: specialistExecute,
     } as unknown as SpecialistCoordinator;
     const runtime = new TocaOrchestratorRuntime({
       conversations: new InMemoryConversationStore(),
       routeResolver: {
-        resolve: () =>
-          Promise.resolve({ routeId: 'R19', confidence: 1, evidence: ['route:r19'] }),
+        resolve: () => Promise.resolve({ routeId: 'R19', confidence: 1, evidence: ['route:r19'] }),
       },
       artifacts: {
         resolveSop: () =>
@@ -417,6 +416,6 @@ describe('AG-01 internal specialized missions — existing WorkflowStore, produc
     });
     expect(outcome.status).toBe('SUCCEEDED');
     expect(coreExecute).toHaveBeenCalledTimes(1);
-    expect(specialist.executePlannedStep).not.toHaveBeenCalled();
+    expect(specialistExecute).not.toHaveBeenCalled();
   });
 });
