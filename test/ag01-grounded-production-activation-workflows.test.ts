@@ -87,10 +87,19 @@ describe('grounded production activation workflows', () => {
       'AG01_INTERNAL_SPECIALISTS_CHATGPT_TASKS_DISPATCH=false',
     ];
     const checked = (body: string) =>
-      spawnSync('bash', ['-c', `set -euo pipefail
+      spawnSync(
+        'bash',
+        [
+          '-c',
+          `set -euo pipefail
 BODY="$1"
 ${script}
-printf 'SPECIALISTS=%s' "$SPECIALISTS_ENABLED"`, '_', body], { encoding: 'utf8' });
+printf 'SPECIALISTS=%s' "$SPECIALISTS_ENABLED"`,
+          '_',
+          body,
+        ],
+        { encoding: 'utf8' },
+      );
 
     const off = checked('OTHER_AUTHORIZATION_STATE=ACTIVE');
     expect(off.status).toBe(0);
