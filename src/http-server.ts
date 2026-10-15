@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { toNodeHandler, type NodeIncomingMessageLike } from '@modelcontextprotocol/node';
 import { createMcpHandler } from '@modelcontextprotocol/server';
+import type { ReadonlyMcpAuth } from './mcp/readonly-auth.js';
+import { createReadonlyMcpServer } from './mcp/readonly-server.js';
 import { evaluateReadiness, type ReadinessCheck } from './health/readiness.js';
 import type { InstagramWebhookEvent } from './providers/instagram/instagram-engagement-contracts.js';
 import type { MetaManagedAsset } from './providers/meta/meta-assets.js';
@@ -37,10 +39,15 @@ export interface TocaHttpServerOptions {
   ) => Promise<readonly MetaManagedAsset[]>;
   readonly metaWebhook?: MetaWebhookHttpBoundary;
   readonly mcpEnabled?: boolean;
+  readonly readonlyMcpAuth?: ReadonlyMcpAuth;
 }
 
 export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Server {
-  const mcp = createMcpHandler(() => createArtistSafeTocaServer());
+  const mcp = createMcpHandler((context) =>
+    options.readonlyMcpAuth
+      ? createReadonlyMcpServer(options.readonlyMcpAuth, context.authInfo)
+      : createArtistSafeTocaServer(),
+  );
   const handleMcp = toNodeHandler(mcp, {
     onerror: (error) => {
       options.onError?.(error);
@@ -170,23 +177,75 @@ export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Serve
       return;
     }
 
-    const normalizedRequest: NodeIncomingMessageLike = {
-      method,
-      url: requestUrl,
-      headers: request.headers,
-      [Symbol.asyncIterator]: () => request[Symbol.asyncIterator](),
-    };
-
-    void handleMcp(normalizedRequest, response).catch((error: unknown) => {
+    void (async () => {
+      const auth = options.readonlyMcpAuth;
+      let authInfo;
+      if (auth) {
+        try {
+          authInfo = await auth.authenticate(request);
+        } catch {
+          response.writeHead(401, {
+            'content-type': 'application/json; charset=utf-8',
+            'cache-control': 'no-store',
+            'www-authenticate': 'Bearer scope="toca:read"',
+          });
+          response.end(JSON.stringify({ error: 'invalid_token' }));
+          return;
+        }
+        if (method !== 'POST') {
+          response.writeHead(405, { allow: 'POST', 'cache-control': 'no-store' });
+          response.end();
+          return;
+        }
+      }
+      const readonlyBody = auth ? await readBoundedMcpBody(request) : undefined;
+      const normalizedRequest: NodeIncomingMessageLike = {
+        method,
+        url: requestUrl,
+        headers: request.headers,
+        // Deliberately do not forward request.auth or caller-supplied claims.
+        ...(authInfo ? { auth: authInfo } : {}),
+        [Symbol.asyncIterator]: () =>
+          readonlyBody !== undefined
+            ? (async function* () {
+                yield await Promise.resolve(readonlyBody);
+              })()
+            : request[Symbol.asyncIterator](),
+      };
+      await handleMcp(normalizedRequest, response);
+    })().catch((error: unknown) => {
       options.onError?.(error);
       if (!response.headersSent) {
-        response.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
+        response.writeHead(error instanceof McpBodyTooLargeError ? 413 : 500, {
+          'content-type': 'application/json; charset=utf-8',
+        });
       }
       if (!response.writableEnded) {
-        response.end(JSON.stringify({ error: 'mcp_request_failed' }));
+        response.end(
+          JSON.stringify({
+            error:
+              error instanceof McpBodyTooLargeError
+                ? 'mcp_request_too_large'
+                : 'mcp_request_failed',
+          }),
+        );
       }
     });
   });
+}
+
+class McpBodyTooLargeError extends Error {}
+
+async function readBoundedMcpBody(request: IncomingMessage): Promise<Buffer> {
+  let bytes = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+    bytes += buffer.length;
+    if (bytes > 64 * 1024) throw new McpBodyTooLargeError('MCP_READONLY_BODY_TOO_LARGE');
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks, bytes);
 }
 
 interface CompliancePage {
