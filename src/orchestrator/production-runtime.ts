@@ -35,6 +35,7 @@ import type { Ag01ProductionConfig } from './production-config.js';
 import { assertAg01PersistenceReady } from './readiness.js';
 import { TocaOrchestratorRuntime } from './runtime.js';
 import { deterministicId } from './safety.js';
+import { Ag01SpecialistMissionCoordinator } from './specialist-missions.js';
 import type { Ag01StructuredDecision } from './structured-decision.js';
 import {
   GoogleSheetsTocaOsRegistryClient,
@@ -201,12 +202,18 @@ export function createAg01ProductionRuntime(
   );
   const artifacts = new TocaOsCanonicalArtifactResolver(tocaOs, decisionContext);
   const planner = new StructuredDecisionPlanBuilder(decisionContext, () => runtimeCapabilityIds);
+  // Opt-in only: no new scheduler, ChatGPT Tasks API or externally callable worker route.
+  const specialistMissions =
+    env.TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED === 'true'
+      ? new Ag01SpecialistMissionCoordinator(coreComposition.workflowStore, core)
+      : undefined;
   const orchestrator = new TocaOrchestratorRuntime({
     conversations,
     routeResolver,
     artifacts,
     planner,
     core,
+    ...(specialistMissions ? { specialistMissions } : {}),
     deadLetters,
   });
 
