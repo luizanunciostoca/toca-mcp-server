@@ -49,6 +49,42 @@ describe('Meta Ads no-side-effect provider preflight', () => {
     });
   });
 
+  it('tries another usable Ad Set when the provider rejects the first combination', async () => {
+    const { api, post } = apiMock({
+      adSets: [
+        {
+          id: 'adset-incompatible',
+          status: 'PAUSED',
+          effective_status: 'CAMPAIGN_PAUSED',
+          issues_info: [],
+        },
+        {
+          id: 'adset-compatible',
+          status: 'PAUSED',
+          effective_status: 'CAMPAIGN_PAUSED',
+          issues_info: [],
+        },
+      ],
+    });
+    post
+      .mockRejectedValueOnce(new Error('META_HTTP_400|META_CODE_100|META_SUBCODE_1860014'))
+      .mockResolvedValueOnce({ success: true });
+
+    await expect(
+      validateMetaAdsAdWriteReadiness(api, {
+        accountId: '311793958882290',
+        creativeId: 'creative-1',
+        validationId: 'validation-1',
+      }),
+    ).resolves.toEqual({
+      validated: true,
+      adSetId: 'adset-compatible',
+      creativeId: 'creative-1',
+    });
+
+    expect(post).toHaveBeenCalledTimes(2);
+  });
+
   it('fails closed when no usable existing Ad Set is available', async () => {
     const { api, post } = apiMock({
       adSets: [
