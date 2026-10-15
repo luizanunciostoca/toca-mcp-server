@@ -67,7 +67,6 @@ export function parseEvidenceRecord(body) {
   return record;
 }
 
-
 const REQUIRED_WORKFLOW_JOBS = Object.freeze({
   'Quality Gate': ['quality'],
   'Autonomy Safety': ['autonomy-safety'],
@@ -100,8 +99,13 @@ export function evaluateRequiredWorkflowJobs({ workflowName, runId, jobsResponse
     const matches = jobs.filter((job) => job?.name === name);
     if (matches.length !== 1) {
       errors.push(
-        ['CONTROL_PLANE_ACTIONS_REQUIRED_JOB_INVALID', workflowName, runId, name,
-          matches.length === 0 ? 'MISSING' : 'AMBIGUOUS'].join(':'),
+        [
+          'CONTROL_PLANE_ACTIONS_REQUIRED_JOB_INVALID',
+          workflowName,
+          runId,
+          name,
+          matches.length === 0 ? 'MISSING' : 'AMBIGUOUS',
+        ].join(':'),
       );
       continue;
     }
@@ -109,8 +113,13 @@ export function evaluateRequiredWorkflowJobs({ workflowName, runId, jobsResponse
     const job = matches[0];
     if (job.run_id !== runId || job.status !== 'completed' || job.conclusion !== 'success') {
       errors.push(
-        ['CONTROL_PLANE_ACTIONS_REQUIRED_JOB_INVALID', workflowName, runId, name,
-          job.run_id !== runId ? 'WRONG_RUN' : (job.conclusion ?? 'UNKNOWN')].join(':'),
+        [
+          'CONTROL_PLANE_ACTIONS_REQUIRED_JOB_INVALID',
+          workflowName,
+          runId,
+          name,
+          job.run_id !== runId ? 'WRONG_RUN' : (job.conclusion ?? 'UNKNOWN'),
+        ].join(':'),
       );
     }
   }

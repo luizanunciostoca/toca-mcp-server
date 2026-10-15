@@ -154,7 +154,12 @@ describe('control-plane drift watch', () => {
   it('accepts all critical jobs while allowing push-only optional jobs to be skipped', () => {
     const jobs = [
       { name: 'codeql', run_id: 77, status: 'completed', conclusion: 'success' },
-      { name: 'vulnerability-secret-container-sbom', run_id: 77, status: 'completed', conclusion: 'success' },
+      {
+        name: 'vulnerability-secret-container-sbom',
+        run_id: 77,
+        status: 'completed',
+        conclusion: 'success',
+      },
       { name: 'dependency-review', run_id: 77, status: 'completed', conclusion: 'skipped' },
     ];
     expect(
@@ -169,7 +174,12 @@ describe('control-plane drift watch', () => {
   it('rejects a workflow-success result with a skipped CodeQL job', () => {
     const jobs = [
       { name: 'codeql', run_id: 77, status: 'completed', conclusion: 'skipped' },
-      { name: 'vulnerability-secret-container-sbom', run_id: 77, status: 'completed', conclusion: 'success' },
+      {
+        name: 'vulnerability-secret-container-sbom',
+        run_id: 77,
+        status: 'completed',
+        conclusion: 'success',
+      },
     ];
     expect(
       evaluateRequiredWorkflowJobs({
@@ -177,7 +187,9 @@ describe('control-plane drift watch', () => {
         runId: 77,
         jobsResponse: { total_count: jobs.length, jobs },
       }),
-    ).toContain('CONTROL_PLANE_ACTIONS_REQUIRED_JOB_INVALID:Security Supply Chain:77:codeql:skipped');
+    ).toContain(
+      'CONTROL_PLANE_ACTIONS_REQUIRED_JOB_INVALID:Security Supply Chain:77:codeql:skipped',
+    );
   });
 
   it('rejects missing, duplicated and failed required jobs', () => {
@@ -205,10 +217,14 @@ describe('control-plane drift watch', () => {
         runId: 77,
         jobsResponse: {
           total_count: 1,
-          jobs: [{ name: 'autonomy-safety', run_id: 78, status: 'completed', conclusion: 'success' }],
+          jobs: [
+            { name: 'autonomy-safety', run_id: 78, status: 'completed', conclusion: 'success' },
+          ],
         },
       }),
-    ).toContain('CONTROL_PLANE_ACTIONS_REQUIRED_JOB_INVALID:Autonomy Safety:77:autonomy-safety:WRONG_RUN');
+    ).toContain(
+      'CONTROL_PLANE_ACTIONS_REQUIRED_JOB_INVALID:Autonomy Safety:77:autonomy-safety:WRONG_RUN',
+    );
   });
 
   it('fails closed on truncated, empty or invalid job API responses', () => {
@@ -235,5 +251,4 @@ describe('control-plane drift watch', () => {
       }),
     ).toEqual(['CONTROL_PLANE_ACTIONS_WORKFLOW_UNKNOWN:Unknown Workflow']);
   });
-
 });
