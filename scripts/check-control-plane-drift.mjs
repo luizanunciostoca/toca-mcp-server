@@ -67,6 +67,56 @@ export function parseEvidenceRecord(body) {
   return record;
 }
 
+
+const REQUIRED_WORKFLOW_JOBS = Object.freeze({
+  'Quality Gate': ['quality'],
+  'Autonomy Safety': ['autonomy-safety'],
+  'Security Supply Chain': ['codeql', 'vulnerability-secret-container-sbom'],
+});
+
+/**
+ * A successful workflow conclusion is not evidence that its required jobs ran.
+ * Keep push-only optional jobs (dependency-review and drift-watch) optional.
+ */
+export function evaluateRequiredWorkflowJobs({ workflowName, runId, jobsResponse }) {
+  const required = Object.hasOwn(REQUIRED_WORKFLOW_JOBS, workflowName)
+    ? REQUIRED_WORKFLOW_JOBS[workflowName]
+    : undefined;
+  if (!required) return ['CONTROL_PLANE_ACTIONS_WORKFLOW_UNKNOWN:' + workflowName];
+
+  const jobs = jobsResponse?.jobs;
+  const total = jobsResponse?.total_count;
+  if (
+    !Array.isArray(jobs) ||
+    !Number.isSafeInteger(total) ||
+    total < required.length ||
+    jobs.length !== total
+  ) {
+    return ['CONTROL_PLANE_ACTIONS_JOBS_INCOMPLETE:' + workflowName + ':' + runId];
+  }
+
+  const errors = [];
+  for (const name of required) {
+    const matches = jobs.filter((job) => job?.name === name);
+    if (matches.length !== 1) {
+      errors.push(
+        ['CONTROL_PLANE_ACTIONS_REQUIRED_JOB_INVALID', workflowName, runId, name,
+          matches.length === 0 ? 'MISSING' : 'AMBIGUOUS'].join(':'),
+      );
+      continue;
+    }
+
+    const job = matches[0];
+    if (job.run_id !== runId || job.status !== 'completed' || job.conclusion !== 'success') {
+      errors.push(
+        ['CONTROL_PLANE_ACTIONS_REQUIRED_JOB_INVALID', workflowName, runId, name,
+          job.run_id !== runId ? 'WRONG_RUN' : (job.conclusion ?? 'UNKNOWN')].join(':'),
+      );
+    }
+  }
+  return errors;
+}
+
 export async function fetchAllIssueComments({ apiUrl, repository, issueNumber, token }) {
   const comments = [];
   for (let page = 1; page <= 100; page += 1) {
@@ -143,6 +193,23 @@ async function main() {
       console.error(
         `CONTROL_PLANE_ACTIONS_PROOF_INVALID:${expectedName}:${runId}:${run?.head_sha ?? 'MISSING'}:${run?.status ?? 'MISSING'}:${run?.conclusion ?? 'MISSING'}`,
       );
+      process.exitCode = 1;
+      return;
+    }
+
+    // The workflow run may report SUCCESS when a critical job was skipped.
+    // Verify all latest-attempt required jobs before accepting certification.
+    const jobsResponse = await githubJson(
+      `${apiUrl}/repos/${repository}/actions/runs/${runId}/jobs?filter=latest&per_page=100`,
+      token,
+    );
+    const jobErrors = evaluateRequiredWorkflowJobs({
+      workflowName: expectedName,
+      runId,
+      jobsResponse,
+    });
+    if (jobErrors.length > 0) {
+      for (const error of jobErrors) console.error(error);
       process.exitCode = 1;
       return;
     }
