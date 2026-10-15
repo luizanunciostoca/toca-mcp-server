@@ -19,6 +19,8 @@ export interface Agent09MetaRow {
   readonly dateStart: string;
   readonly dateStop: string;
   readonly deliveryStatus: 'ACTIVE' | 'PAUSED' | 'OTHER';
+  /** Independently read from the canonical Core delivery/status provider, not inferred from Insights. */
+  readonly deliveryStatusReadbackVerified: boolean;
   readonly impressions: number | null;
   readonly clicks: number | null;
   readonly reach: number | null;
@@ -112,6 +114,8 @@ export interface Agent09Recommendation {
     | 'ACTIVE_ZERO_SPEND_RECONCILIATION'
     | 'CAMPAIGN_PERFORMANCE_REVIEW';
   readonly priority: 'P0' | 'P1' | 'P2';
+  /** Stable affected entity/date identity, independent of fetch receipt IDs. */
+  readonly incidentKey: string;
   readonly fact: string;
   readonly risk: string;
   readonly confidence: 'HIGH' | 'MEDIUM' | 'LOW';
@@ -194,6 +198,7 @@ function dedupeMeta(rows: readonly Agent09MetaRow[], window: Agent09Window): rea
   for (const row of rows) {
     if (!row.id || !row.campaignId || !['campaign', 'adset', 'ad'].includes(row.level) ||
         !['ACTIVE', 'PAUSED', 'OTHER'].includes(row.deliveryStatus) ||
+        typeof row.deliveryStatusReadbackVerified !== 'boolean' ||
         row.dateStart !== window.since || row.dateStop !== window.until ||
         !nonnegativeInteger(row.impressions) || !nonnegativeInteger(row.clicks) ||
         !nonnegativeInteger(row.reach) || !nonnegative(row.spend) ||
@@ -224,7 +229,7 @@ function verifiedMission(m: Agent09Mission | null, nowMs: number, accountId: str
 }
 
 function fingerprintFor(r: Agent09Recommendation): string {
-  const stable = JSON.stringify([r.code, r.priority, r.fact, r.evidence]);
+  const stable = JSON.stringify([r.code, r.priority, r.incidentKey, r.fact]);
   // Deterministic non-cryptographic dedupe token; not a security/idempotency key.
   let a = 2166136261;
   let b = 5381;
@@ -310,10 +315,21 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
   const published = new Set<string>();
   const pending = new Set<string>();
   const pendingEvidence = new Set<string>();
+  const slotDue = new Map<string, number>();
+  const slotProviders = new Map<string, Set<string>>();
+  const providerSlots = new Map<string, Set<string>>();
   for (const p of input.publications) {
     if (!p.contentItemId.trim() || !validInstant(p.scheduledAt)) continue;
     const key = `${p.contentItemId}:${p.scheduledAt}`;
+    slotDue.set(key, Date.parse(p.scheduledAt));
     if (verifiedPublication(p)) {
+      const mediaKey = `${p.providerAccountId}:${p.providerMediaId}`;
+      const mediaIds = slotProviders.get(key) ?? new Set<string>();
+      mediaIds.add(mediaKey);
+      slotProviders.set(key, mediaIds);
+      const slotKeys = providerSlots.get(mediaKey) ?? new Set<string>();
+      slotKeys.add(key);
+      providerSlots.set(mediaKey, slotKeys);
       published.add(key);
       pending.delete(key);
       continue;
@@ -324,9 +340,25 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
     }
   }
 
+  // A media ID reused by different slots, or multiple media IDs claimed by one slot,
+  // cannot prove independent publications; fail closed instead of double-counting.
+  for (const [key, mediaIds] of slotProviders) {
+    const conflict = mediaIds.size > 1 ||
+      [...mediaIds].some(mediaKey => (providerSlots.get(mediaKey)?.size ?? 0) > 1);
+    if (conflict) {
+      published.delete(key);
+      if ((slotDue.get(key) ?? Number.POSITIVE_INFINITY) < nowMs) pending.add(key);
+      for (const p of input.publications) {
+        if (`${p.contentItemId}:${p.scheduledAt}` === key)
+          for (const e of p.evidence) if (e.trim()) pendingEvidence.add(e);
+      }
+    }
+  }
+
   const recommendations: Agent09Recommendation[] = [];
   if (pending.size > 0) recommendations.push({
     code: 'PUBLICATION_PROVIDER_RECONCILIATION', priority: 'P0',
+    incidentKey: [...pending].sort().join('|'),
     fact: `${pending.size} past-due content slots have no verified provider ID/permalink in this evidence set; publication outcome is UNKNOWN.`,
     risk: 'A ledger gap can conceal a failed post or a successful post whose ACK was not persisted.',
     confidence: 'HIGH', decision: 'Request GET-only readback from the canonical publisher; do not retry or backfill without reconciliation.',
@@ -335,15 +367,17 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
   });
   if (metaState !== 'PROVEN') recommendations.push({
     code: 'META_IDENTITY_OR_EVIDENCE_GAP', priority: 'P1',
+    incidentKey: `${meta?.accountId ?? 'UNKNOWN'}:${meta?.window.since ?? 'NONE'}:${meta?.window.until ?? 'NONE'}:${metaReason}`, 
     fact: `Meta Ads metrics are METRICS_NOT_PROVEN (${metaReason}).`,
     risk: 'Unavailable metrics must not be shown as zeros, purchases, revenue or campaign success.',
     confidence: 'HIGH', decision: 'Verify the native Core account, ads_read scope, requested date window and Meta Graph readback.',
     rollback: 'No write proposed; keep paid-campaign state and budgets unchanged.',
     evidence: meta?.evidence?.filter(e => e.trim()).sort() ?? [],
   });
-  if (metaState === 'PROVEN' && rows.some(r => r.deliveryStatus === 'ACTIVE' && r.spend === 0)) {
+  if (metaState === 'PROVEN' && rows.some(r => r.deliveryStatusReadbackVerified && r.deliveryStatus === 'ACTIVE' && r.spend === 0)) {
     recommendations.push({
       code: 'ACTIVE_ZERO_SPEND_RECONCILIATION', priority: 'P1',
+      incidentKey: `${meta!.accountId}:${meta!.window.since}:${meta!.window.until}:${rows.filter(r => r.deliveryStatusReadbackVerified && r.deliveryStatus === 'ACTIVE' && r.spend === 0).map(r => `${r.level}:${r.id}`).sort().join(',')}`, 
       fact: 'An ACTIVE Meta Ads entity reports verified spend=0 for the requested window.',
       risk: 'Zero spend can indicate delivery/billing/approval issues; ACTIVE alone is not evidence of success.',
       confidence: 'MEDIUM', decision: 'Compare campaign/adset/ad delivery and billing read-only in Core before any proposed pause.',
@@ -355,6 +389,7 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
     ctr !== null && frequency !== null && frequency >= 3 && ctr < 0.01) {
     recommendations.push({
       code: 'CAMPAIGN_PERFORMANCE_REVIEW', priority: 'P2',
+      incidentKey: `${mission.campaignId}:${meta!.window.since}:${meta!.window.until}`, 
       fact: `Campaign ${mission.campaignId} has observed frequency >=3 and CTR <1% in a verified window.`,
       risk: 'Possible creative fatigue, targeting mismatch or weak attribution; thresholds are diagnostic only.',
       confidence: 'LOW', decision: 'Submit a read-only creative/copy comparison to the authorized planner; require independent baseline before recommending pause.',
