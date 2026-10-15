@@ -16,6 +16,7 @@ export function createReadonlyMcpAuthFromEnv(env: NodeJS.ProcessEnv): ReadonlyMc
     return value;
   };
   return createReadonlyMcpAuth({
+    resourceUrl: required('MCP_READONLY_RESOURCE_URL'),
     issuer: required('MCP_READONLY_OIDC_ISSUER'),
     audience: required('MCP_READONLY_OIDC_AUDIENCE'),
     jwksUri: required('MCP_READONLY_OIDC_JWKS_URI'),

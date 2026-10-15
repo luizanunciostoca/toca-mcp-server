@@ -31,7 +31,9 @@ import { READONLY_MCP_TOOL_NAMES } from '../src/mcp/readonly-server.js';
 // Synthetic keys and signed claims never leave this process. Only the loopback
 // HTTP transport is real; the injected JWKS transport cannot contact a provider.
 const ISSUER = 'https://readonly-identity.example.test/';
-const AUDIENCE = 'toca-readonly-test';
+const AUDIENCE = 'https://readonly-resource.example.test/mcp';
+const METADATA_PATH = '/.well-known/oauth-protected-resource/mcp';
+const METADATA_URL = `https://readonly-resource.example.test${METADATA_PATH}`;
 const JWKS_URI = `${ISSUER}.well-known/jwks.json`;
 const NOW = 2_000_000_000;
 const CLIENT_ID = 'shared-oauth-client';
@@ -109,11 +111,13 @@ function jwt(
 
 function authFixture(overrides: Partial<ReadonlyAuthOptions> = {}) {
   const jwksRequests: string[] = [];
+  const authenticationAttempts: (string | undefined)[] = [];
   const authenticated: AuthInfo[] = [];
   const observations: Observation[] = [];
   const verifier = createReadonlyMcpAuth({
     issuer: ISSUER,
     audience: AUDIENCE,
+    resourceUrl: AUDIENCE,
     jwksUri: JWKS_URI,
     principals,
     clockSkewSeconds: 0,
@@ -128,7 +132,10 @@ function authFixture(overrides: Partial<ReadonlyAuthOptions> = {}) {
   // Observe the actual binding at the SDK/Core seam without mocking its
   // verifier, identity resolver, registrations, catalog, or HTTP transport.
   const auth: ReadonlyMcpAuth = {
+    resourceMetadata: verifier.resourceMetadata,
+    resourceMetadataUrl: verifier.resourceMetadataUrl,
     async authenticate(request) {
+      authenticationAttempts.push(request.headers.authorization);
       const authInfo = await verifier.authenticate(request);
       authenticated.push(authInfo);
       return authInfo;
@@ -139,7 +146,7 @@ function authFixture(overrides: Partial<ReadonlyAuthOptions> = {}) {
       return identity;
     },
   };
-  return { auth, verifier, jwksRequests, authenticated, observations };
+  return { auth, verifier, jwksRequests, authenticationAttempts, authenticated, observations };
 }
 
 async function listen(server: Server): Promise<string> {
@@ -201,11 +208,15 @@ async function send(
       ...(options.token === undefined ? {} : { authorization: `Bearer ${options.token}` }),
       ...options.headers,
     },
-    ...(method === 'GET' || method === 'DELETE' ? {} : { body: JSON.stringify(payload) }),
+    ...(['GET', 'HEAD', 'DELETE'].includes(method) ? {} : { body: JSON.stringify(payload) }),
     signal: AbortSignal.timeout(10_000),
   });
   const text = await response.text();
-  const frames = response.headers.get('content-type')?.includes('text/event-stream')
+  return parseReply(response.status, response.headers, text);
+}
+
+function parseReply(status: number, headers: Headers, text: string): HttpReply {
+  const frames = headers.get('content-type')?.includes('text/event-stream')
     ? text
         .split('\n')
         .filter((line) => line.startsWith('data: '))
@@ -218,7 +229,60 @@ async function send(
     : text
       ? (JSON.parse(text) as HttpReply['body'])
       : null;
-  return { status: response.status, headers: response.headers, body, text };
+  return { status, headers, body, text };
+}
+
+// Node fetch replaces a caller-supplied Host. Native HTTP is necessary to put
+// the forged Host on the wire and genuinely test authority-header spoofing.
+function sendWithHost(
+  endpoint: string,
+  payload: unknown,
+  options: { headers: Record<string, string>; token?: string; method?: string },
+): Promise<HttpReply> {
+  return new Promise((resolve, reject) => {
+    const method = options.method ?? 'POST';
+    const body = ['GET', 'HEAD', 'DELETE'].includes(method) ? undefined : JSON.stringify(payload);
+    const request = httpRequest(
+      endpoint,
+      {
+        method,
+        headers: {
+          accept: 'application/json, text/event-stream',
+          'content-type': 'application/json',
+          'mcp-protocol-version': '2025-11-25',
+          ...(body === undefined ? {} : { 'content-length': String(Buffer.byteLength(body)) }),
+          ...(options.token === undefined ? {} : { authorization: `Bearer ${options.token}` }),
+          ...options.headers,
+        },
+      },
+      (response) => {
+        response.setEncoding('utf8');
+        let text = '';
+        response.on('data', (chunk: string) => {
+          text += chunk;
+        });
+        response.on('error', reject);
+        response.on('end', () => {
+          const headers = new Headers();
+          for (const [name, value] of Object.entries(response.headers)) {
+            if (value !== undefined) {
+              for (const entry of Array.isArray(value) ? value : [value])
+                headers.append(name, entry);
+            }
+          }
+          try {
+            resolve(parseReply(response.statusCode!, headers, text));
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        });
+      },
+    );
+    expect(request.getHeader('host')).toBe(options.headers.host);
+    request.on('error', reject);
+    request.setTimeout(10_000, () => request.destroy(new Error('HTTP fixture timed out')));
+    request.end(body);
+  });
 }
 
 function rpc(method: string, params: JsonObject = {}): JsonObject {
@@ -378,7 +442,9 @@ describe('source-only read-only MCP bearer boundary over real SDK HTTP', () => {
       const reply = await send(fixture.endpoint, rpc('tools/list'), { token });
       expect(reply.status).toBe(401);
       expect(reply.body).toEqual({ error: 'invalid_token' });
-      expect(reply.headers.get('www-authenticate')).toBe('Bearer scope="toca:read"');
+      expect(reply.headers.get('www-authenticate')).toBe(
+        `Bearer resource_metadata="${METADATA_URL}", scope="toca:read"`,
+      );
       expect(reply.headers.get('cache-control')).toBe('no-store');
       expect(reply.text).not.toContain(token);
       expect(fixture.authenticated).toEqual([]);
@@ -719,6 +785,7 @@ describe('read-only MCP source configuration is opt-in and fail-closed', () => {
     MCP_READONLY_AUTH_ENABLED: 'true',
     MCP_READONLY_OIDC_ISSUER: ISSUER,
     MCP_READONLY_OIDC_AUDIENCE: AUDIENCE,
+    MCP_READONLY_RESOURCE_URL: AUDIENCE,
     MCP_READONLY_OIDC_JWKS_URI: JWKS_URI,
     MCP_READONLY_PRINCIPALS_JSON: JSON.stringify(principals),
   };
@@ -742,7 +809,105 @@ describe('read-only MCP source configuration is opt-in and fail-closed', () => {
   it('accepts complete explicit configuration without fetching keys or selecting runtime providers', () => {
     const auth = createReadonlyMcpAuthFromEnv(environment);
     expect(auth).toBeDefined();
+    expect(auth!.resourceMetadataUrl).toBe(METADATA_URL);
+    expect(auth!.resourceMetadata).toEqual({
+      resource: AUDIENCE,
+      authorization_servers: [ISSUER],
+      scopes_supported: ['toca:read'],
+      bearer_methods_supported: ['header'],
+    });
     expect(() => auth!.resolveIdentity(undefined)).toThrow('MCP_READONLY_AUTH_REQUIRED');
+  });
+
+  it.each([
+    '',
+    'http://readonly-resource.example.test/mcp',
+    'ftp://readonly-resource.example.test/mcp',
+    'https://user:pass@readonly-resource.example.test/mcp',
+    'https://readonly-resource.example.test/',
+    'https://readonly-resource.example.test/other',
+    'https://readonly-resource.example.test/mcp/',
+    'https://readonly-resource.example.test/%6dcp',
+    'https://readonly-resource.example.test/mcp?tenant=other',
+    'https://readonly-resource.example.test/mcp?',
+    'https://readonly-resource.example.test/mcp#fragment',
+    'https://readonly-resource.example.test/mcp#',
+    'HTTPS://readonly-resource.example.test/mcp',
+    'https://READONLY-RESOURCE.example.test/mcp',
+    'https://readonly-resource.example.test:443/mcp',
+    'https://readonly-resource.example.test/./mcp',
+    'https://readonly-resource.example.test/other/../mcp',
+    'https://readonly-resource.example.test\\mcp',
+    ' https://readonly-resource.example.test/mcp',
+    'https://readonly-resource.example.test/mcp ',
+  ])('rejects noncanonical or unsafe resource URL %j', (resourceUrl) => {
+    expect(() => authFixture({ resourceUrl, audience: resourceUrl })).toThrow();
+    expect(() =>
+      createReadonlyMcpAuthFromEnv({
+        ...environment,
+        MCP_READONLY_RESOURCE_URL: resourceUrl,
+        MCP_READONLY_OIDC_AUDIENCE: resourceUrl,
+      }),
+    ).toThrow();
+  });
+
+  it.each([
+    '',
+    'http://readonly-identity.example.test/',
+    'ftp://readonly-identity.example.test/',
+    'https://user:pass@readonly-identity.example.test/',
+    'https://readonly-identity.example.test/?tenant=other',
+    'https://readonly-identity.example.test/?',
+    'https://readonly-identity.example.test/#fragment',
+    'https://readonly-identity.example.test/#',
+    'HTTPS://readonly-identity.example.test/',
+    'https://READONLY-IDENTITY.example.test/',
+    'https://readonly-identity.example.test:443/',
+    'https://readonly-identity.example.test/realm/../',
+    'https://readonly-identity.example.test',
+    ' https://readonly-identity.example.test/',
+  ])('rejects noncanonical or unsafe issuer URL %j', (issuer) => {
+    expect(() => authFixture({ issuer })).toThrow();
+    expect(() =>
+      createReadonlyMcpAuthFromEnv({ ...environment, MCP_READONLY_OIDC_ISSUER: issuer }),
+    ).toThrow();
+  });
+
+  it.each([
+    'different-audience',
+    'https://other-resource.example.test/mcp',
+    `${AUDIENCE}/`,
+    `${AUDIENCE}?tenant=other`,
+    [AUDIENCE],
+    [AUDIENCE, 'different-audience'],
+    [],
+  ])('requires one exact resource audience rather than %j', (audience) => {
+    expect(() => authFixture({ audience })).toThrow();
+    expect(() =>
+      createReadonlyMcpAuthFromEnv({
+        ...environment,
+        MCP_READONLY_OIDC_AUDIENCE:
+          typeof audience === 'string' ? audience : JSON.stringify(audience),
+      }),
+    ).toThrow();
+  });
+
+  it('derives metadata solely from canonical configured URLs, retaining issuer paths and HTTPS ports', () => {
+    const resourceUrl = 'https://readonly-resource.example.test:8443/mcp';
+    const issuer = 'https://readonly-identity.example.test/realms/readers';
+    const fixture = authFixture({ resourceUrl, audience: resourceUrl, issuer });
+    expect(fixture.auth.resourceMetadataUrl).toBe(
+      `https://readonly-resource.example.test:8443${METADATA_PATH}`,
+    );
+    expect(fixture.auth.resourceMetadata).toEqual({
+      resource: resourceUrl,
+      authorization_servers: [issuer],
+      scopes_supported: ['toca:read'],
+      bearer_methods_supported: ['header'],
+    });
+    expect(fixture.jwksRequests).toEqual([]);
+    expect(fixture.authenticationAttempts).toEqual([]);
+    expect(fixture.observations).toEqual([]);
   });
 
   it.each(['', 'TRUE', '1', 'yes', ' false ', ' true '])(
@@ -757,6 +922,7 @@ describe('read-only MCP source configuration is opt-in and fail-closed', () => {
   it.each([
     'MCP_READONLY_OIDC_ISSUER',
     'MCP_READONLY_OIDC_AUDIENCE',
+    'MCP_READONLY_RESOURCE_URL',
     'MCP_READONLY_OIDC_JWKS_URI',
     'MCP_READONLY_PRINCIPALS_JSON',
   ])('fails closed with missing, blank or padded %s', (key) => {
@@ -800,5 +966,177 @@ describe('read-only MCP source configuration is opt-in and fail-closed', () => {
     const health = await fetch(new URL('/health', endpoint));
     expect(health.status).toBe(200);
     await health.text();
+  });
+});
+
+describe('RFC 9728 read-only MCP protected-resource metadata', () => {
+  const metadata = {
+    resource: AUDIENCE,
+    authorization_servers: [ISSUER],
+    scopes_supported: ['toca:read'],
+    bearer_methods_supported: ['header'],
+  };
+  const spoofedHeaders = {
+    host: 'attacker.example.test:8080',
+    forwarded: 'for=192.0.2.1;host=attacker.example.test;proto=http',
+    'x-forwarded-host': 'attacker.example.test',
+    'x-forwarded-proto': 'http',
+    'x-forwarded-prefix': '/forged-prefix',
+    'x-original-url': 'https://attacker.example.test/mcp',
+  };
+
+  it.each([undefined, 'Bearer malformed', 'Basic forged-client'])(
+    'serves public GET metadata without authentication, JWKS or identity lookup (%s)',
+    async (authorization) => {
+      const fixture = await readonlyEndpoint();
+      const endpoint = new URL(METADATA_PATH, fixture.endpoint).href;
+      const reply = await send(endpoint, undefined, {
+        method: 'GET',
+        ...(authorization === undefined ? {} : { headers: { authorization } }),
+      });
+      expect(reply.status).toBe(200);
+      expect(reply.headers.get('content-type')?.split(';')[0]).toBe('application/json');
+      expect(reply.headers.get('www-authenticate')).toBeNull();
+      expect(reply.body).toEqual(metadata);
+      expect(fixture.authenticationAttempts).toEqual([]);
+      expect(fixture.authenticated).toEqual([]);
+      expect(fixture.jwksRequests).toEqual([]);
+      expect(fixture.observations).toEqual([]);
+      expect(reply.text).not.toContain('tenant-alice');
+      expect(reply.text).not.toContain('workspace-alice');
+      expect(reply.text).not.toContain(JWKS_URI);
+    },
+  );
+
+  it('serves HEAD with metadata headers and no body or authentication work', async () => {
+    const fixture = await readonlyEndpoint();
+    const endpoint = new URL(METADATA_PATH, fixture.endpoint).href;
+    const reply = await sendWithHost(endpoint, undefined, {
+      method: 'HEAD',
+      headers: { authorization: 'Bearer malformed', ...spoofedHeaders },
+    });
+    expect(reply.status).toBe(200);
+    expect(reply.headers.get('content-type')?.split(';')[0]).toBe('application/json');
+    expect(reply.body).toBeNull();
+    expect(reply.text).toBe('');
+    expect(fixture.authenticationAttempts).toEqual([]);
+    expect(fixture.jwksRequests).toEqual([]);
+    expect(fixture.observations).toEqual([]);
+  });
+
+  it('ignores Host and forwarding claims for both metadata and authentication challenges', async () => {
+    const fixture = await readonlyEndpoint();
+    const endpoint = new URL(METADATA_PATH, fixture.endpoint).href;
+    const publicReply = await sendWithHost(endpoint, undefined, {
+      method: 'GET',
+      headers: spoofedHeaders,
+    });
+    expect(publicReply.status).toBe(200);
+    expect(publicReply.body).toEqual(metadata);
+    expect(publicReply.text).not.toContain('attacker');
+    expect(publicReply.text).not.toContain('forged-prefix');
+    expect(fixture.authenticationAttempts).toEqual([]);
+    expect(fixture.jwksRequests).toEqual([]);
+    expect(fixture.observations).toEqual([]);
+
+    for (const token of [undefined, 'malformed', jwt({ exp: NOW - 1 })]) {
+      const reply = await sendWithHost(fixture.endpoint, rpc('tools/list'), {
+        ...(token === undefined ? {} : { token }),
+        headers: spoofedHeaders,
+      });
+      expect(reply.status).toBe(401);
+      expect(reply.body).toEqual({ error: 'invalid_token' });
+      expect(reply.headers.get('www-authenticate')).toBe(
+        `Bearer resource_metadata="${METADATA_URL}", scope="toca:read"`,
+      );
+      expect(reply.headers.get('www-authenticate')).not.toContain('attacker');
+      expect(reply.headers.get('cache-control')).toBe('no-store');
+    }
+    expect(fixture.authenticated).toEqual([]);
+    expect(fixture.observations).toEqual([]);
+  });
+
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])(
+    'rejects %s metadata requests without invoking authentication or Core',
+    async (method) => {
+      const fixture = await readonlyEndpoint();
+      const endpoint = new URL(METADATA_PATH, fixture.endpoint).href;
+      const reply = await send(endpoint, rpc('tools/list'), { method, token: jwt() });
+      expect(reply.status).toBe(405);
+      expect(
+        reply.headers
+          .get('allow')
+          ?.split(',')
+          .map((value) => value.trim())
+          .sort(),
+      ).toEqual(['GET', 'HEAD']);
+      expect(fixture.authenticationAttempts).toEqual([]);
+      expect(fixture.jwksRequests).toEqual([]);
+      expect(fixture.observations).toEqual([]);
+    },
+  );
+
+  it.each([undefined, 'false'])(
+    'does not publish resource metadata when read-only authentication is disabled (%s)',
+    async (flag) => {
+      const auth = createReadonlyMcpAuthFromEnv({
+        ...(flag === undefined ? {} : { MCP_READONLY_AUTH_ENABLED: flag }),
+      });
+      expect(auth).toBeUndefined();
+      const endpoint = await listen(createTocaHttpServer());
+      for (const method of ['GET', 'HEAD', 'POST']) {
+        const reply = await send(new URL(METADATA_PATH, endpoint).href, undefined, { method });
+        expect(reply.status).toBe(404);
+        expect(reply.headers.get('www-authenticate')).toBeNull();
+      }
+    },
+  );
+
+  it('does not publish metadata or authenticate when the MCP endpoint is explicitly disabled', async () => {
+    const fixture = authFixture();
+    const endpoint = await listen(
+      createTocaHttpServer({ readonlyMcpAuth: fixture.auth, mcpEnabled: false }),
+    );
+    for (const method of ['GET', 'HEAD', 'POST']) {
+      const reply = await send(new URL(METADATA_PATH, endpoint).href, undefined, {
+        method,
+        token: jwt(),
+      });
+      expect(reply.status).toBe(404);
+      expect(reply.headers.get('www-authenticate')).toBeNull();
+    }
+    expect(fixture.authenticationAttempts).toEqual([]);
+    expect(fixture.jwksRequests).toEqual([]);
+    expect(fixture.observations).toEqual([]);
+  });
+
+  it.each([
+    '/.well-known/oauth-protected-resource',
+    '/.well-known/oauth-protected-resource/other',
+    `${METADATA_PATH}/`,
+  ])('does not expose metadata for the unconfigured path %s', async (path) => {
+    const fixture = await readonlyEndpoint();
+    const reply = await send(new URL(path, fixture.endpoint).href, undefined, { method: 'GET' });
+    expect(reply.status).toBe(404);
+    expect(fixture.authenticationAttempts).toEqual([]);
+    expect(fixture.jwksRequests).toEqual([]);
+  });
+
+  it('continues to require header bearer authentication after metadata discovery', async () => {
+    const fixture = await readonlyEndpoint();
+    const discovery = await send(new URL(METADATA_PATH, fixture.endpoint).href, undefined, {
+      method: 'GET',
+    });
+    expect(discovery.body).toEqual(metadata);
+    expect(fixture.authenticationAttempts).toEqual([]);
+    const token = jwt();
+    const queryToken = await send(`${fixture.endpoint}?access_token=${token}`, rpc('tools/list'));
+    expect(queryToken.status).toBe(401);
+    expect(fixture.authenticated).toEqual([]);
+    expect(fixture.jwksRequests).toEqual([]);
+    const health = output(await call(fixture.endpoint, token, 'toca.system.health'));
+    expect(health.discoveryOnly).toBe(true);
+    expect(fixture.authenticated).toHaveLength(1);
+    expect(fixture.jwksRequests).toEqual([JWKS_URI]);
   });
 });

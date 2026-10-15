@@ -26,9 +26,12 @@ approve all of the following before any separate deployment/configuration step:
 
 - `MCP_READONLY_AUTH_ENABLED=true` (only exact `true` enables it; missing or exact
   `false` preserves the existing path; other values fail startup)
-- `MCP_READONLY_OIDC_ISSUER`: exact approved access-token issuer
-- `MCP_READONLY_OIDC_AUDIENCE`: exact audience identifying this MCP resource,
-  not an unrelated API or an OAuth login client
+- `MCP_READONLY_RESOURCE_URL`: explicit canonical HTTPS URL with root pathname exactly
+  `/mcp` (nested prefixes are unsupported), without credentials, query or fragment; never inferred from request headers
+- `MCP_READONLY_OIDC_ISSUER`: exact canonical HTTPS approved access-token issuer,
+  without credentials, query or fragment
+- `MCP_READONLY_OIDC_AUDIENCE`: must exactly equal `MCP_READONLY_RESOURCE_URL`;
+  no additional audiences or unrelated API/login client identifiers are accepted
 - `MCP_READONLY_OIDC_JWKS_URI`: approved HTTPS public-key endpoint
 - `MCP_READONLY_PRINCIPALS_JSON`: nonempty JSON array of strict objects with
   `subject`, `tenantId`, `workspaceId`, and `organizationId`; every field must be
@@ -61,11 +64,22 @@ token contents or verification details.
 
 ## What remains before a usable integration
 
-This is authenticated discovery plumbing only. OAuth protected-resource metadata,
-authorization-server discovery, client registration/login, owner-approved trust
-and subject mapping, a supported client/plugin, and end-to-end connection evidence
-remain separate gates. The 401 Bearer challenge announces the required read scope
-but does not claim a complete OAuth discovery implementation. See the official
+When enabled, unauthenticated GET/HEAD at
+`/.well-known/oauth-protected-resource/mcp` returns RFC 9728 resource metadata.
+It advertises only the configured resource, configured issuer, `toca:read`, and
+header bearer transport. The 401 challenge points to that configured metadata URL
+and announces the required read scope. Host and forwarded headers never select
+these values; metadata does not disclose subject mappings or JWKS configuration.
+The route is absent when this binding or MCP is disabled. It does not expose
+an authorization-server metadata endpoint, login page, client registration or
+token endpoint. The configured external issuer must provide those separately.
+
+This is authenticated discovery plumbing only. Authorization-server discovery,
+client registration/login, owner-approved trust and subject mapping, a supported
+client/plugin, and end-to-end connection evidence remain separate gates. An
+operator must route the configured HTTPS resource and metadata paths consistently;
+this source change does not create that route or relax private ingress/IAM.
+See the official
 [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization).
 
 The existing Core ingress/IAM/default-URL restrictions and runtime service account

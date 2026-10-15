@@ -31,15 +31,36 @@ export const readonlyPrincipalSchema = z
   .strict();
 
 export interface ReadonlyAuthOptions extends OidcBearerVerifierOptions {
+  readonly resourceUrl: string;
   readonly principals: readonly z.infer<typeof readonlyPrincipalSchema>[];
 }
 
 export interface ReadonlyMcpAuth {
+  readonly resourceMetadataUrl: string;
+  readonly resourceMetadata: {
+    readonly resource: string;
+    readonly authorization_servers: readonly string[];
+    readonly scopes_supported: readonly string[];
+    readonly bearer_methods_supported: readonly string[];
+  };
   authenticate(request: IncomingMessage): Promise<AuthInfo>;
   resolveIdentity(authInfo: AuthInfo | undefined): ExecutionIdentity;
 }
 
 export function createReadonlyMcpAuth(options: ReadonlyAuthOptions): ReadonlyMcpAuth {
+  // Configuration, never request Host/Forwarded headers, defines the trust boundary.
+  const resource = canonicalHttpsUrl(options.resourceUrl);
+  const issuer = canonicalHttpsUrl(options.issuer);
+  if (resource.pathname !== '/mcp' || options.audience !== options.resourceUrl) {
+    throw new Error('MCP_READONLY_CONFIGURATION_INVALID');
+  }
+  const resourceMetadataUrl = `${resource.origin}/.well-known/oauth-protected-resource${resource.pathname}`;
+  const resourceMetadata = Object.freeze({
+    resource: resource.href,
+    authorization_servers: Object.freeze([issuer.href]),
+    scopes_supported: Object.freeze(['toca:read']),
+    bearer_methods_supported: Object.freeze(['header']),
+  });
   const principals = z.array(readonlyPrincipalSchema).min(1).parse(options.principals);
   const mappings = new Map(principals.map((principal) => [principal.subject, principal]));
   if (mappings.size !== principals.length) throw new Error('MCP_READONLY_MAPPING_AMBIGUOUS');
@@ -54,6 +75,8 @@ export function createReadonlyMcpAuth(options: ReadonlyAuthOptions): ReadonlyMcp
     return identity;
   }
   return {
+    resourceMetadataUrl,
+    resourceMetadata,
     resolveIdentity,
     async authenticate(request) {
       const header = request.headers.authorization;
@@ -110,4 +133,25 @@ export function createReadonlyMcpAuth(options: ReadonlyAuthOptions): ReadonlyMcp
       return authInfo;
     },
   };
+}
+
+function canonicalHttpsUrl(value: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('MCP_READONLY_CONFIGURATION_INVALID');
+  }
+  if (
+    url.protocol !== 'https:' ||
+    value.includes('?') ||
+    value.includes('#') ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    url.href !== value
+  )
+    throw new Error('MCP_READONLY_CONFIGURATION_INVALID');
+  return url;
 }

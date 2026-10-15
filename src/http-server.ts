@@ -171,6 +171,21 @@ export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Serve
       return;
     }
 
+    const discoveryAuth = options.mcpEnabled !== false ? options.readonlyMcpAuth : undefined;
+    if (discoveryAuth && url.pathname === new URL(discoveryAuth.resourceMetadataUrl).pathname) {
+      if (method !== 'GET' && method !== 'HEAD') {
+        response.writeHead(405, { allow: 'GET, HEAD', 'cache-control': 'no-store' });
+        response.end();
+        return;
+      }
+      response.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store',
+      });
+      response.end(method === 'HEAD' ? undefined : JSON.stringify(discoveryAuth.resourceMetadata));
+      return;
+    }
+
     if (url.pathname !== '/mcp' || options.mcpEnabled === false) {
       response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ error: 'not_found' }));
@@ -187,7 +202,7 @@ export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Serve
           response.writeHead(401, {
             'content-type': 'application/json; charset=utf-8',
             'cache-control': 'no-store',
-            'www-authenticate': 'Bearer scope="toca:read"',
+            'www-authenticate': `Bearer resource_metadata="${auth.resourceMetadataUrl}", scope="toca:read"`,
           });
           response.end(JSON.stringify({ error: 'invalid_token' }));
           return;
