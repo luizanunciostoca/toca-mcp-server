@@ -57,6 +57,9 @@ export interface VerifiedOidcIdentity {
   readonly issuer: string;
   readonly audiences: readonly string[];
   readonly expiresAt: number;
+  /** Optional signed OAuth claims. Never populated from request headers or decoded separately. */
+  readonly scopes?: readonly string[];
+  readonly clientId?: string;
 }
 
 export interface OidcJwksFetchOptions {
@@ -541,6 +544,12 @@ function validateClaims(
     issuer: options.issuer,
     audiences,
     expiresAt,
+    ...(typeof claims.scope === 'string'
+      ? { scopes: claims.scope.split(' ').filter(Boolean) }
+      : {}),
+    ...(typeof claims.client_id === 'string' && claims.client_id.trim() === claims.client_id
+      ? { clientId: claims.client_id }
+      : {}),
   };
 }
 
