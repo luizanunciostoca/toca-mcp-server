@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -41,7 +42,7 @@ describe('grounded production activation workflows', () => {
 
   it('requires explicit owner opt-in for internal READ-only specialists and proves effective revision configuration', () => {
     expect(ag01).toContain('SPECIALISTS_ENABLED=false');
-    expect(ag01).toContain("grep -Fxq 'AG01_INTERNAL_SPECIALISTS_ACTIVATION=AUTHORIZED'");
+    expect(ag01).toContain('AG01_INTERNAL_SPECIALISTS_ACTIVATION=AUTHORIZED');
     expect(ag01).toContain('AG01_INTERNAL_SPECIALISTS_MODE=READ_ONLY');
     expect(ag01).toContain('AG01_INTERNAL_SPECIALISTS_SIDE_EFFECTS_AUTHORIZED=false');
     expect(ag01).toContain('AG01_INTERNAL_SPECIALISTS_WORKFLOWSTORE_EXISTING_SCHEMA_ONLY=true');
@@ -66,6 +67,56 @@ describe('grounded production activation workflows', () => {
     expect(productionReadback).toBeGreaterThan(promotion);
     expect(ag01).toContain('--no-traffic --no-allow-unauthenticated');
     expect(ag01).toContain("if: failure() && steps.promote.outputs.traffic_changed == 'true'");
+  });
+
+  it('rejects duplicate, contradictory, partial and conflicting opt-in lines', () => {
+    const start = ag01.indexOf('          SPECIALISTS_ENABLED=false');
+    const end = ag01.indexOf('          PREVIOUS="$(grep', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const script = ag01
+      .slice(start, end)
+      .split('\n')
+      .map((line) => line.replace(/^          /, ''))
+      .join('\n');
+    const valid = [
+      'AG01_INTERNAL_SPECIALISTS_ACTIVATION=AUTHORIZED',
+      'AG01_INTERNAL_SPECIALISTS_MODE=READ_ONLY',
+      'AG01_INTERNAL_SPECIALISTS_SIDE_EFFECTS_AUTHORIZED=false',
+      'AG01_INTERNAL_SPECIALISTS_WORKFLOWSTORE_EXISTING_SCHEMA_ONLY=true',
+      'AG01_INTERNAL_SPECIALISTS_CHATGPT_TASKS_DISPATCH=false',
+    ];
+    const checked = (body: string) =>
+      spawnSync('bash', ['-c', `set -euo pipefail
+BODY="$1"
+${script}
+printf 'SPECIALISTS=%s' "$SPECIALISTS_ENABLED"`, '_', body], { encoding: 'utf8' });
+
+    const off = checked('OTHER_AUTHORIZATION_STATE=ACTIVE');
+    expect(off.status).toBe(0);
+    expect(off.stdout).toContain('SPECIALISTS=false');
+
+    const enabled = checked(valid.join('\n'));
+    expect(enabled.status).toBe(0);
+    expect(enabled.stdout).toContain('SPECIALISTS=true');
+
+    const invalidCases = [
+      [...valid, 'AG01_INTERNAL_SPECIALISTS_ACTIVATION=FORBIDDEN'],
+      [...valid, 'AG01_INTERNAL_SPECIALISTS_MODE=WRITE'],
+      [...valid, valid[0]],
+      [...valid, valid[1]],
+      valid.slice(1),
+      valid.slice(0, -1),
+      ['AG01_INTERNAL_SPECIALISTS_ACTIVATION=AUTHORIZED'],
+      ['AG01_INTERNAL_SPECIALISTS_MODE=READ_ONLY'],
+      ['AG01_INTERNAL_SPECIALISTS_MODE=WRITE'],
+    ];
+    for (const lines of invalidCases) {
+      const result = checked(lines.join('\n'));
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).not.toContain('SPECIALISTS=true');
+      expect(result.stderr).toContain('AG01_SPECIALIST_OPTIN_INCOMPLETE');
+    }
   });
 
   it('captures github-only sanitized startup diagnostics without production credentials', () => {
