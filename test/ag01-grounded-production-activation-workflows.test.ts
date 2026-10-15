@@ -39,6 +39,35 @@ describe('grounded production activation workflows', () => {
     expect(ag01).not.toContain('ag01-grounded-evidence/grounded-answer.json');
   });
 
+  it('requires explicit owner opt-in for internal READ-only specialists and proves effective revision configuration', () => {
+    expect(ag01).toContain('SPECIALISTS_ENABLED=false');
+    expect(ag01).toContain("grep -Fxq 'AG01_INTERNAL_SPECIALISTS_ACTIVATION=AUTHORIZED'");
+    expect(ag01).toContain('AG01_INTERNAL_SPECIALISTS_MODE=READ_ONLY');
+    expect(ag01).toContain('AG01_INTERNAL_SPECIALISTS_SIDE_EFFECTS_AUTHORIZED=false');
+    expect(ag01).toContain('AG01_INTERNAL_SPECIALISTS_WORKFLOWSTORE_EXISTING_SCHEMA_ONLY=true');
+    expect(ag01).toContain('AG01_INTERNAL_SPECIALISTS_CHATGPT_TASKS_DISPATCH=false');
+    expect(ag01).toContain('AG01_SPECIALIST_OPTIN_INCOMPLETE');
+    expect(ag01).toContain('echo "specialists_enabled=$SPECIALISTS_ENABLED"');
+    expect(ag01).toContain('SPECIALISTS_ENABLED: ${{ steps.authz.outputs.specialists_enabled }}');
+    expect(ag01).toContain('TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED=$SPECIALISTS_ENABLED');
+    expect(ag01).toContain(
+      'select(.name=="TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED") | .value',
+    );
+    expect(ag01).toContain('CURRENT_REVISION_JSON="$(gcloud run revisions describe "$CURRENT"');
+    expect(ag01).toContain('SPECIALIST_READONLY_FLAG_VERIFIED=$SPECIALISTS_ENABLED');
+    expect(ag01).toContain('SPECIALIST_CORE_PRODUCER_ACK=NOT_PROVEN_BY_GROUNDED_PROBE');
+    const authorization = ag01.indexOf('AG01_INTERNAL_SPECIALISTS_ACTIVATION=AUTHORIZED');
+    const staging = ag01.indexOf('Stage private AG-01 candidate at zero traffic');
+    const promotion = ag01.indexOf('Promote exact candidate transactionally');
+    const productionReadback = ag01.indexOf('CURRENT_REVISION_JSON="$(gcloud run revisions describe "$CURRENT"');
+    expect(authorization).toBeGreaterThan(0);
+    expect(staging).toBeGreaterThan(authorization);
+    expect(promotion).toBeGreaterThan(staging);
+    expect(productionReadback).toBeGreaterThan(promotion);
+    expect(ag01).toContain('--no-traffic --no-allow-unauthenticated');
+    expect(ag01).toContain("if: failure() && steps.promote.outputs.traffic_changed == 'true'");
+  });
+
   it('captures github-only sanitized startup diagnostics without production credentials', () => {
     expect(startupDiagnostics).toContain('AG-01 Grounded Runtime Activation');
     expect(startupDiagnostics).toContain("github.event.workflow_run.conclusion == 'failure'");
