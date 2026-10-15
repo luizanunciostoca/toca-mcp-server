@@ -65,22 +65,32 @@ jobs:
             'ROLLBACK_ON_FAILURE=true'
           )
           for line in "${required[@]}"; do grep -Fxq "$line" <<< "$BODY" || exit 1; done
-          # Existing grounded activations remain opt-out. Owner-issued specialist
-          # enablement requires all scoped read-only/persistence assertions.
+          # Old grounded activations retain the disabled default. If *any*
+          # specialist key is present, require an exact, non-contradictory
+          # one-per-key scope before enabling the internal READ-only bridge.
           SPECIALISTS_ENABLED=false
-          if grep -Fxq 'AG01_INTERNAL_SPECIALISTS_ACTIVATION=AUTHORIZED' <<< "$BODY"; then
-            scoped_specialist=(
-              'AG01_INTERNAL_SPECIALISTS_MODE=READ_ONLY'
-              'AG01_INTERNAL_SPECIALISTS_SIDE_EFFECTS_AUTHORIZED=false'
-              'AG01_INTERNAL_SPECIALISTS_WORKFLOWSTORE_EXISTING_SCHEMA_ONLY=true'
-              'AG01_INTERNAL_SPECIALISTS_CHATGPT_TASKS_DISPATCH=false'
-            )
-            for line in "${scoped_specialist[@]}"; do grep -Fxq "$line" <<< "$BODY" || exit 1; done
+          scoped_specialist=(
+            'AG01_INTERNAL_SPECIALISTS_ACTIVATION=AUTHORIZED'
+            'AG01_INTERNAL_SPECIALISTS_MODE=READ_ONLY'
+            'AG01_INTERNAL_SPECIALISTS_SIDE_EFFECTS_AUTHORIZED=false'
+            'AG01_INTERNAL_SPECIALISTS_WORKFLOWSTORE_EXISTING_SCHEMA_ONLY=true'
+            'AG01_INTERNAL_SPECIALISTS_CHATGPT_TASKS_DISPATCH=false'
+          )
+          specialist_key_present=false
+          for line in "${scoped_specialist[@]}"; do
+            key="${line%%=*}"
+            if grep -Eq "^${key}=" <<< "$BODY"; then specialist_key_present=true; fi
+          done
+          if [[ "$specialist_key_present" == true ]]; then
+            for line in "${scoped_specialist[@]}"; do
+              key="${line%%=*}"
+              occurrences="$(grep -Ec "^${key}=" <<< "$BODY" || true)"
+              if [[ "$occurrences" != 1 ]] || ! grep -Fxq "$line" <<< "$BODY"; then
+                echo 'AG01_SPECIALIST_OPTIN_INCOMPLETE' >&2
+                exit 1
+              fi
+            done
             SPECIALISTS_ENABLED=true
-          fi
-          if grep -Fq 'AG01_INTERNAL_SPECIALISTS_MODE=READ_ONLY' <<< "$BODY" && [[ "$SPECIALISTS_ENABLED" != true ]]; then
-            echo 'AG01_SPECIALIST_OPTIN_INCOMPLETE' >&2
-            exit 1
           fi
           PREVIOUS="$(grep '^EXPECTED_PREVIOUS_REVISION=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
           [[ "$PREVIOUS" =~ ^toca-ag01-orchestrator-[a-z0-9-]+$ ]]
