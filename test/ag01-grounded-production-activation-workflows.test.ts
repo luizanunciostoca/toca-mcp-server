@@ -50,16 +50,16 @@ describe('grounded production activation workflows', () => {
     expect(ag01).toContain('echo "specialists_enabled=$SPECIALISTS_ENABLED"');
     expect(ag01).toContain('SPECIALISTS_ENABLED: ${{ steps.authz.outputs.specialists_enabled }}');
     expect(ag01).toContain('TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED=$SPECIALISTS_ENABLED');
-    expect(ag01).toContain(
-      'select(.name=="TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED") | .value',
-    );
+    expect(ag01).toContain('select(.name=="TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED") | .value');
     expect(ag01).toContain('CURRENT_REVISION_JSON="$(gcloud run revisions describe "$CURRENT"');
     expect(ag01).toContain('SPECIALIST_READONLY_FLAG_VERIFIED=$SPECIALISTS_ENABLED');
     expect(ag01).toContain('SPECIALIST_CORE_PRODUCER_ACK=NOT_PROVEN_BY_GROUNDED_PROBE');
     const authorization = ag01.indexOf('AG01_INTERNAL_SPECIALISTS_ACTIVATION=AUTHORIZED');
     const staging = ag01.indexOf('Stage private AG-01 candidate at zero traffic');
     const promotion = ag01.indexOf('Promote exact candidate transactionally');
-    const productionReadback = ag01.indexOf('CURRENT_REVISION_JSON="$(gcloud run revisions describe "$CURRENT"');
+    const productionReadback = ag01.indexOf(
+      'CURRENT_REVISION_JSON="$(gcloud run revisions describe "$CURRENT"',
+    );
     expect(authorization).toBeGreaterThan(0);
     expect(staging).toBeGreaterThan(authorization);
     expect(promotion).toBeGreaterThan(staging);
