@@ -77,7 +77,7 @@ describe('grounded production activation workflows', () => {
     const script = ag01
       .slice(start, end)
       .split('\n')
-      .map((line) => line.replace(/^          /, ''))
+      .map((line) => line.replace(/^ {10}/, ''))
       .join('\n');
     const valid = [
       'AG01_INTERNAL_SPECIALISTS_ACTIVATION=AUTHORIZED',
