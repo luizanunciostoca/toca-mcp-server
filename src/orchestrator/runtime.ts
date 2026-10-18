@@ -27,6 +27,10 @@ import {
   summarizeRedactedMessages,
   withTimeout,
 } from './safety.js';
+import {
+  SPECIALIST_MISSION_MAX_TTL_MS,
+  type Ag01SpecialistMissionCoordinator,
+} from './specialist-missions.js';
 
 export const DEFAULT_ORCHESTRATOR_BUDGET: OrchestratorBudget = {
   maxToolCalls: 12,
@@ -46,6 +50,7 @@ export interface TocaOrchestratorRuntimeDependencies {
   readonly artifacts: CanonicalArtifactResolver;
   readonly planner: PlanBuilder;
   readonly core: CoreCapabilityGateway;
+  readonly specialistMissions?: Ag01SpecialistMissionCoordinator;
   readonly deadLetters: DeadLetterSink;
   readonly budget?: Partial<OrchestratorBudget>;
   readonly now?: () => Date;
@@ -222,6 +227,7 @@ export class TocaOrchestratorRuntime {
     const checkpoint: OrchestratorCheckpoint = {
       runId: deterministicId('ag01run', tenantId, messageId),
       messageId,
+      missionCreatedAt: this.#now().toISOString(),
       correlationId,
       causationId,
       plan,
@@ -422,13 +428,37 @@ export class TocaOrchestratorRuntime {
 
       try {
         const execution = await withTimeout(
-          this.dependencies.core.execute({
-            capabilityId: inspection.canonicalCapabilityId,
-            payload: step.payload,
-            correlationId: checkpoint.correlationId,
-            identity,
-            ...(checkpoint.approvalId ? { approvalId: checkpoint.approvalId } : {}),
-          }),
+          this.dependencies.specialistMissions &&
+            checkpoint.missionCreatedAt &&
+            checkpoint.plan.primaryAgent !== 'AG-01' &&
+            !inspection.sideEffects &&
+            !inspection.approvalRequired &&
+            this.dependencies.specialistMissions.supports(inspection.canonicalCapabilityId)
+            ? this.dependencies.specialistMissions.executePlannedStep({
+                routeId: checkpoint.plan.routeId,
+                capabilityId: inspection.canonicalCapabilityId,
+                payload: step.payload,
+                owner: checkpoint.plan.primaryAgent,
+                priority:
+                  getRouteDefinition(checkpoint.plan.routeId).priority === 'P0'
+                    ? 'P0'
+                    : getRouteDefinition(checkpoint.plan.routeId).priority === 'P2'
+                      ? 'P2'
+                      : 'P1',
+                correlationId: checkpoint.correlationId,
+                idempotencyKey: `${checkpoint.runId}:${step.stepId}`,
+                expiresAt: new Date(
+                  Date.parse(checkpoint.missionCreatedAt) + SPECIALIST_MISSION_MAX_TTL_MS,
+                ).toISOString(),
+                identity,
+              })
+            : this.dependencies.core.execute({
+                capabilityId: inspection.canonicalCapabilityId,
+                payload: step.payload,
+                correlationId: checkpoint.correlationId,
+                identity,
+                ...(checkpoint.approvalId ? { approvalId: checkpoint.approvalId } : {}),
+              }),
           this.#budget.toolTimeoutMs,
         );
         if (inspection.sideEffects && !execution.providerReadbackVerified) {

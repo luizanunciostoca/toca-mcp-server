@@ -66,6 +66,8 @@ export interface OrchestratorPlan {
 export interface OrchestratorCheckpoint {
   readonly runId: string;
   readonly messageId: string;
+  /** Immutable anchor used by opt-in durable specialist mission TTL across restarts. */
+  readonly missionCreatedAt?: string;
   readonly correlationId: string;
   readonly causationId: string | null;
   readonly plan: OrchestratorPlan;
