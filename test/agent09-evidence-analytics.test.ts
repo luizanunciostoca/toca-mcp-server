@@ -336,7 +336,150 @@ describe('TOCA OS / AGENTE 09 — canonical read-only metrics', () => {
     );
     expect(verified.organicState).toBe('PROVEN');
     expect(verified.organicMetrics).toEqual([
-      { format: 'FEED', mediaId: 'ig-media', reach: 20, engagement: 3, engagementRate: 0.15 },
+      {
+        accountId: 'ig-account',
+        window,
+        format: 'FEED',
+        mediaId: 'ig-media',
+        reach: 20,
+        engagement: 3,
+        engagementRate: 0.15,
+      },
     ]);
   });
+  it('deduplicates identical Meta measurements with reordered properties', () => {
+    const row = meta.rows[0]!;
+    const reordered = {
+      spend: row.spend,
+      reach: row.reach,
+      clicks: row.clicks,
+      impressions: row.impressions,
+      deliveryStatusReadbackVerified: row.deliveryStatusReadbackVerified,
+      deliveryStatus: row.deliveryStatus,
+      dateStop: row.dateStop,
+      dateStart: row.dateStart,
+      campaignId: row.campaignId,
+      id: row.id,
+      level: row.level,
+    };
+    const r = analyzeAgent09Evidence(sample({ meta: { ...meta, rows: [row, reordered] } }));
+    expect(r.metaState).toBe('PROVEN');
+    expect(r.sampleRows).toBe(1);
+    expect(r.spend).toBe(100);
+    expect(r.roas).toBe(3);
+  });
+
+  it('never joins campaign-wide CRM leads or revenue to a single ad or ad set', () => {
+    for (const level of ['ad', 'adset'] as const) {
+      const partial = { ...meta.rows[0]!, level, id: level + '-only', spend: 10 };
+      const r = analyzeAgent09Evidence(sample({ meta: { ...meta, rows: [partial] } }));
+      expect(r.metaState).toBe('PROVEN');
+      expect(r.spend).toBe(10);
+      expect(r.cpl).toBeNull();
+      expect(r.revenue).toBeNull();
+      expect(r.roas).toBeNull();
+    }
+    const conflictingIdentity = { ...meta.rows[0]!, id: 'another-campaign' };
+    expect(
+      analyzeAgent09Evidence(sample({ meta: { ...meta, rows: [conflictingIdentity] } })).roas,
+    ).toBeNull();
+  });
+
+  it('deduplicates organic receipts with differing timestamps and evidence but equal metrics', () => {
+    const obs = {
+      source: 'TOCA_CORE_INSTAGRAM' as const,
+      format: 'FEED' as const,
+      accountId: 'ig-account',
+      mediaId: 'ig-media',
+      window,
+      observedAt: '2026-10-14T20:55:00-03:00',
+      providerReadbackVerified: true,
+      reach: 20,
+      engagement: 3,
+      evidence: ['meta:receipt:one'],
+    };
+    const r = analyzeAgent09Evidence(
+      sample({ organic: [obs, { ...obs, observedAt: '2026-10-14T20:59:00-03:00', evidence: ['meta:receipt:two'] }] }),
+    );
+    expect(r.organicState).toBe('PROVEN');
+    expect(r.organicMetrics).toHaveLength(1);
+    expect(r.organicMetrics[0]).toMatchObject({
+      accountId: 'ig-account',
+      mediaId: 'ig-media',
+      window,
+      reach: 20,
+      engagement: 3,
+    });
+  });
+
+  it('keeps account and window on each distinct verified organic observation', () => {
+    const obs = {
+      source: 'TOCA_CORE_INSTAGRAM' as const,
+      format: 'STORY' as const,
+      accountId: 'ig-account',
+      mediaId: 'ig-media',
+      window,
+      observedAt: '2026-10-14T20:55:00-03:00',
+      providerReadbackVerified: true,
+      reach: 20,
+      engagement: 3,
+      evidence: ['meta:receipt:one'],
+    };
+    const otherWindow = { ...window, since: '2026-10-13' };
+    const r = analyzeAgent09Evidence(
+      sample({ organic: [obs, { ...obs, window: otherWindow, reach: 40 }] }),
+    );
+    expect(r.organicMetrics).toHaveLength(2);
+    expect(r.organicMetrics.map((item) => item.window.since)).toEqual([
+      '2026-10-14',
+      '2026-10-13',
+    ]);
+    expect(r.organicMetrics.every((item) => item.accountId === 'ig-account')).toBe(true);
+  });
+
+  it('normalizes equivalent UTC-offset publication instants for verified and pending slots', () => {
+    const p = {
+      contentItemId: 'slot-one',
+      expectedAccountId: 'ig-account',
+      providerAccountId: 'ig-account',
+      scheduledAt: '2026-10-14T09:00:00-03:00',
+      status: 'PUBLISHED',
+      providerMediaId: 'ig-media-1',
+      permalink: 'https://www.instagram.com/p/example/',
+      providerReadbackVerified: true,
+      evidence: ['ig:ack:one'],
+    };
+    const sameInstant = { ...p, scheduledAt: '2026-10-14T12:00:00Z' };
+    const published = analyzeAgent09Evidence(sample({ publications: [p, sameInstant] }));
+    expect(published.publicationConfirmed).toBe(1);
+    expect(published.publicationUnreconciled).toBe(0);
+    const unresolved = {
+      ...p,
+      status: 'MISSED_WINDOW',
+      providerAccountId: null,
+      providerMediaId: null,
+      permalink: null,
+      providerReadbackVerified: false,
+    };
+    const pending = analyzeAgent09Evidence(
+      sample({ publications: [unresolved, { ...unresolved, scheduledAt: sameInstant.scheduledAt }] }),
+    );
+    expect(pending.publicationConfirmed).toBe(0);
+    expect(pending.publicationUnreconciled).toBe(1);
+  });
+
+  it('recommends campaign performance review only for a matching campaign-wide row', () => {
+    const weak = { ...meta.rows[0]!, clicks: 5, reach: 200 };
+    const matching = analyzeAgent09Evidence(sample({ meta: { ...meta, rows: [weak] } }));
+    expect(matching.recommendation?.code).toBe('CAMPAIGN_PERFORMANCE_REVIEW');
+    const differentMission = analyzeAgent09Evidence(
+      sample({ meta: { ...meta, rows: [weak] }, mission: { ...mission, campaignId: 'cmp2' } }),
+    );
+    expect(differentMission.recommendation).toBeNull();
+    const adOnly = analyzeAgent09Evidence(
+      sample({ meta: { ...meta, rows: [{ ...weak, level: 'ad', id: 'ad1' }] } }),
+    );
+    expect(adOnly.recommendation).toBeNull();
+  });
+
 });

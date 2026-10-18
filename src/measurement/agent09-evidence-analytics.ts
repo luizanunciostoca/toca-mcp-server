@@ -132,6 +132,8 @@ export interface Agent09Analysis {
   readonly organicState: Agent09MetricState;
   /** Per-media only; no cross-media summation of unique reach. */
   readonly organicMetrics: readonly {
+    accountId: string;
+    window: Agent09Window;
     format: 'FEED' | 'STORY' | 'REEL';
     mediaId: string;
     reach: number | null;
@@ -206,6 +208,23 @@ function ratio(numerator: number | null, denominator: number | null): number | n
   return numerator / denominator;
 }
 
+/** Compare declared provider measurements, independent of JSON property order. */
+function sameDeclaredMetaValues(a: Agent09MetaRow, b: Agent09MetaRow): boolean {
+  return (
+    a.level === b.level &&
+    a.id === b.id &&
+    a.campaignId === b.campaignId &&
+    a.dateStart === b.dateStart &&
+    a.dateStop === b.dateStop &&
+    a.deliveryStatus === b.deliveryStatus &&
+    a.deliveryStatusReadbackVerified === b.deliveryStatusReadbackVerified &&
+    a.impressions === b.impressions &&
+    a.clicks === b.clicks &&
+    a.reach === b.reach &&
+    a.spend === b.spend
+  );
+}
+
 function dedupeMeta(
   rows: readonly Agent09MetaRow[],
   window: Agent09Window,
@@ -229,7 +248,7 @@ function dedupeMeta(
       return null;
     const key = `${row.level}:${row.id}:${row.dateStart}:${row.dateStop}`;
     const prior = distinct.get(key);
-    if (prior && JSON.stringify(prior) !== JSON.stringify(row)) return null;
+    if (prior && !sameDeclaredMetaValues(prior, row)) return null;
     distinct.set(key, row);
   }
   const out = [...distinct.values()];
@@ -283,6 +302,11 @@ function fingerprintFor(r: Agent09Recommendation): string {
   return `${(a >>> 0).toString(16)}:${(b >>> 0).toString(16)}`;
 }
 
+/** Provider receipt identity is already scoped by the map key; metadata timestamps do not change measurements. */
+function sameOrganicMeasurement(a: Agent09OrganicEvidence, b: Agent09OrganicEvidence): boolean {
+  return a.reach === b.reach && a.engagement === b.engagement;
+}
+
 /** No external I/O; this is NOT an AG-01 to ChatGPT Tasks bridge. */
 export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Analysis {
   if (!validInstant(input.now)) throw new Error('AGENT09_NOW_MUST_BE_OFFSET_AWARE');
@@ -326,7 +350,12 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
   const mission = verifiedMission(input.mission, nowMs, meta?.accountId ?? null)
     ? input.mission
     : null;
-  const campaignId = rows.length === 1 ? rows[0]!.campaignId : null;
+  // Only one verified campaign-wide row can be joined to campaign-wide CRM totals.
+  const campaignRow =
+    rows.length === 1 && rows[0]?.level === 'campaign' && rows[0]?.id === rows[0]?.campaignId
+      ? rows[0]
+      : null;
+  const campaignId = campaignRow?.id ?? null;
   const crm = input.crm;
   const crmVerified = !!(
     crm &&
@@ -336,6 +365,7 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
     crm.providerReadbackVerified &&
     crm.accountId === meta!.accountId &&
     crm.campaignId === campaignId &&
+    (!mission || (mission.campaignId === campaignId && mission.correlationId === crm.correlationId)) &&
     !!crm.correlationId.trim() &&
     crm.currency === meta!.currency &&
     sameWindow(crm.window, meta!.window) &&
@@ -374,7 +404,7 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
     const key = `${o.accountId}:${o.format}:${o.mediaId}:${o.window.since}:${o.window.until}`;
     if (organicConflicts.has(key)) continue;
     const prior = organicById.get(key);
-    if (prior && JSON.stringify(prior) !== JSON.stringify(o)) {
+    if (prior && !sameOrganicMeasurement(prior, o)) {
       // Conflicting provider observations must not be merged or counted as two posts.
       organicById.delete(key);
       organicConflicts.add(key);
@@ -383,6 +413,8 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
     organicById.set(key, o);
   }
   const organicMetrics = [...organicById.values()].map((o) => ({
+    accountId: o.accountId,
+    window: o.window,
     format: o.format,
     mediaId: o.mediaId,
     reach: o.reach,
@@ -399,7 +431,7 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
   const providerSlots = new Map<string, Set<string>>();
   for (const p of input.publications) {
     if (!p.contentItemId.trim() || !validInstant(p.scheduledAt)) continue;
-    const key = `${p.contentItemId}:${p.scheduledAt}`;
+    const key = `${p.contentItemId}:${Date.parse(p.scheduledAt)}`;
     slotDue.set(key, Date.parse(p.scheduledAt));
     if (verifiedPublication(p)) {
       const mediaKey = `${p.providerAccountId}:${p.providerMediaId}`;
@@ -429,7 +461,7 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
       published.delete(key);
       if ((slotDue.get(key) ?? Number.POSITIVE_INFINITY) < nowMs) pending.add(key);
       for (const p of input.publications) {
-        if (`${p.contentItemId}:${p.scheduledAt}` === key)
+        if (`${p.contentItemId}:${Date.parse(p.scheduledAt)}` === key)
           for (const e of p.evidence) if (e.trim()) pendingEvidence.add(e);
       }
     }
@@ -490,6 +522,8 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
   if (
     mission &&
     metaState === 'PROVEN' &&
+    campaignRow !== null &&
+    campaignRow.id === mission.campaignId &&
     rows.length === 1 &&
     ctr !== null &&
     frequency !== null &&
