@@ -15,6 +15,10 @@ import {
   resolveCapabilityDefinition,
 } from '../governance/capability-resolution.js';
 import { ROUTE_IDS } from '../governance/types.js';
+import {
+  authorizeSpecialistMissionRead,
+  SPECIALIST_MISSION_DEFINITION_ID,
+} from '../orchestrator/specialist-missions.js';
 import type { WorkflowSnapshot, WorkflowStore } from '../workflow/workflow-contracts.js';
 import {
   executeCoreCapability,
@@ -368,7 +372,7 @@ export function registerTocaCoreSurface(
     async ({ workflowId }, context) => {
       const identity = requireIdentity(dependencies, context);
       const store = requireStore(dependencies.workflowStore, 'WORKFLOW_STORE_REQUIRED');
-      const snapshot = await requireTenantWorkflow(store, workflowId, identity);
+      const snapshot = await requireTenantWorkflow(store, workflowId, identity, dependencies);
       return response({ workflow: snapshot });
     },
   );
@@ -386,7 +390,12 @@ export function registerTocaCoreSurface(
       const identity = requireIdentity(dependencies, context);
       requireMutationRole(identity);
       const store = requireStore(dependencies.workflowStore, 'WORKFLOW_STORE_REQUIRED');
-      const authorizedWorkflow = await requireTenantWorkflow(store, input.workflowId, identity);
+      const authorizedWorkflow = await requireTenantWorkflow(
+        store,
+        input.workflowId,
+        identity,
+        dependencies,
+      );
       const now = new Date().toISOString();
       let snapshot: WorkflowSnapshot;
       switch (input.action) {
@@ -790,10 +799,16 @@ async function requireTenantWorkflow(
   store: WorkflowStore,
   workflowId: string,
   identity: ExecutionIdentity,
+  dependencies: TocaCoreSurfaceDependencies,
 ): Promise<WorkflowSnapshot> {
   const snapshot = await store.get(workflowId);
   if (!snapshot) throw new Error('WORKFLOW_NOT_FOUND');
   assertTenant(snapshot.instance.tenantId, identity);
+  if (snapshot.instance.definitionId === SPECIALIST_MISSION_DEFINITION_ID) {
+    authorizeSpecialistMissionRead(snapshot, identity, (capabilityId, payload) => {
+      resolveCoreRuntimeExecution(capabilityId, payload, identity, dependencies);
+    });
+  }
   return snapshot;
 }
 
