@@ -34,12 +34,12 @@ const policy = JSON.parse(
   };
 };
 
-const productionCanaryId = 'MKT-20261015-SUNSET-FEED-0900';
+const productionCanaryId = 'MKT-20261019-SUNSET-FEED-1500';
 const canaryId = 'MKT-20260916-SUNSET-FEED-0900';
 const storyId = 'MKT-20260916-SUNSET-STORY-1100';
 const feedSha = '1c6c961dff3ed10ce0edfa13e2096c2849ade51ff99ade6a6fe14688cd2d1226';
 const storySha = 'c5fb0667575754c53c06e16fdda44db822dc0753f257c88ae8795f88ce564dda';
-const productionCanarySha = '3685d9e86d86311fb98f7469fbb97ff7aa2023f26abe820d5033c3d4bcdcf973';
+const productionCanarySha = '2b92b4c79c9e34040f65133a0b92957a59236a6d560c4e325bdd3743939b3f18';
 
 function feedRow(overrides: Record<string, string> = {}) {
   return {
@@ -126,25 +126,25 @@ function storyRow(overrides: Record<string, string> = {}) {
 function productionCanaryFeedRow(overrides: Record<string, string> = {}) {
   return {
     content_item_id: productionCanaryId,
-    scheduled_at: '2026-10-15T09:00:00-03:00',
+    scheduled_at: '2026-10-19T15:00:00-03:00',
     timezone: 'America/Bahia',
     operation: 'SUNSET',
     channel: 'INSTAGRAM',
     format: 'FEED',
     message:
-      'O horizonte dourado é um convite para esquecer as horas e acompanhar o sol até o mar. 🌅 #TocaDoMorcego #MorroDeSaoPaulo #PorDoSol',
-    cta: 'Salve para lembrar do próximo Sunset.',
+      'O sol encontra o horizonte e o mar guarda cada tom desse encontro. Simples assim, extraordinário assim. 🌅 #TocaDoMorcego #PorDoSol #MorroDeSaoPaulo',
+    cta: 'Planeje seu próximo fim de tarde na Toca.',
     status: 'PRODUCED',
-    creative_id: 'CR-MKT-20261015-SUNSET-FEED-0900-PHOTO4X5-CANDIDATE-V1',
-    copy_id: 'CP-MKT-20261015-SUNSET-FEED-0900-V1',
+    creative_id: 'CR-MKT-20261019-SUNSET-FEED-1500-PHOTO4X5-CANDIDATE-V1',
+    copy_id: 'CP-MKT-20261019-SUNSET-FEED-1500-V1',
     approval_status: 'APPROVED',
     approval_mode: 'EXPLICIT_APPROVAL',
     publication_id: '',
     provider_external_id: '',
     provider_status: '',
-    correlation_id: 'CORR-MKT-20261015-SUNSET-FEED-0900-V1',
-    master_asset_id: 'MM-SUN-0005-FEED4X5-202610-V1',
-    master_drive_file_id: '1L5vGFsdD1pXU-Fyqf3AZrsNEFevd1Cql',
+    correlation_id: 'CORR-MKT-20261019-SUNSET-FEED-1500-V1',
+    master_asset_id: 'MM-SUN-0002-FEED4X5-202610-JPG-V1',
+    master_drive_file_id: '1ZEAfWGayrkWLLsldsIM_OBFwIstnSAyA',
     master_status: 'MASTER_READY',
     story_creative_id: '',
     story_drive_file_id: '',
@@ -266,10 +266,17 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     expect(workflow).not.toContain('REQUESTED_MODE');
     expect(policy.dailyRollout).toMatchObject({
       canaryContentItemId: productionCanaryId,
-      canaryScheduledAt: '2026-10-15T09:00:00-03:00',
-      rollForwardFromContentItemId: 'MKT-20260917-SUNSET-FEED-0900',
+      canaryScheduledAt: '2026-10-19T15:00:00-03:00',
+      rollForwardFromContentItemId: 'MKT-20261015-SUNSET-FEED-0900',
       rollForwardReason:
-        'EXPIRED_PRIOR_CANARY_NO_VERIFIED_PUBLICATION_FRESH_OWNER_APPROVED_QA_PASSED_OCTOBER',
+        'EXPIRED_CANARY_OUTCOME_UNPROVEN_DISTINCT_FUTURE_OWNER_APPROVED_QA_PASSED_FEED',
+      priorCanaryDisposition: {
+        contentItemId: 'MKT-20261015-SUNSET-FEED-0900',
+        providerOutcome: 'NOT_PROVEN',
+        automaticRetryAuthorized: false,
+        scheduledBackfillAuthorized: false,
+        protectedBindingPreserved: true,
+      },
       promoteToLimitedAfterVerifiedCanary: true,
       generalAutonomy: false,
       limited: { generalAutonomy: false },
@@ -281,9 +288,9 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     });
   });
 
-  it('selects the production next-day 09:00 Feed as the only CANARY candidate', () => {
+  it('selects the production Oct19 15:00 Feed as the only CANARY candidate', () => {
     const result = runScheduler({
-      now: '2026-10-15T08:58:00-03:00',
+      now: '2026-10-19T14:58:00-03:00',
       rows: [productionCanaryFeedRow()],
       useProductionPolicy: true,
     });
@@ -294,7 +301,7 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
       canaryVerified: false,
       candidate: {
         contentItemId: productionCanaryId,
-        scheduledAt: '2026-10-15T09:00:00-03:00',
+        scheduledAt: '2026-10-19T15:00:00-03:00',
         waitSeconds: 120,
         format: 'FEED',
         expectedAssetSha256: productionCanarySha,
@@ -302,11 +309,51 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     });
   });
 
-  it('builds the production next-day 09:00 Feed command in CANARY with exact approved binding', () => {
+  it('does not turn the future canary binding into an immediate publication command', () => {
+    const result = runScheduler({
+      mode: 'build-command',
+      now: '2026-10-18T20:00:00-03:00',
+      rows: [productionCanaryFeedRow()],
+      useProductionPolicy: true,
+      extraEnv: {
+        MARKETING_AUTOPILOT_CONTENT_ITEM_ID: productionCanaryId,
+        MARKETING_AUTOPILOT_TARGET_CODE_SHA: '3'.repeat(40),
+      },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('AUTOPILOT_PUBLICATION_NOT_DUE');
+  });
+
+  it('rejects a forced retry of the expired prior canary after the distinct future roll-forward', () => {
+    const priorId = 'MKT-20261015-SUNSET-FEED-0900';
+    const result = runScheduler({
+      mode: 'build-command',
+      now: '2026-10-19T15:00:00-03:00',
+      rows: [
+        productionCanaryFeedRow(),
+        feedRow({
+          content_item_id: priorId,
+          scheduled_at: '2026-10-15T09:00:00-03:00',
+        }),
+      ],
+      useProductionPolicy: true,
+      extraEnv: {
+        MARKETING_AUTOPILOT_CONTENT_ITEM_ID: priorId,
+        MARKETING_AUTOPILOT_TARGET_CODE_SHA: '3'.repeat(40),
+      },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('AUTOPILOT_CONTENT_ITEM_NOT_ROLLOUT_AUTHORIZED');
+    expect(policy.bindings?.[priorId]?.outputSha256).toBe(
+      '3685d9e86d86311fb98f7469fbb97ff7aa2023f26abe820d5033c3d4bcdcf973',
+    );
+  });
+
+  it('builds the production Oct19 15:00 Feed command in CANARY with exact approved binding', () => {
     const targetCodeSha = '3'.repeat(40);
     const result = runScheduler({
       mode: 'build-command',
-      now: '2026-10-15T09:00:00-03:00',
+      now: '2026-10-19T15:00:00-03:00',
       rows: [productionCanaryFeedRow()],
       useProductionPolicy: true,
       extraEnv: {
@@ -322,11 +369,11 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
         action: 'PUBLISH_NOW',
         contentItemId: productionCanaryId,
         format: 'FEED_IMAGE',
-        assetId: 'MM-SUN-0005-FEED4X5-202610-V1',
-        driveFileId: '1L5vGFsdD1pXU-Fyqf3AZrsNEFevd1Cql',
+        assetId: 'MM-SUN-0002-FEED4X5-202610-JPG-V1',
+        driveFileId: '1ZEAfWGayrkWLLsldsIM_OBFwIstnSAyA',
         expectedAssetSha256: productionCanarySha,
         caption:
-          'O horizonte dourado é um convite para esquecer as horas e acompanhar o sol até o mar. 🌅 #TocaDoMorcego #MorroDeSaoPaulo #PorDoSol\n\nSalve para lembrar do próximo Sunset.',
+          'O sol encontra o horizonte e o mar guarda cada tom desse encontro. Simples assim, extraordinário assim. 🌅 #TocaDoMorcego #PorDoSol #MorroDeSaoPaulo\n\nPlaneje seu próximo fim de tarde na Toca.',
         targetCodeSha,
         creativeTruthBinding: {
           qualityGateStatus: 'PASSED',
@@ -334,8 +381,8 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
         },
         schedulerBinding: {
           rolloutPhase: 'CANARY',
-          notBefore: '2026-10-15T09:00:00-03:00',
-          expiresAt: '2026-10-15T09:30:00-03:00',
+          notBefore: '2026-10-19T15:00:00-03:00',
+          expiresAt: '2026-10-19T15:30:00-03:00',
         },
       },
     });
@@ -375,7 +422,7 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     (_kind, rowChange, expectedError) => {
       const attempt = runScheduler({
         mode: 'build-command',
-        now: '2026-10-15T09:00:00-03:00',
+        now: '2026-10-19T15:00:00-03:00',
         rows: [productionCanaryFeedRow(rowChange)],
         useProductionPolicy: true,
         extraEnv: {
@@ -395,7 +442,7 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     };
     const built = runScheduler({
       mode: 'build-command',
-      now: '2026-10-15T09:00:00-03:00',
+      now: '2026-10-19T15:00:00-03:00',
       rows: [productionCanaryFeedRow()],
       useProductionPolicy: true,
       extraEnv: env,
@@ -412,7 +459,7 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
 
     const verified = runScheduler({
       mode: 'verify-command',
-      now: '2026-10-15T09:00:00-03:00',
+      now: '2026-10-19T15:00:00-03:00',
       rows: [productionCanaryFeedRow()],
       useProductionPolicy: true,
       extraEnv: { ...env, MARKETING_AUTOPILOT_COMMAND_PATH: path },
@@ -503,12 +550,12 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
 
   it('reports an expired unverified canary without promoting future approved content', () => {
     const result = runScheduler({
-      now: '2026-10-16T08:15:00-03:00',
+      now: '2026-10-20T08:15:00-03:00',
       rows: [
         productionCanaryFeedRow(),
         feedRow({
-          content_item_id: 'MKT-20261016-SUNSET-FEED-1500',
-          scheduled_at: '2026-10-16T15:00:00-03:00',
+          content_item_id: 'MKT-20261020-SUNSET-FEED-1500',
+          scheduled_at: '2026-10-20T15:00:00-03:00',
         }),
       ],
       useProductionPolicy: true,
