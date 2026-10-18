@@ -26,8 +26,8 @@ describe('Marketing Publish Now hardening contract', () => {
   it('pushes candidate images, resolves registry digests, and deploys immutable references', () => {
     expect(script).toContain('retry_command 3 5 docker push "$app_image_tag"');
     expect(script).toContain('retry_command 3 5 docker push "$prep_image_tag"');
-    expect(script).toContain('gcloud artifacts docker images describe "$app_image_tag"');
-    expect(script).toContain('gcloud artifacts docker images describe "$prep_image_tag"');
+    expect(script).toContain('bash scripts/resolve-artifact-registry-digest.sh "$app_image_tag"');
+    expect(script).toContain('bash scripts/resolve-artifact-registry-digest.sh "$prep_image_tag"');
     expect(script).toContain('APP_IMAGE="${app_image_tag%:*}@${APP_IMAGE_DIGEST}"');
     expect(script).toContain('PREP_IMAGE="${prep_image_tag%:*}@${PREP_IMAGE_DIGEST}"');
     expect(script).toContain('[[ "$APP_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]');
