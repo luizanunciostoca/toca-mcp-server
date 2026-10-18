@@ -17,7 +17,8 @@ read_digest() {
     echo 'REGISTRY_MANIFEST_READ_FAILED' >&2
     return 1
   fi
-  if ! digest="$(jq -er '
+  if ! digest="$(jq -ers '
+    if length == 1 then .[0] else error("single descriptor required") end |
     select(.schemaVersion == 2) |
     select(.mediaType | IN(
       "application/vnd.docker.distribution.manifest.v2+json",
@@ -25,12 +26,15 @@ read_digest() {
       "application/vnd.oci.image.manifest.v1+json",
       "application/vnd.oci.image.index.v1+json"
     )) |
-    .digest | select(type == "string" and test("^sha256:[a-f0-9]{64}$"))
+    .digest | select(type == "string" and length == 71 and test("^sha256:[a-f0-9]{64}$"))
   ' <<< "$manifest" 2>/dev/null)"; then
     echo 'REGISTRY_MANIFEST_DIGEST_INVALID' >&2
     return 1
   fi
-  [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || return 1
+  if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+    echo 'REGISTRY_MANIFEST_DIGEST_INVALID' >&2
+    return 1
+  fi
   printf '%s\n' "$digest"
 }
 

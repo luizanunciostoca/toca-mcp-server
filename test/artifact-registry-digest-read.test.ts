@@ -94,12 +94,16 @@ describe('registry-only immutable digest resolution', () => {
       '{}',
       '{broken',
       manifest('latest'),
+      manifest(digest + '\n'),
+      manifest() + '\n{}',
+      manifest() + '\n' + manifest(),
       JSON.stringify({ schemaVersion: 2, config: { digest } }),
     ]) {
       const result = run({ tag });
       expect(result.status).not.toBe(0);
       expect(result.calls).toHaveLength(1);
       expect(result.stdout).toBe('');
+      expect(result.stderr).toBe('REGISTRY_MANIFEST_DIGEST_INVALID\n');
     }
   });
 
