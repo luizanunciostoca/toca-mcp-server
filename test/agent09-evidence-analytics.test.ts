@@ -399,7 +399,12 @@ describe('TOCA OS / AGENTE 09 — canonical read-only metrics', () => {
       evidence: ['meta:receipt:one'],
     };
     const r = analyzeAgent09Evidence(
-      sample({ organic: [obs, { ...obs, observedAt: '2026-10-14T20:59:00-03:00', evidence: ['meta:receipt:two'] }] }),
+      sample({
+        organic: [
+          obs,
+          { ...obs, observedAt: '2026-10-14T20:59:00-03:00', evidence: ['meta:receipt:two'] },
+        ],
+      }),
     );
     expect(r.organicState).toBe('PROVEN');
     expect(r.organicMetrics).toHaveLength(1);
@@ -430,10 +435,7 @@ describe('TOCA OS / AGENTE 09 — canonical read-only metrics', () => {
       sample({ organic: [obs, { ...obs, window: otherWindow, reach: 40 }] }),
     );
     expect(r.organicMetrics).toHaveLength(2);
-    expect(r.organicMetrics.map((item) => item.window.since)).toEqual([
-      '2026-10-14',
-      '2026-10-13',
-    ]);
+    expect(r.organicMetrics.map((item) => item.window.since)).toEqual(['2026-10-14', '2026-10-13']);
     expect(r.organicMetrics.every((item) => item.accountId === 'ig-account')).toBe(true);
   });
 
@@ -462,7 +464,9 @@ describe('TOCA OS / AGENTE 09 — canonical read-only metrics', () => {
       providerReadbackVerified: false,
     };
     const pending = analyzeAgent09Evidence(
-      sample({ publications: [unresolved, { ...unresolved, scheduledAt: sameInstant.scheduledAt }] }),
+      sample({
+        publications: [unresolved, { ...unresolved, scheduledAt: sameInstant.scheduledAt }],
+      }),
     );
     expect(pending.publicationConfirmed).toBe(0);
     expect(pending.publicationUnreconciled).toBe(1);
@@ -481,5 +485,4 @@ describe('TOCA OS / AGENTE 09 — canonical read-only metrics', () => {
     );
     expect(adOnly.recommendation).toBeNull();
   });
-
 });

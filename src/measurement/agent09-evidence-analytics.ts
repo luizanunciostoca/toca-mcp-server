@@ -365,7 +365,8 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
     crm.providerReadbackVerified &&
     crm.accountId === meta!.accountId &&
     crm.campaignId === campaignId &&
-    (!mission || (mission.campaignId === campaignId && mission.correlationId === crm.correlationId)) &&
+    (!mission ||
+      (mission.campaignId === campaignId && mission.correlationId === crm.correlationId)) &&
     !!crm.correlationId.trim() &&
     crm.currency === meta!.currency &&
     sameWindow(crm.window, meta!.window) &&
