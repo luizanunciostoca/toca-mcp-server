@@ -106,6 +106,80 @@ describe('TOCA OS / AGENTE 09 — canonical read-only metrics', () => {
       ).metaState,
     ).toBe('METRICS_NOT_PROVEN');
   });
+
+  it('does not certify Meta rows containing no measured values, including mixed evidence sets', () => {
+    const emptyRow = {
+      ...meta.rows[0]!,
+      impressions: null,
+      clicks: null,
+      reach: null,
+      spend: null,
+    };
+    for (const rows of [
+      [emptyRow],
+      [meta.rows[0]!, { ...emptyRow, id: 'cmp2', campaignId: 'cmp2' }],
+    ]) {
+      const result = analyzeAgent09Evidence(sample({ meta: { ...meta, rows } }));
+      expect(result).toMatchObject({
+        metaState: 'METRICS_NOT_PROVEN',
+        metaReason: 'META_ROWS_MISSING_MEASUREMENTS',
+        sampleRows: 0,
+        spend: null,
+        ctr: null,
+        frequency: null,
+        cpl: null,
+        revenue: null,
+        roas: null,
+      });
+      expect(result.recommendation?.code).toBe('META_IDENTITY_OR_EVIDENCE_GAP');
+    }
+  });
+
+  it('preserves observed Meta zeros and partial measurements without inventing missing metrics', () => {
+    for (const spend of [0, 25]) {
+      const row = { ...meta.rows[0]!, impressions: null, clicks: null, reach: null, spend };
+      const result = analyzeAgent09Evidence(sample({ meta: { ...meta, rows: [row] }, crm: null }));
+      expect(result).toMatchObject({
+        metaState: 'PROVEN',
+        sampleRows: 1,
+        spend,
+        ctr: null,
+        frequency: null,
+        cpl: null,
+        revenue: null,
+        roas: null,
+      });
+    }
+  });
+
+  it('requires at least one measured organic value while preserving zero and partial observations', () => {
+    const observation = {
+      source: 'TOCA_CORE_INSTAGRAM' as const,
+      format: 'FEED' as const,
+      accountId: '123',
+      mediaId: 'organic-1',
+      window,
+      observedAt: meta.observedAt,
+      providerReadbackVerified: true,
+      reach: null,
+      engagement: null,
+      evidence: ['core:instagram:readback-1'],
+    };
+    const missing = analyzeAgent09Evidence(sample({ organic: [observation] }));
+    expect(missing.organicState).toBe('METRICS_NOT_PROVEN');
+    expect(missing.organicMetrics).toEqual([]);
+    for (const values of [
+      { reach: 0, engagement: null },
+      { reach: null, engagement: 0 },
+      { reach: 20, engagement: null },
+    ]) {
+      const partial = analyzeAgent09Evidence(sample({ organic: [{ ...observation, ...values }] }));
+      expect(partial.organicState).toBe('PROVEN');
+      expect(partial.organicMetrics).toEqual([
+        expect.objectContaining({ ...values, engagementRate: null }),
+      ]);
+    }
+  });
   it('does not aggregate cross-entity reach into frequency and does not infer sales', () => {
     const r = analyzeAgent09Evidence(
       sample({
