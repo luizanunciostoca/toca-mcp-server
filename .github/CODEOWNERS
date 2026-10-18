@@ -1,17 +1,17 @@
 # TOCA OS repository ownership
-# Keep the default owner explicit so protected-branch review rules can require
-# code-owner approval without creating route/domain-specific ACL drift.
-* @luizanunciostoca @luizidebook
+# Explicit owner mapping, without a mandatory named external reviewer.
+# Independent technical verification and GitHub required checks remain unchanged.
+* @luizanunciostoca
 
 # Governance / execution boundaries
-/.github/ @luizanunciostoca @luizidebook
-/src/core/ @luizanunciostoca @luizidebook
-/src/governance/ @luizanunciostoca @luizidebook
-/src/mcp/ @luizanunciostoca @luizidebook
-/migrations/ @luizanunciostoca @luizidebook
-/scripts/ @luizanunciostoca @luizidebook
-/control/ @luizanunciostoca @luizidebook
+/.github/ @luizanunciostoca
+/src/core/ @luizanunciostoca
+/src/governance/ @luizanunciostoca
+/src/mcp/ @luizanunciostoca
+/migrations/ @luizanunciostoca
+/scripts/ @luizanunciostoca
+/control/ @luizanunciostoca
 
 # Supply-chain manifests
-/package.json @luizanunciostoca @luizidebook
-/pnpm-lock.yaml @luizanunciostoca @luizidebook
+/package.json @luizanunciostoca
+/pnpm-lock.yaml @luizanunciostoca
