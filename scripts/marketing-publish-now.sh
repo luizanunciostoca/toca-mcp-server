@@ -182,9 +182,7 @@ build_images() {
 
   docker build -t "$app_image_tag" .
   retry_command 3 5 docker push "$app_image_tag"
-  APP_IMAGE_DIGEST="$(gcloud artifacts docker images describe "$app_image_tag" \
-    --project "$PROJECT_ID" \
-    --format='value(image_summary.digest)')"
+  APP_IMAGE_DIGEST="$(bash scripts/resolve-artifact-registry-digest.sh "$app_image_tag")"
   [[ "$APP_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
   APP_IMAGE="${app_image_tag%:*}@${APP_IMAGE_DIGEST}"
 
@@ -202,9 +200,7 @@ DOCKERFILE
     -f /tmp/publish-now-prepare.Dockerfile \
     -t "$prep_image_tag" .
   retry_command 3 5 docker push "$prep_image_tag"
-  PREP_IMAGE_DIGEST="$(gcloud artifacts docker images describe "$prep_image_tag" \
-    --project "$PROJECT_ID" \
-    --format='value(image_summary.digest)')"
+  PREP_IMAGE_DIGEST="$(bash scripts/resolve-artifact-registry-digest.sh "$prep_image_tag")"
   [[ "$PREP_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
   PREP_IMAGE="${prep_image_tag%:*}@${PREP_IMAGE_DIGEST}"
 

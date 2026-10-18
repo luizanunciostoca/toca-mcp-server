@@ -166,10 +166,10 @@ jobs:
           IMAGE_TAG="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/ag01:grounded-${GITHUB_SHA}"
           docker build --pull --file Dockerfile.orchestrator --tag "$IMAGE_TAG" .
           docker push "$IMAGE_TAG"
-          DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" --project "$PROJECT_ID" --format='value(image_summary.digest)')"
+          DIGEST="$(bash scripts/resolve-artifact-registry-digest.sh "$IMAGE_TAG")"
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/ag01@$DIGEST"
-          test "$(gcloud artifacts docker images describe "$IMAGE" --project "$PROJECT_ID" --format='value(image_summary.digest)')" = "$DIGEST"
+          test "$(bash scripts/resolve-artifact-registry-digest.sh "$IMAGE")" = "$DIGEST"
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
