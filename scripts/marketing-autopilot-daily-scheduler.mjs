@@ -385,7 +385,13 @@ function validateItem(item) {
 }
 
 function protectedCanaryBinding(contentItemId) {
-  if (contentItemId !== text(policy.dailyRollout.canaryContentItemId)) return null;
+  // Historical canaries keep their exact bindings after the rollout advances.
+  if (
+    contentItemId !== text(policy.dailyRollout.canaryContentItemId) &&
+    !Object.hasOwn(policy.bindings ?? {}, contentItemId)
+  ) {
+    return null;
+  }
   const binding = policy.bindings?.[contentItemId];
   assert(
     binding && typeof binding === 'object' && !Array.isArray(binding),

@@ -150,7 +150,7 @@ function productionCanaryFeedRow(overrides: Record<string, string> = {}) {
     story_drive_file_id: '',
     story_status: '',
     registry_revision: '',
-    scheduling_status: '',
+    scheduling_status: 'CANARY_READY',
     scheduling_policy: '',
     creative_standard_id: 'SUNSET_FEED_V1',
     creative_standard_version: '1.0',
@@ -347,6 +347,63 @@ describe('Marketing Autopilot daily scheduler restoration', () => {
     expect(policy.bindings?.[priorId]?.outputSha256).toBe(
       '3685d9e86d86311fb98f7469fbb97ff7aa2023f26abe820d5033c3d4bcdcf973',
     );
+  });
+
+  it('keeps the historical canary schedule protected after verified promotion to LIMITED', () => {
+    const priorId = 'MKT-20261015-SUNSET-FEED-0900';
+    const rows = [
+      productionCanaryFeedRow({
+        status: 'PUBLISHED',
+        publication_id: '17900000000000001',
+        provider_external_id: '17900000000000001',
+        provider_status: 'PUBLISHED',
+        scheduling_status: 'PUBLISHED_VERIFIED',
+        scheduling_policy: 'TOCA_MARKETING_AUTOPILOT_GCP_SCHEDULER_V1',
+      }),
+      productionCanaryFeedRow({
+        content_item_id: priorId,
+        scheduled_at: '2026-10-20T15:00:00-03:00',
+        message:
+          'O horizonte dourado é um convite para esquecer as horas e acompanhar o sol até o mar. 🌅 #TocaDoMorcego #MorroDeSaoPaulo #PorDoSol',
+        cta: 'Salve para lembrar do próximo Sunset.',
+        creative_id: 'CR-MKT-20261015-SUNSET-FEED-0900-PHOTO4X5-CANDIDATE-V1',
+        copy_id: 'CP-MKT-20261015-SUNSET-FEED-0900-V1',
+        correlation_id: 'CORR-MKT-20261015-SUNSET-FEED-0900-V1',
+        master_asset_id: 'MM-SUN-0005-FEED4X5-202610-V1',
+        master_drive_file_id: '1L5vGFsdD1pXU-Fyqf3AZrsNEFevd1Cql',
+        output_sha256: '3685d9e86d86311fb98f7469fbb97ff7aa2023f26abe820d5033c3d4bcdcf973',
+        scheduling_policy: 'TOCA_MARKETING_AUTOPILOT_GCP_SCHEDULER_V1',
+      }),
+    ];
+    const scan = runScheduler({
+      now: '2026-10-20T15:00:00-03:00',
+      rows,
+      useProductionPolicy: true,
+    });
+    expect(scan.status, scan.stderr).toBe(0);
+    const decision = parseOutput(scan.stdout) as { rejected?: unknown[] };
+    expect(decision).toMatchObject({
+      status: 'NO_CANDIDATE',
+      rolloutPhase: 'LIMITED',
+      canaryVerified: true,
+    });
+    expect(decision.rejected).toContainEqual({
+      contentItemId: priorId,
+      reason: 'AUTOPILOT_CANARY_PROTECTED_SCHEDULE_MISMATCH',
+    });
+
+    const forced = runScheduler({
+      mode: 'build-command',
+      now: '2026-10-20T15:00:00-03:00',
+      rows,
+      useProductionPolicy: true,
+      extraEnv: {
+        MARKETING_AUTOPILOT_CONTENT_ITEM_ID: priorId,
+        MARKETING_AUTOPILOT_TARGET_CODE_SHA: '3'.repeat(40),
+      },
+    });
+    expect(forced.status).not.toBe(0);
+    expect(forced.stderr).toContain('AUTOPILOT_CANARY_PROTECTED_SCHEDULE_MISMATCH');
   });
 
   it('builds the production Oct19 15:00 Feed command in CANARY with exact approved binding', () => {
