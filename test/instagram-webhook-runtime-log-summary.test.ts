@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { evaluateReadiness } from '../src/health/readiness.js';
 
 const script = 'scripts/instagram-webhook-runtime-log-summary.mjs';
 const revision = 'toca-webhook-next-production-w9434008a1';
@@ -79,6 +80,85 @@ describe('bounded webhook runtime log diagnostics', () => {
     }
   });
 
+  it('recognizes the actual readiness failure log without publishing failure details', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const report = await evaluateReadiness([
+        {
+          name: 'schema',
+          check: () =>
+            Promise.reject(
+              new Error('READINESS_SCHEMA_MISSING:private_guests token=PRIVATE-TOKEN'),
+            ),
+        },
+      ]);
+      expect(report.status).toBe('not_ready');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith('TOCA_READINESS_NOT_READY failed_checks=schema');
+      const message: unknown = warn.mock.calls[0]?.[0];
+      const result = run([entry({ textPayload: message })]);
+      expect(result.status).toBe(0);
+      expect(result.output).toMatchObject({
+        classification: 'RUNTIME_ERROR_SIGNALS_OBSERVED',
+        matchedEntries: 1,
+        httpStatusCounts: {},
+        approvedErrorTokens: ['TOCA_READINESS_NOT_READY'],
+        errorSignals: [],
+        rootCause: 'NOT_PROVEN_BY_LOG_CLASSIFICATION',
+        runtimeHealth: 'NOT_PROVEN_BY_LOG_CLASSIFICATION',
+        rawLogPayloadPublished: false,
+      });
+      for (const detail of [
+        'failed_checks=',
+        'READINESS_SCHEMA_MISSING',
+        'private_guests',
+        'PRIVATE-TOKEN',
+      ]) {
+        expect(result.stdout + result.stderr).not.toContain(detail);
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each(['ERROR', 'CRITICAL', 'ALERT', 'EMERGENCY'])(
+    'recognizes explicit %s severity without publishing its private message',
+    (severity) => {
+      const result = run([
+        entry({ severity, textPayload: 'TypeError: PRIVATE-DETAIL token=PRIVATE-TOKEN' }),
+      ]);
+      expect(result.status).toBe(0);
+      expect(result.output).toMatchObject({
+        classification: 'RUNTIME_ERROR_SIGNALS_OBSERVED',
+        matchedEntries: 1,
+        httpStatusCounts: {},
+        approvedErrorTokens: [],
+        errorSignals: ['ERROR_SEVERITY'],
+        rootCause: 'NOT_PROVEN_BY_LOG_CLASSIFICATION',
+        runtimeHealth: 'NOT_PROVEN_BY_LOG_CLASSIFICATION',
+        rawLogPayloadPublished: false,
+      });
+      for (const detail of ['TypeError', 'PRIVATE-DETAIL', 'PRIVATE-TOKEN']) {
+        expect(result.stdout + result.stderr).not.toContain(detail);
+      }
+    },
+  );
+
+  it('does not treat lower or malformed severities as an explicit error signal', () => {
+    const result = run(
+      ['DEFAULT', 'DEBUG', 'INFO', 'NOTICE', 'WARNING', 'ERROR PRIVATE-TOKEN', null, 500].map(
+        (severity) => entry({ severity }),
+      ),
+    );
+    expect(result.status).toBe(0);
+    expect(result.output).toMatchObject({
+      classification: 'NO_ERROR_SIGNAL_IN_BOUNDED_SAMPLE',
+      approvedErrorTokens: [],
+      errorSignals: [],
+    });
+    expect(result.stdout + result.stderr).not.toContain('PRIVATE-TOKEN');
+  });
+
   it('excludes stale, future and foreign service, project, region and revision evidence', () => {
     const good = entry();
     const foreign = Object.entries(good.resource.labels).map(([key]) => ({
@@ -86,18 +166,25 @@ describe('bounded webhook runtime log diagnostics', () => {
       resource: { ...good.resource, labels: { ...good.resource.labels, [key]: 'other' } },
       textPayload: 'ERR_MODULE_NOT_FOUND',
     }));
-    const result = run([
-      ...foreign,
-      entry({ timestamp: '2026-10-17T21:00:00Z' }),
-      entry({ timestamp: '2026-10-19T21:00:00Z' }),
-      entry({ timestamp: 'invalid' }),
-      entry({ resource: { type: 'cloud_run_job' } }),
-    ]);
+    const result = run(
+      [
+        ...foreign,
+        entry({ timestamp: '2026-10-17T21:00:00Z' }),
+        entry({ timestamp: '2026-10-19T21:00:00Z' }),
+        entry({ timestamp: 'invalid' }),
+        entry({ resource: { type: 'cloud_run_job' } }),
+      ].map((log) => ({
+        ...log,
+        severity: 'ERROR',
+        textPayload: 'TOCA_READINESS_NOT_READY ERR_MODULE_NOT_FOUND',
+      })),
+    );
     expect(result.output).toMatchObject({
       classification: 'INSUFFICIENT_CURRENT_LOG_EVIDENCE',
       matchedEntries: 0,
       excludedEntries: 8,
       approvedErrorTokens: [],
+      errorSignals: [],
     });
   });
 

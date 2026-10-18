@@ -332,6 +332,12 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
     else {
       const normalized = dedupeMeta(meta.rows, meta.window);
       if (normalized === null) metaReason = 'META_ROWS_CONFLICT_SCOPE_OR_FORMAT';
+      else if (
+        normalized.some((row) =>
+          [row.impressions, row.clicks, row.reach, row.spend].every((value) => value === null),
+        )
+      )
+        metaReason = 'META_ROWS_MISSING_MEASUREMENTS';
       else {
         rows = normalized;
         metaReason = null;
@@ -397,7 +403,8 @@ export function analyzeAgent09Evidence(input: Agent09AnalysisInput): Agent09Anal
       fresh(o.observedAt, nowMs) &&
       hasEvidence(o.evidence) &&
       nonnegativeInteger(o.reach) &&
-      nonnegativeInteger(o.engagement),
+      nonnegativeInteger(o.engagement) &&
+      (o.reach !== null || o.engagement !== null),
   );
   const organicById = new Map<string, Agent09OrganicEvidence>();
   const organicConflicts = new Set<string>();

@@ -14,6 +14,7 @@ const approvedTokens = [
   'READINESS_DATABASE_POOL_UNAVAILABLE',
   'READINESS_MIGRATIONS_PENDING',
   'READINESS_SCHEMA_MISSING',
+  'TOCA_READINESS_NOT_READY',
   'EFFECTIVE_AUTONOMY_POLICY_NOT_FOUND',
   'CAPABILITY_VALIDATION_EVIDENCE_MANIFEST_NOT_FOUND',
   'CAPABILITY_EVIDENCE_MANIFEST_EXACT_HEAD_MISMATCH',
@@ -22,6 +23,7 @@ const approvedTokens = [
   'EADDRINUSE',
   'EACCES',
 ];
+const errorSeverities = new Set(['ERROR', 'CRITICAL', 'ALERT', 'EMERGENCY']);
 const signalPatterns = [
   ['PERSISTENCE_SCHEMA', /relation .* does not exist|undefined table|migration.*missing/i],
   [
@@ -97,6 +99,7 @@ export function summarizeWebhookRuntimeLogs(entries, { revision, since, until })
     )
       continue;
     matchedEntries++;
+    if (errorSeverities.has(entry.severity)) signals.add('ERROR_SEVERITY');
     const status = entry?.httpRequest?.status;
     if (Number.isInteger(status) && status >= 100 && status <= 599) {
       httpStatusCounts[status] = (httpStatusCounts[status] ?? 0) + 1;
