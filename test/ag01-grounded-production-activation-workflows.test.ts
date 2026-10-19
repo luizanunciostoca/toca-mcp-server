@@ -1,6 +1,15 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import {
+  chmodSync,
+  closeSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
@@ -846,21 +855,108 @@ const archiveGuard = guardModule as {
   ) => Promise<Buffer>;
 };
 function zipFixture(entries: Array<[string, string]>) {
-  const result = spawnSync('python3', [
-    '-c',
+  const result = spawnSync(
+    'python3',
     [
-      'import io, json, sys, zipfile',
-      'output = io.BytesIO()',
-      'with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:',
-      '    for name, value in json.loads(sys.argv[1]): archive.writestr(name, value)',
-      'sys.stdout.buffer.write(output.getvalue())',
-    ].join('\n'),
-    JSON.stringify(entries),
-  ]);
+      '-c',
+      [
+        'import io, json, sys, zipfile',
+        'output = io.BytesIO()',
+        'with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:',
+        '    for name, value in json.loads(sys.argv[1]): archive.writestr(name, value)',
+        'sys.stdout.buffer.write(output.getvalue())',
+      ].join('\n'),
+      JSON.stringify(entries),
+    ],
+    {
+      timeout: 5000,
+      killSignal: 'SIGKILL',
+      maxBuffer: 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
   expect(result.status).toBe(0);
   return result.stdout;
 }
 describe('real ZIP parser and bounded artifact download', () => {
+  it.each(['listing-overflow', 'body-overflow', 'stalled'] as const)(
+    'rejects a SIGTERM-resistant unzip without hanging the runner: %s',
+    (mode) => {
+      const folder = mkdtempSync(join(tmpdir(), 'ag01-unzip-boundary-'));
+      try {
+        const executable = join(folder, 'unzip');
+        writeFileSync(
+          executable,
+          [
+            '#!/usr/bin/env node',
+            "process.on('SIGTERM', () => {});",
+            'const mode = process.env.AG01_UNZIP_TEST_MODE;',
+            "if (mode === 'body-overflow' && process.argv.includes('-Z1')) {",
+            "  process.stdout.write('rollback-context.json\\n');",
+            '} else {',
+            "  if (mode !== 'stalled') process.stdout.write('x'.repeat(65536));",
+            '  setInterval(() => {}, 1000);',
+            '}',
+          ].join('\n') + '\n',
+        );
+        chmodSync(executable, 0o700);
+        const script = [
+          'const guard = await import(process.argv[1]);',
+          'try {',
+          "  guard.extractContextArchive(Buffer.from('fixture-only'));",
+          "  process.stdout.write('UNEXPECTED_ACCEPTANCE');",
+          '  process.exitCode = 1;',
+          '} catch (error) {',
+          "  process.stdout.write(error.code === 'INVALID_ARTIFACT_ARCHIVE' ? error.code : 'UNEXPECTED_ERROR');",
+          "  if (error.code !== 'INVALID_ARTIFACT_ARCHIVE') process.exitCode = 2;",
+          '}',
+        ].join('\n');
+        // GNU timeout kills this isolated process group on regression, including
+        // a child that ignores SIGTERM. Vitest's own timer cannot interrupt a
+        // synchronous execFileSync blocked inside the tested module.
+        const stdoutPath = join(folder, 'stdout');
+        const stderrPath = join(folder, 'stderr');
+        const stdout = openSync(stdoutPath, 'w');
+        const stderr = openSync(stderrPath, 'w');
+        let result;
+        try {
+          result = spawnSync(
+            'timeout',
+            [
+              '--signal=KILL',
+              '8s',
+              process.execPath,
+              '--input-type=module',
+              '-e',
+              script,
+              pathToFileURL(resolve('scripts/ag01-activation-rollback-guard.mjs')).href,
+            ],
+            {
+              encoding: 'utf8',
+              timeout: 9000,
+              killSignal: 'SIGKILL',
+              stdio: ['ignore', stdout, stderr],
+              env: {
+                ...process.env,
+                PATH: folder + delimiter + (process.env.PATH ?? ''),
+                AG01_UNZIP_TEST_MODE: mode,
+              },
+            },
+          );
+        } finally {
+          closeSync(stdout);
+          closeSync(stderr);
+        }
+        expect(result.error).toBeUndefined();
+        expect(result.status, readFileSync(stderrPath, 'utf8')).toBe(0);
+        expect(readFileSync(stdoutPath, 'utf8')).toBe('INVALID_ARTIFACT_ARCHIVE');
+      } finally {
+        rmSync(folder, { recursive: true, force: true });
+      }
+    },
+    12000,
+  );
+
   it('reads a single JSON member without executing or extracting it', () => {
     const payload = { proof: 'example-only', text: '$(touch /tmp/untrusted)' };
     const bytes = zipFixture([['rollback-context.json', JSON.stringify(payload)]]);

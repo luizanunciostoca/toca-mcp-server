@@ -1150,6 +1150,8 @@ export function extractContextArchive(bytes) {
     const names = execFileSync('unzip', ['-Z1', archive], {
       encoding: 'utf8',
       maxBuffer: 8192,
+      timeout: 5000,
+      killSignal: 'SIGKILL',
       stdio: ['ignore', 'pipe', 'pipe'],
     })
       .trim()
@@ -1161,6 +1163,8 @@ export function extractContextArchive(bytes) {
     const json = execFileSync('unzip', ['-p', archive, 'rollback-context.json'], {
       encoding: 'utf8',
       maxBuffer: 32768,
+      timeout: 5000,
+      killSignal: 'SIGKILL',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     return JSON.parse(json);
