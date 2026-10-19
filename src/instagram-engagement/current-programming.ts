@@ -1,5 +1,6 @@
 import type { EngagementIntent } from '../policy/engagement-policy.js';
 import type { InstagramEngagementKnowledgeMatch } from './knowledge.js';
+import { INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE } from './knowledge-snapshot-current.js';
 import { TOCA_OFFICIAL_INFORMATION_URL } from './ticket-information.js';
 
 const OPERATIONS_SOURCE =
@@ -46,13 +47,19 @@ export function resolveCurrentProgrammingKnowledge(
   );
   if (!matchesProgramming && !matchesExactAlias) return null;
 
+  const sunsetCalendar = INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.find(
+    (row) =>
+      row.faqId === 'FAQ-019' && row.status === 'APROVADO' && row.autonomy === 'AUTO_REPLY_ALLOWED',
+  );
+  if (!sunsetCalendar) return null;
+
   const now = options.now ?? new Date();
   const timeZone = options.timeZone ?? 'America/Bahia';
   const localClock = localClockInTimeZone(now, timeZone);
   const fridayPartyCarryover = localClock.weekday === 'sat' && localClock.hour < 6;
-  const answer = programmingAnswer(localClock.weekday, fridayPartyCarryover);
-  const sources =
-    localClock.weekday === 'sat' ? `${OPERATIONS_SOURCE}; ${SATURDAY_SOURCE}` : OPERATIONS_SOURCE;
+  const answer = programmingAnswer(localClock.weekday, fridayPartyCarryover, sunsetCalendar.answer);
+  const baseSources = `${OPERATIONS_SOURCE}; ${sunsetCalendar.source}`;
+  const sources = localClock.weekday === 'sat' ? `${baseSources}; ${SATURDAY_SOURCE}` : baseSources;
 
   return {
     faqId: `DYNAMIC:PROGRAMMING_TODAY:${localClock.weekday.toUpperCase()}${fridayPartyCarryover ? ':FRIDAY_CARRYOVER' : ''}`,
@@ -65,8 +72,12 @@ export function resolveCurrentProgrammingKnowledge(
   };
 }
 
-function programmingAnswer(weekday: Weekday, fridayPartyCarryover: boolean): string {
-  const parts = ['Hoje tem Sunset na Toca do Morcego a partir das 16:30, no horário da Bahia.'];
+function programmingAnswer(
+  weekday: Weekday,
+  fridayPartyCarryover: boolean,
+  sunsetCalendarAnswer: string,
+): string {
+  const parts = [sunsetCalendarAnswer];
   if (weekday === 'fri') {
     parts.push('Às sextas-feiras, a The Party acontece das 23:59 às 06:00.');
   }

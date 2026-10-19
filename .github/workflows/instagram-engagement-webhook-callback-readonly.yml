@@ -65,12 +65,29 @@ jobs:
             'PROVIDER_CALLS_AUTHORIZED=false'
             'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
           )
-          for marker in "${required[@]}"; do grep -Fxq "$marker" <<< "$BODY"; done
+          for marker in "${required[@]}"; do
+            test "$(grep -c "^${marker%%=*}=" <<< "$BODY")" = 1
+            grep -Fxq "$marker" <<< "$BODY"
+          done
+          INCLUDE_RUNTIME_DIAGNOSTICS=false
+          OPTIONAL_COUNT="$(grep -c '^INCLUDE_SANITIZED_RUNTIME_LOGS=' <<< "$BODY" || true)"
+          if [[ "$OPTIONAL_COUNT" != 0 ]]; then
+            test "$OPTIONAL_COUNT" = 1
+            grep -Eq '^INCLUDE_SANITIZED_RUNTIME_LOGS=(true|false)$' <<< "$BODY"
+            if grep -Fxq 'INCLUDE_SANITIZED_RUNTIME_LOGS=true' <<< "$BODY"; then
+              for marker in 'RUNTIME_LOG_WINDOW=LAST_2_HOURS' 'RUNTIME_LOG_LIMIT=200' 'PUBLIC_HEALTH_PROBES=GET_HEALTH_AND_READY_ONLY' 'IAM_MUTATIONS_AUTHORIZED=false'; do
+                test "$(grep -c "^${marker%%=*}=" <<< "$BODY")" = 1
+                grep -Fxq "$marker" <<< "$BODY"
+              done
+              INCLUDE_RUNTIME_DIAGNOSTICS=true
+            fi
+          fi
           CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
           grep -Fxq 'MAIN_STABILITY=PASS' <<< "$CONTROL_BODY"
           grep -Fxq "EVALUATED_MAIN_SHA=$GITHUB_SHA" <<< "$CONTROL_BODY"
           grep -Fxq 'MERGE_RESERVATION=NONE' <<< "$CONTROL_BODY"
           echo "authorization_issue=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "include_runtime_diagnostics=$INCLUDE_RUNTIME_DIAGNOSTICS" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate diagnostic identity
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
@@ -83,6 +100,8 @@ jobs:
 
       - name: Read authoritative webhook callback posture
         id: readback
+        env:
+          INCLUDE_RUNTIME_DIAGNOSTICS: ${{ steps.auth.outputs.include_runtime_diagnostics }}
         shell: bash
         run: |
           set -euo pipefail
@@ -91,6 +110,15 @@ jobs:
           SERVING_REVISION="$(printf '%s' "$SERVICE_JSON" | jq -r '[.status.traffic[]? | select((.percent // 0) == 100 and (.revisionName // "") != "") | .revisionName] | unique | if length == 1 then .[0] else empty end')"
           test -n "$SERVING_REVISION"
           REVISION_JSON="$(gcloud run revisions describe "$SERVING_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          test "$(jq -r '.metadata.name' <<< "$SERVICE_JSON")" = "$WEBHOOK_SERVICE_NAME"
+          test "$(jq -r '.metadata.name' <<< "$REVISION_JSON")" = "$SERVING_REVISION"
+          jq -e --arg service "$WEBHOOK_SERVICE_NAME" '.metadata.labels["serving.knative.dev/service"] == $service' <<< "$REVISION_JSON" >/dev/null
+          if [[ "$INCLUDE_RUNTIME_DIAGNOSTICS" == true ]]; then
+            SERVICE_STATUS_URL="$(jq -r '.status.url // empty' <<< "$SERVICE_JSON")" node --input-type=module -e '
+              import { validateWebhookServiceUrl } from "./scripts/instagram-webhook-runtime-log-summary.mjs";
+              console.log("status_url=" + validateWebhookServiceUrl(process.env.SERVICE_STATUS_URL));
+            ' >> "$GITHUB_OUTPUT"
+          fi
 
           INGRESS="$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "all"')"
           DEFAULT_URL_DISABLED="$(printf '%s' "$SERVICE_JSON" | jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"')"
@@ -145,6 +173,50 @@ jobs:
             echo "service_role=$SERVICE_ROLE"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Read bounded runtime logs and public health without mutations
+        id: diagnostic
+        if: steps.auth.outputs.include_runtime_diagnostics == 'true'
+        env:
+          SERVING_REVISION: ${{ steps.readback.outputs.serving_revision }}
+          WEBHOOK_URL: ${{ steps.readback.outputs.status_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          WORK_DIR="$(mktemp -d)"
+          trap 'rm -rf "$WORK_DIR"' EXIT
+          [[ "$SERVING_REVISION" =~ ^toca-webhook-next-production-[a-z0-9-]+$ ]]
+          test "${#SERVING_REVISION}" -le 63
+          HEALTH_STATUS="$(curl --silent --connect-timeout 5 --max-time 15 --proto '=https' --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/health")" || HEALTH_STATUS=NETWORK_ERROR
+          READY_STATUS="$(curl --silent --connect-timeout 5 --max-time 20 --proto '=https' --output /dev/null --write-out '%{http_code}' "$WEBHOOK_URL/ready")" || READY_STATUS=NETWORK_ERROR
+          [[ "$HEALTH_STATUS" =~ ^[1-5][0-9]{2}$ ]] || HEALTH_STATUS=NETWORK_ERROR
+          [[ "$READY_STATUS" =~ ^[1-5][0-9]{2}$ ]] || READY_STATUS=NETWORK_ERROR
+          HEALTH_CLASSIFICATION=PUBLIC_HEALTH_OR_READY_NON200
+          if [[ "$HEALTH_STATUS" == 200 && "$READY_STATUS" == 200 ]]; then
+            HEALTH_CLASSIFICATION=PUBLIC_HEALTH_AND_READY_HTTP_200
+          fi
+          UNTIL="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          SINCE="$(date -u -d "$UNTIL -2 hours" +%Y-%m-%dT%H:%M:%SZ)"
+          FILTER="resource.type=\"cloud_run_revision\" AND resource.labels.project_id=\"$GCP_PROJECT_ID\" AND resource.labels.location=\"$GCP_REGION\" AND resource.labels.service_name=\"$WEBHOOK_SERVICE_NAME\" AND resource.labels.revision_name=\"$SERVING_REVISION\" AND timestamp>=\"$SINCE\" AND timestamp<=\"$UNTIL\""
+          LOG_READ_STATUS=READ_FAILED
+          LOG_SUMMARY='{"classification":"LOG_READ_FAILED","rootCause":"NOT_PROVEN","runtimeHealth":"NOT_PROVEN","rawLogPayloadPublished":false}'
+          if gcloud logging read "$FILTER" --project "$GCP_PROJECT_ID" --limit=200 --order=desc --format=json > "$WORK_DIR/logs.json" 2> "$WORK_DIR/read-error.txt"; then
+            LOG_SUMMARY="$(node scripts/instagram-webhook-runtime-log-summary.mjs "$WORK_DIR/logs.json" "$SERVING_REVISION" "$SINCE" "$UNTIL")"
+            LOG_READ_STATUS=READ
+          elif grep -Eqi 'PERMISSION_DENIED|permission denied|does not have.*permission' "$WORK_DIR/read-error.txt"; then
+            LOG_READ_STATUS=ACCESS_DENIED
+          fi
+          {
+            echo "health_http_status=$HEALTH_STATUS"
+            echo "ready_http_status=$READY_STATUS"
+            echo "health_classification=$HEALTH_CLASSIFICATION"
+            echo "log_read_status=$LOG_READ_STATUS"
+            echo "log_window_since=$SINCE"
+            echo "log_window_until=$UNTIL"
+            echo "log_summary=$LOG_SUMMARY"
+          } >> "$GITHUB_OUTPUT"
+          test "$LOG_READ_STATUS" = READ
+
       - name: Publish sanitized callback readback and consume authorization
         if: always() && steps.auth.outcome == 'success'
         env:
@@ -163,12 +235,22 @@ jobs:
           META_WEBHOOK_PERSISTENCE_ENABLED: ${{ steps.readback.outputs.meta_webhook_persistence_enabled }}
           ENGAGEMENT_RUNTIME_ENABLED: ${{ steps.readback.outputs.engagement_runtime_enabled }}
           SERVICE_ROLE: ${{ steps.readback.outputs.service_role }}
+          INCLUDE_RUNTIME_DIAGNOSTICS: ${{ steps.auth.outputs.include_runtime_diagnostics }}
+          DIAGNOSTIC_OUTCOME: ${{ steps.diagnostic.outcome }}
+          HEALTH_HTTP_STATUS: ${{ steps.diagnostic.outputs.health_http_status }}
+          READY_HTTP_STATUS: ${{ steps.diagnostic.outputs.ready_http_status }}
+          HEALTH_CLASSIFICATION: ${{ steps.diagnostic.outputs.health_classification }}
+          LOG_READ_STATUS: ${{ steps.diagnostic.outputs.log_read_status }}
+          LOG_WINDOW_SINCE: ${{ steps.diagnostic.outputs.log_window_since }}
+          LOG_WINDOW_UNTIL: ${{ steps.diagnostic.outputs.log_window_until }}
+          LOG_SUMMARY: ${{ steps.diagnostic.outputs.log_summary }}
         shell: bash
         run: |
           set -euo pipefail
           test -n "${AUTHORIZATION_ISSUE:-}"
           STATUS=FAIL
           if [[ "$READBACK_OUTCOME" == success ]]; then STATUS=PASS; fi
+          if [[ "$INCLUDE_RUNTIME_DIAGNOSTICS" == true && "$DIAGNOSTIC_OUTCOME" != success ]]; then STATUS=FAIL; fi
           ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE}")"
           BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
           BODY="$(sed 's/^AUTHORIZATION_STATE=ACTIVE$/AUTHORIZATION_STATE=CONSUMED_AND_CLOSED/' <<< "$BODY")"
@@ -194,5 +276,20 @@ jobs:
             'DATABASE_MUTATIONS=false' \
             'PROVIDER_CALLS=false' \
             'EXTERNAL_REPLY_WRITES=false'
+          if [[ "$INCLUDE_RUNTIME_DIAGNOSTICS" == true ]]; then
+            printf -v DIAGNOSTIC_REPORT '%s\n' \
+              "PUBLIC_HEALTH_HTTP_STATUS=${HEALTH_HTTP_STATUS:-NOT_OBSERVED}" \
+              "PUBLIC_READY_HTTP_STATUS=${READY_HTTP_STATUS:-NOT_OBSERVED}" \
+              "PUBLIC_HEALTH_CLASSIFICATION=${HEALTH_CLASSIFICATION:-NOT_PROVEN}" \
+              "RUNTIME_LOG_READ_STATUS=${LOG_READ_STATUS:-READ_FAILED}" \
+              "RUNTIME_LOG_WINDOW_SINCE=${LOG_WINDOW_SINCE:-UNKNOWN}" \
+              "RUNTIME_LOG_WINDOW_UNTIL=${LOG_WINDOW_UNTIL:-UNKNOWN}" \
+              "SANITIZED_RUNTIME_LOG_SUMMARY=${LOG_SUMMARY:-NOT_AVAILABLE}" \
+              'RUNTIME_LOG_LIMIT=200' \
+              'RAW_LOG_PAYLOAD_PUBLISHED=false' \
+              'IAM_MUTATIONS=false' \
+              'PROVIDER_END_TO_END=NOT_PROVEN_BY_RUNTIME_DIAGNOSTIC'
+            REPORT+=$'\n'"$DIAGNOSTIC_REPORT"
+          fi
           gh issue comment "$AUTHORIZATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$REPORT" >/dev/null
           test "$STATUS" = PASS
