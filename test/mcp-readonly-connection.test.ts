@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { it as test } from 'vitest';
 // @ts-expect-error The offline diagnostic is intentionally a plain Node ESM script.
 import * as diagnosticModule from '../scripts/check-mcp-readonly-connection.mjs';
@@ -197,7 +200,9 @@ test('infrastructure fallback is not evidence of caller authentication', () => {
 test('offline inventory never promotes source presence to a live connection', () => {
   const report = inspectMcpReadonlyConnection();
   assert.equal(report.status, 'NOT_INTEGRATED');
-  assert.equal(report.observations.httpHandoff, 'KNOWN_NORMALIZATION_WITHOUT_AUTH_INFO');
+  // The optional verified handoff is newer than this deliberately strict offline
+  // inventory. Its presence still requires live authentication evidence.
+  assert.equal(report.observations.httpHandoff, 'UNKNOWN_REQUIRES_REVIEW');
   assert.equal(report.observations.existingOidcVerifier, 'SOURCE_PRESENT_NOT_RUNTIME_PROVEN');
   assert.equal(report.sourceEvidence.length, 6);
   assert.ok(
@@ -209,4 +214,30 @@ test('offline inventory never promotes source presence to a live connection', ()
     inspectMcpReadonlyConnection('/nonexistent-offline-source-fixture').observations.httpHandoff,
     'UNKNOWN_REQUIRES_REVIEW',
   );
+});
+
+test('offline inventory recognizes only the unchanged legacy normalization fixture', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'toca-mcp-offline-inventory-'));
+  const legacyHandoff = `const normalizedRequest: NodeIncomingMessageLike = {
+    method,
+    url: requestUrl,
+    headers: request.headers,
+    [Symbol.asyncIterator]: () => request[Symbol.asyncIterator](),
+  };
+  void handleMcp(normalizedRequest, response)`;
+  try {
+    mkdirSync(path.join(root, 'src'));
+    const httpSource = path.join(root, 'src/http-server.ts');
+    writeFileSync(httpSource, legacyHandoff);
+    const legacy = inspectMcpReadonlyConnection(root);
+    assert.equal(legacy.status, 'NOT_INTEGRATED');
+    assert.equal(legacy.observations.httpHandoff, 'KNOWN_NORMALIZATION_WITHOUT_AUTH_INFO');
+
+    writeFileSync(httpSource, legacyHandoff.replace('method,', 'method, auth: request.auth,'));
+    const injected = inspectMcpReadonlyConnection(root);
+    assert.equal(injected.status, 'NOT_INTEGRATED');
+    assert.equal(injected.observations.httpHandoff, 'UNKNOWN_REQUIRES_REVIEW');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
