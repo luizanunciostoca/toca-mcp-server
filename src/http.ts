@@ -15,6 +15,7 @@ import {
   type WhatsAppHttpComposition,
 } from './omnichannel/whatsapp-http-composition.js';
 import { SERVER_NAME } from './server.js';
+import { createReadonlyMcpAuthFromEnv } from './mcp/readonly-runtime.js';
 
 const SENDGRID_EVENT_WEBHOOK_PATH = '/webhooks/sendgrid/events';
 const SENDGRID_MAX_EVENT_WEBHOOK_BYTES = 2 * 1024 * 1024;
@@ -28,6 +29,7 @@ const WEBHOOK_SERVICE_ALLOWED_PATHS = new Set([
 ]);
 
 const config = loadConfig();
+const readonlyMcpAuth = createReadonlyMcpAuthFromEnv(process.env);
 const metaRuntime = createMetaHttpRuntime(config, process.env);
 const readinessPool = config.DATABASE_URL
   ? createPostgresPool({ connectionString: config.DATABASE_URL })
@@ -55,6 +57,7 @@ const baseServer = createTocaHttpServer({
   },
   readinessChecks,
   mcpEnabled: config.MCP_ENABLED,
+  ...(readonlyMcpAuth ? { readonlyMcpAuth } : {}),
   ...(metaRuntime
     ? {
         metaOAuth: metaRuntime.oauth,
