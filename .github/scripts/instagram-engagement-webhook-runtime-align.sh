@@ -18,6 +18,11 @@ const imagePrefix = 'southamerica-east1-docker.pkg.dev/' + project + '/toca-mcp/
 const shaPattern = /^[a-f0-9]{40}$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const positive = /^[1-9][0-9]*$/;
+const readinessNames = new Set([
+  'db', 'migrations', 'schema', 'audit', 'outbox', 'approval_store', 'crm', 'privacy',
+  'workflow', 'ag01', 'meta', 'whatsapp', 'email', 'google_ads', 'provider_credentials',
+  'critical_configuration',
+]);
 const check = (condition, code) => { if (!condition) throw new Error(code); };
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const canonical = (value) => Array.isArray(value) ? value.map(canonical) :
@@ -475,6 +480,43 @@ try {
       input.issue.body === input.consumed.body, 'AUTHORIZATION_CONSUMPTION_NOT_PROVEN');
     lines(input.issue.body)('AUTHORIZATION_STATE', 'CONSUMED_AND_CLOSED');
     result = { verified: true };
+  } else if (action === 'probe-diagnostics') {
+    const checks = input?.checks;
+    const valid = object(input) && ['ready', 'not_ready'].includes(input.status) &&
+      Array.isArray(checks) && checks.length > 0 && checks.length <= readinessNames.size &&
+      checks.every((entry) => object(entry) && readinessNames.has(entry.name) &&
+        typeof entry.ok === 'boolean') &&
+      new Set(checks.map((entry) => entry.name)).size === checks.length &&
+      (input.status === 'ready') === checks.every((entry) => entry.ok);
+    result = { status: valid ? (input.status === 'ready' ? 'OBSERVED_READY' : 'OBSERVED_NOT_READY') :
+      'NOT_PROVEN', failedChecks: valid ? checks.filter((entry) => !entry.ok).map((entry) => entry.name).sort() : [],
+      diagnosticOnly: true };
+  } else if (action === 'log-diagnostics') {
+    check(Array.isArray(input.logs) && input.logs.length <= 300 &&
+      typeof input.revision === 'string' && input.revision.length <= 63 &&
+      /^toca-webhook-next-production-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.revision),
+      'READINESS_LOG_INPUT_INVALID');
+    const failed = new Set();
+    let matchedWarnings = 0;
+    for (const entry of input.logs) {
+      const labels = entry?.resource?.labels;
+      if (entry?.resource?.type !== 'cloud_run_revision' || labels?.project_id !== project ||
+          labels?.location !== 'southamerica-east1' || labels?.service_name !== serviceName ||
+          labels?.revision_name !== input.revision) continue;
+      for (const message of [entry.textPayload, entry.jsonPayload?.message]) {
+        if (typeof message !== 'string') continue;
+        for (const line of message.split(/\r?\n/)) {
+          const match = /^TOCA_READINESS_NOT_READY failed_checks=([a-z_]+(?:,[a-z_]+)*)$/.exec(line);
+          if (!match) continue;
+          const names = match[1].split(',');
+          if (!names.every((name) => readinessNames.has(name)) || new Set(names).size !== names.length) continue;
+          matchedWarnings++;
+          for (const name of names) failed.add(name);
+        }
+      }
+    }
+    result = { status: matchedWarnings ? 'OBSERVED_NOT_READY' : 'NOT_PROVEN',
+      failedChecks: [...failed].sort(), matchedWarnings, diagnosticOnly: true };
   } else if (action === 'probe-body') {
     check(input.healthStatus === '200' && input.readyStatus === '200', 'HTTP_PROBE_NON200');
     const checks = input.ready?.checks;
@@ -675,6 +717,14 @@ http_probes() {
     2> "$STATE/command-error")" || ready=000
   printf '%s\n' "$health" > "$STATE/$prefix-health-status"
   printf '%s\n' "$ready" > "$STATE/$prefix-ready-status"
+  # A 503 is a failed acceptance gate, but its bounded check names explain the failure.
+  # Only the model's fixed vocabulary is retained; response bodies never enter reports.
+  if ! model probe-diagnostics "$STATE/$prefix-ready.json" > "$STATE/$prefix-ready-diagnostic.json" 2> "$STATE/model-error"; then
+    printf '%s\n' '{"status":"NOT_PROVEN","failedChecks":[],"diagnosticOnly":true}' > "$STATE/$prefix-ready-diagnostic.json"
+  fi
+  jq -er '.status' "$STATE/$prefix-ready-diagnostic.json" > "$STATE/$prefix-ready-diagnostic-status"
+  jq -er 'if .status == "NOT_PROVEN" then "NOT_PROVEN" elif (.failedChecks | length) == 0 then "NONE" else .failedChecks | join(",") end' \
+    "$STATE/$prefix-ready-diagnostic.json" > "$STATE/$prefix-failed-readiness-checks"
   [[ "$health" == 200 && "$ready" == 200 ]] || fail 'HTTP_PROBE_NON200'
   jq -n --slurpfile state "$STATE/state.json" --slurpfile health "$STATE/$prefix-health.json" \
     --slurpfile ready "$STATE/$prefix-ready.json" --arg hs "$health" --arg rs "$ready" \
@@ -849,6 +899,10 @@ case "$PHASE" in
       printf 'STAGE_STATUS=%s\nPROMOTION_STATUS=%s\n' "$(value stage-status)" "$(value promote-status)"
       printf 'CANDIDATE_HEALTH_HTTP_STATUS=%s\nCANDIDATE_READY_HTTP_STATUS=%s\n' "$(value candidate-health-status)" "$(value candidate-ready-status)"
       printf 'PUBLIC_HEALTH_HTTP_STATUS=%s\nPUBLIC_READY_HTTP_STATUS=%s\n' "$(value base-health-status)" "$(value base-ready-status)"
+      printf 'CANDIDATE_READY_DIAGNOSTIC_STATUS=%s\nCANDIDATE_FAILED_READINESS_CHECKS=%s\n' \
+        "$(value candidate-ready-diagnostic-status)" "$(value candidate-failed-readiness-checks)"
+      printf 'PUBLIC_READY_DIAGNOSTIC_STATUS=%s\nPUBLIC_FAILED_READINESS_CHECKS=%s\n' \
+        "$(value base-ready-diagnostic-status)" "$(value base-failed-readiness-checks)"
       printf 'RUNTIME_ACCEPTANCE_STATUS=%s\nROLLBACK_STATUS=%s\nOWN_TAG_CLEANUP_STATUS=%s\nFAILURE_CODE=%s\n' \
         "$(value runtime-acceptance-status)" "$(value rollback-status)" "$(value cleanup-status)" "$(value failure-code)"
       printf '%s\n' 'EXACT_SOURCE_AND_TREE_REQUIRED=true' 'DAEMON_MUTATION=false' \

@@ -46,6 +46,8 @@ describe('Instagram webhook startup diagnostic', () => {
       'resource.labels.revision_name',
       '--freshness=7d',
       'APPROVED_ERROR_TOKENS=',
+      'READINESS_LOG_EVIDENCE=',
+      'READINESS_FAILED_CHECKS=',
       'ENV_PRESENCE=',
       'COMMAND_MATCH=',
       'ARGS_MATCH=',
@@ -64,6 +66,10 @@ describe('Instagram webhook startup diagnostic', () => {
 
   it('publishes only allowlisted classifications rather than raw startup strings', () => {
     expect(workflow).toContain('approved_tokens=(');
+    expect(workflow).toContain(
+      'instagram-engagement-webhook-runtime-align.sh model log-diagnostics',
+    );
+    expect(workflow).toContain('--arg revision "$EXPECTED_REVISION"');
     expect(workflow).not.toContain('SANITIZED_STARTUP_ERRORS_BEGIN');
     expect(workflow).not.toContain('startup-errors.txt');
     expect(workflow).not.toContain('SECRETS_PRINTED=false');

@@ -68,7 +68,10 @@ function runCaptured(
   const stdout = openSync(stdoutPath, 'w');
   const stderr = openSync(stderrPath, 'w');
   try {
-    const result = spawnSync('bash', args, { ...options, stdio: ['ignore', stdout, stderr] });
+    const result = spawnSync('bash', args, {
+      ...options,
+      stdio: ['ignore', stdout, stderr],
+    });
     if (result.error) throw result.error;
     return {
       status: result.status,
@@ -110,6 +113,101 @@ interface Metadata {
   labels: Record<string, string>;
   annotations: Record<string, string>;
 }
+
+describe('allowlisted readiness diagnostics', () => {
+  it.each([
+    {
+      status: 'not_ready',
+      checks: [
+        { name: 'db', ok: false },
+        { name: 'migrations', ok: true },
+      ],
+    },
+    {
+      status: 'not_ready',
+      checks: [{ name: 'db', ok: false }],
+      private: 'SECRET_CUSTOMER_VALUE',
+    },
+  ])('retains bounded failure names and discards all other fields', (input) => {
+    expect(model('probe-diagnostics', input)).toEqual({
+      status: 'OBSERVED_NOT_READY',
+      failedChecks: ['db'],
+      diagnosticOnly: true,
+    });
+  });
+
+  it.each([
+    null,
+    {},
+    { status: 'not_ready', checks: [] },
+    { status: 'ready', checks: [{ name: 'db', ok: false }] },
+    { status: 'not_ready', checks: [{ name: 'db', ok: true }] },
+    { status: 'not_ready', checks: [{ name: 'customer_secret', ok: false }] },
+    {
+      status: 'not_ready',
+      checks: [
+        { name: 'db', ok: false },
+        { name: 'db', ok: false },
+      ],
+    },
+    { status: 'not_ready', checks: [{ name: 'db', ok: 'false' }] },
+  ])('never promotes malformed or unknown check bodies into diagnostic evidence', (input) => {
+    expect(model('probe-diagnostics', input)).toEqual({
+      status: 'NOT_PROVEN',
+      failedChecks: [],
+      diagnosticOnly: true,
+    });
+  });
+
+  const logEntry = (textPayload: string, revision = candidateName) => ({
+    resource: {
+      type: 'cloud_run_revision',
+      labels: {
+        project_id: 'toca-mcp-production',
+        location: 'southamerica-east1',
+        service_name: serviceName,
+        revision_name: revision,
+      },
+    },
+    textPayload,
+  });
+
+  it('reads only exact authorized revision warnings and never returns arbitrary log strings', () => {
+    const result = model('log-diagnostics', {
+      revision: candidateName,
+      logs: [
+        logEntry('TOCA_READINESS_NOT_READY failed_checks=migrations,db'),
+        logEntry('TOCA_READINESS_NOT_READY failed_checks=outbox'),
+        logEntry('TOCA_READINESS_NOT_READY failed_checks=meta', previous),
+        logEntry('TOCA_READINESS_NOT_READY failed_checks=customer_secret'),
+        logEntry('TOCA_READINESS_NOT_READY failed_checks=db,db'),
+        logEntry('TOCA_READINESS_NOT_READY failed_checks=privacy private_customer_value'),
+        logEntry('SECRET_CUSTOMER_VALUE'),
+      ],
+    });
+    expect(result).toEqual({
+      status: 'OBSERVED_NOT_READY',
+      failedChecks: ['db', 'migrations', 'outbox'],
+      matchedWarnings: 2,
+      diagnosticOnly: true,
+    });
+    expect(JSON.stringify(result)).not.toMatch(/SECRET|customer|private/);
+  });
+
+  it('does not interpret absent log warnings as readiness success', () => {
+    expect(model('log-diagnostics', { revision: candidateName, logs: [] })).toEqual({
+      status: 'NOT_PROVEN',
+      failedChecks: [],
+      matchedWarnings: 0,
+      diagnosticOnly: true,
+    });
+    rejects(
+      'log-diagnostics',
+      { revision: candidateName, logs: Array(301).fill({}) },
+      'READINESS_LOG_INPUT_INVALID',
+    );
+  });
+});
 
 interface Container {
   name: string;
@@ -195,7 +293,10 @@ interface RecoveryState {
   preRevisionUid: string;
   baseUrl: string;
   preServiceSpec: Service['spec'];
-  preTraffic: { percentages: Record<string, number>; tags: Record<string, string> };
+  preTraffic: {
+    percentages: Record<string, number>;
+    tags: Record<string, string>;
+  };
   candidateTemplate: Template;
   candidateUid?: string;
   candidateUrl?: string;
@@ -366,13 +467,20 @@ function fixtures() {
             { name: 'TOCA_RELEASE_SHA', value: '6'.repeat(40) },
             {
               name: 'DATABASE_URL',
-              valueFrom: { secretKeyRef: { name: 'secret-alias', key: 'latest' } },
+              valueFrom: {
+                secretKeyRef: { name: 'secret-alias', key: 'latest' },
+              },
             },
             {
               name: 'META_APP_SECRET',
-              valueFrom: { secretKeyRef: { name: 'toca-meta-app-secret', key: 'latest' } },
+              valueFrom: {
+                secretKeyRef: { name: 'toca-meta-app-secret', key: 'latest' },
+              },
             },
-            { name: 'PRIVATE_TEST_MARKER', value: 'DO_NOT_PUBLISH_RUNTIME_VALUE' },
+            {
+              name: 'PRIVATE_TEST_MARKER',
+              value: 'DO_NOT_PUBLISH_RUNTIME_VALUE',
+            },
           ],
         },
         {
@@ -384,7 +492,10 @@ function fixtures() {
       volumes: [
         {
           name: 'mount',
-          secret: { secretName: 'existing-mount', items: [{ key: '1', path: 'value' }] },
+          secret: {
+            secretName: 'existing-mount',
+            items: [{ key: '1', path: 'value' }],
+          },
         },
       ],
     },
@@ -469,7 +580,12 @@ function fixtures() {
     iam: {
       version: 3,
       etag: 'opaque-iam',
-      bindings: [{ role: 'roles/run.admin', members: ['serviceAccount:deployer@example.invalid'] }],
+      bindings: [
+        {
+          role: 'roles/run.admin',
+          members: ['serviceAccount:deployer@example.invalid'],
+        },
+      ],
     },
     scheduler: {
       name: 'projects/toca-mcp-production/locations/southamerica-east1/jobs/toca-managed-instagram-tick',
@@ -632,10 +748,15 @@ describe('webhook authorization and exact artifact provenance', () => {
   it('requires exact live consumption and rejects a later changed authorization', () => {
     const input = authorizationInput();
     const auth = model<Authorization>('authorize', input);
-    const consumed = model<{ body: string }>('consume', { auth, issue: input.issue });
+    const consumed = model<{ body: string }>('consume', {
+      auth,
+      issue: input.issue,
+    });
     expect(consumed.body).toContain('AUTHORIZATION_STATE=CONSUMED_AND_CLOSED');
     const issue = { ...input.issue, state: 'closed', body: consumed.body };
-    expect(model('consumed', { auth, issue, consumed })).toEqual({ verified: true });
+    expect(model('consumed', { auth, issue, consumed })).toEqual({
+      verified: true,
+    });
     issue.body += '\nREVOKED=true';
     rejects('consumed', { auth, issue, consumed }, 'AUTHORIZATION_CONSUMPTION_NOT_PROVEN');
     input.issue.body += '\nCHANGED=true';
@@ -646,9 +767,14 @@ describe('webhook authorization and exact artifact provenance', () => {
     const input = authorizationInput();
     input.issue.body = input.issue.body.replaceAll('\n', '\r\n');
     const auth = model<Authorization>('authorize', input);
-    const consumed = model<{ body: string }>('consume', { auth, issue: input.issue });
+    const consumed = model<{ body: string }>('consume', {
+      auth,
+      issue: input.issue,
+    });
     const issue = { ...input.issue, state: 'closed', body: consumed.body };
-    expect(model('consumed', { auth, issue, consumed })).toEqual({ verified: true });
+    expect(model('consumed', { auth, issue, consumed })).toEqual({
+      verified: true,
+    });
     expect(consumed.body).not.toContain('AUTHORIZATION_STATE=ACTIVE');
   });
 });
@@ -662,7 +788,9 @@ describe('serving revision clone and zero traffic gates', () => {
     expected.containers[0]!.env!.find((entry) => entry.name === 'TOCA_RELEASE_SHA')!.value = sha;
     expect(state.candidateTemplate.spec).toEqual(expected);
     expect(state.candidateTemplate.spec).not.toEqual(input.service.spec.template.spec);
-    expect(state.candidateTemplate.metadata.labels).toEqual({ 'team.example.com/role': 'webhook' });
+    expect(state.candidateTemplate.metadata.labels).toEqual({
+      'team.example.com/role': 'webhook',
+    });
     expect(state.candidateTemplate.metadata.annotations).toEqual({
       'run.googleapis.com/cloudsql-instances':
         input.revision.metadata.annotations['run.googleapis.com/cloudsql-instances'],
@@ -680,7 +808,10 @@ describe('serving revision clone and zero traffic gates', () => {
     const input = fixtures();
     const state = model<RecoveryState>('prestate', input);
     input.service.metadata.resourceVersion = 'fresh/opaque+/==';
-    const transition = model<Transition>('stage', { state, service: input.service });
+    const transition = model<Transition>('stage', {
+      state,
+      service: input.service,
+    });
     expect(transition.request.metadata.resourceVersion).toBe('fresh/opaque+/==');
     expect(transition.request.metadata).not.toHaveProperty('uid');
     expect(transition.request.metadata).not.toHaveProperty('generation');
@@ -700,10 +831,20 @@ describe('serving revision clone and zero traffic gates', () => {
     const input = fixtures();
     input.service.spec.traffic[0] = { latestRevision: true, percent: 100 };
     const state = model<RecoveryState>('prestate', input);
-    const transition = model<Transition>('stage', { state, service: input.service });
-    expect(transition.request.spec.traffic[0]).toEqual({ revisionName: previous, percent: 100 });
+    const transition = model<Transition>('stage', {
+      state,
+      service: input.service,
+    });
+    expect(transition.request.spec.traffic[0]).toEqual({
+      revisionName: previous,
+      percent: 100,
+    });
     expect(transition.request.spec.traffic.every((route) => !route.latestRevision)).toBe(true);
-    input.service.spec.traffic[1] = { latestRevision: true, percent: 0, tag: 'support' };
+    input.service.spec.traffic[1] = {
+      latestRevision: true,
+      percent: 0,
+      tag: 'support',
+    };
     rejects('prestate', input, 'THIRD_PARTY_DYNAMIC_TAG');
   });
 
@@ -745,7 +886,10 @@ describe('serving revision clone and zero traffic gates', () => {
       code = 'REVISION_IMAGE_MISMATCH';
     }
     if (change === 'duplicate-env') {
-      input.revision.spec.containers[0]!.env!.push({ name: 'MCP_ENABLED', value: 'true' });
+      input.revision.spec.containers[0]!.env!.push({
+        name: 'MCP_ENABLED',
+        value: 'true',
+      });
       code = 'ENV_NAME_DUPLICATE';
     }
     if (change === 'unknown-annotation') {
@@ -782,13 +926,19 @@ describe('serving revision clone and zero traffic gates', () => {
   it('requires reconciled candidate identity and real fresh HTTP proof before promotion', () => {
     const fixture = stagedFixture();
     const promoted = model<Transition>('promote', fixture);
-    expect(promoted.request.spec.traffic[0]).toEqual({ revisionName: candidateName, percent: 100 });
+    expect(promoted.request.spec.traffic[0]).toEqual({
+      revisionName: candidateName,
+      percent: 100,
+    });
     expect(promoted.request.metadata.resourceVersion).toBe(
       fixture.service.metadata.resourceVersion,
     );
     const stale = {
       ...fixture,
-      probes: { ...(fixture.probes as object), checkedAt: '2000-01-01T00:00:00Z' },
+      probes: {
+        ...(fixture.probes as object),
+        checkedAt: '2000-01-01T00:00:00Z',
+      },
     };
     rejects('promote', stale, 'CANDIDATE_HTTP_PROOF_REQUIRED');
     fixture.candidate.metadata.uid = 'foreign-revision';
@@ -797,8 +947,16 @@ describe('serving revision clone and zero traffic gates', () => {
 
   it('does not promote after another tag or traffic writer changes the staged state', () => {
     const fixture = stagedFixture();
-    fixture.service.spec.traffic.push({ revisionName: previous, percent: 0, tag: 'new-support' });
-    fixture.service.status.traffic.push({ revisionName: previous, percent: 0, tag: 'new-support' });
+    fixture.service.spec.traffic.push({
+      revisionName: previous,
+      percent: 0,
+      tag: 'new-support',
+    });
+    fixture.service.status.traffic.push({
+      revisionName: previous,
+      percent: 0,
+      tag: 'new-support',
+    });
     rejects('promote', fixture, 'PRE_PROMOTION_TRAFFIC_CHANGED');
   });
 
@@ -832,7 +990,10 @@ describe('serving revision clone and zero traffic gates', () => {
       healthStatus: '200',
       readyStatus: '200',
       health: { status: 'ok' },
-      ready: { status: 'ready', checks: [] as Array<{ name: string; ok: boolean }> },
+      ready: {
+        status: 'ready',
+        checks: [] as Array<{ name: string; ok: boolean }>,
+      },
     };
     rejects('probe-body', input, 'HTTP_PROBE_BODY_INVALID');
     input.ready.checks = readinessChecks.filter((entry) => entry.name !== 'migrations');
@@ -853,7 +1014,9 @@ describe('ownership-aware compensation and final acceptance', () => {
     expect(rollback.request.metadata.resourceVersion).toBe(
       fixture.service.metadata.resourceVersion,
     );
-    expect(rollback.expectedTraffic).toMatchObject({ percentages: { [previous]: 100 } });
+    expect(rollback.expectedTraffic).toMatchObject({
+      percentages: { [previous]: 100 },
+    });
     expect(rollback.request.spec.template).toEqual(fixture.service.spec.template);
   });
 
@@ -877,8 +1040,16 @@ describe('ownership-aware compensation and final acceptance', () => {
 
   it('restores only its own 100% candidate, retaining current third-party tags', () => {
     const fixture = promotedFixture();
-    fixture.service.spec.traffic.push({ revisionName: previous, percent: 0, tag: 'added-later' });
-    fixture.service.status.traffic.push({ revisionName: previous, percent: 0, tag: 'added-later' });
+    fixture.service.spec.traffic.push({
+      revisionName: previous,
+      percent: 0,
+      tag: 'added-later',
+    });
+    fixture.service.status.traffic.push({
+      revisionName: previous,
+      percent: 0,
+      tag: 'added-later',
+    });
     fixture.service.metadata.resourceVersion = 'fresh-rollback-version';
     const rollback = model<Transition>('rollback', {
       ...fixture,
@@ -898,7 +1069,10 @@ describe('ownership-aware compensation and final acceptance', () => {
     expect(model('rollback', { state: fixture.state, service: fixture.service })).toEqual({
       decision: 'NOOP_ALREADY_RESTORED',
     });
-    fixture.service.spec.traffic[0] = { revisionName: serviceName + '-other-owner', percent: 100 };
+    fixture.service.spec.traffic[0] = {
+      revisionName: serviceName + '-other-owner',
+      percent: 100,
+    };
     fixture.service.status.traffic[0] = {
       revisionName: serviceName + '-other-owner',
       percent: 100,
@@ -915,7 +1089,10 @@ describe('ownership-aware compensation and final acceptance', () => {
       let code = 'TRAFFIC_NOT_SINGLE_100';
       if (change === 'split') {
         fixture.service.spec.traffic[0]!.percent = 99;
-        fixture.service.spec.traffic.push({ revisionName: previous, percent: 1 });
+        fixture.service.spec.traffic.push({
+          revisionName: previous,
+          percent: 1,
+        });
         fixture.service.status.traffic = structuredClone(fixture.service.spec.traffic);
       }
       if (change === 'service-uid') {
@@ -953,9 +1130,15 @@ describe('ownership-aware compensation and final acceptance', () => {
     expect(cleanup.request.spec.template).toEqual(fixture.service.spec.template);
     const cleaned = applyRequest(fixture.service, cleanup, candidateName);
     expect(
-      model('transition-readback', { state: fixture.state, service: cleaned, transition: cleanup }),
+      model('transition-readback', {
+        state: fixture.state,
+        service: cleaned,
+        transition: cleanup,
+      }),
     ).toEqual({ verified: true });
-    expect(model('accepted', { ...fixture, service: cleaned })).toEqual({ accepted: true });
+    expect(model('accepted', { ...fixture, service: cleaned })).toEqual({
+      accepted: true,
+    });
   });
 
   it('will not remove a reassigned tag or certify a different final serving revision', () => {
@@ -1050,7 +1233,7 @@ if (method === 'PUT') {
 if (method !== 'GET') process.exit(66);
 const health = args.at(-1).endsWith('/health');
 const status = health ? (process.env.MOCK_HEALTH || '200') : (process.env.MOCK_READY || '200');
-fs.writeFileSync(output, status === '200' ? JSON.stringify(health ? { status: 'ok' } :
+fs.writeFileSync(output, !health && process.env.MOCK_READY_BODY ? process.env.MOCK_READY_BODY : status === '200' ? JSON.stringify(health ? { status: 'ok' } :
   { status: 'ready', checks: ['db', 'migrations', 'schema', 'meta', 'provider_credentials', 'critical_configuration']
     .map((name) => ({ name, ok: true })) }) : '{"private":"DO_NOT_PUBLISH_PROVIDER_VALUE"}');
 process.stdout.write(status);
@@ -1096,6 +1279,52 @@ fs.copyFileSync(args[args.indexOf('--body-file') + 1], path.join(process.env.MOC
 }
 
 describe('actual controller phases with isolated mocked cloud transport', () => {
+  it('retains only failing check names on a real 503 probe and still rejects promotion', () => {
+    const fixture = promotedFixture();
+    const harness = runtimeHarness(fixture.service, fixture.state);
+    const ready = {
+      status: 'not_ready',
+      checks: readinessChecks.map((entry) => ({
+        ...entry,
+        ok: entry.name !== 'db',
+      })),
+      private: 'DO_NOT_PUBLISH_PROVIDER_VALUE',
+    };
+    const result = harness.run('probe', {
+      MOCK_READY: '503',
+      MOCK_READY_BODY: JSON.stringify(ready),
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('WEBHOOK_RECOVERY_HTTP_PROBE_NON200');
+    expect(existsSync(join(harness.statePath, 'candidate-probes.json'))).toBe(false);
+    expect(harness.calls().every((call) => call.method === 'GET')).toBe(true);
+    expect(
+      readFileSync(join(harness.statePath, 'candidate-failed-readiness-checks'), 'utf8').trim(),
+    ).toBe('db');
+    const report = harness.run('report');
+    expect(report.status, report.stderr).toBe(0);
+    const body = readFileSync(join(harness.root, 'report.env'), 'utf8');
+    expect(body).toContain('INSTAGRAM_WEBHOOK_RUNTIME_ALIGNMENT_STATUS=FAIL');
+    expect(body).toContain('CANDIDATE_READY_DIAGNOSTIC_STATUS=OBSERVED_NOT_READY');
+    expect(body).toContain('CANDIDATE_FAILED_READINESS_CHECKS=db');
+    expect(body).not.toContain('DO_NOT_PUBLISH_PROVIDER_VALUE');
+  });
+
+  it('keeps malformed 503 bodies unproven without hiding the original failure', () => {
+    const fixture = promotedFixture();
+    const harness = runtimeHarness(fixture.service, fixture.state);
+    const result = harness.run('probe', {
+      MOCK_READY: '503',
+      MOCK_READY_BODY: '<html>private</html>',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('WEBHOOK_RECOVERY_HTTP_PROBE_NON200');
+    expect(
+      readFileSync(join(harness.statePath, 'candidate-failed-readiness-checks'), 'utf8').trim(),
+    ).toBe('NOT_PROVEN');
+    expect(existsSync(join(harness.statePath, 'candidate-probes.json'))).toBe(false);
+  });
+
   it('does exactly one CAS PUT on conflict, never retries or overwrites another writer', () => {
     const fixture = promotedFixture();
     const harness = runtimeHarness(fixture.service, fixture.state);
@@ -1124,7 +1353,10 @@ describe('actual controller phases with isolated mocked cloud transport', () => 
     );
     const current = JSON.parse(readFileSync(join(harness.root, 'service.json'), 'utf8')) as Service;
     expect(current.spec.traffic.filter((route) => route.tag === tag)).toHaveLength(0);
-    expect(current.spec.traffic[0]).toEqual({ revisionName: candidateName, percent: 100 });
+    expect(current.spec.traffic[0]).toEqual({
+      revisionName: candidateName,
+      percent: 100,
+    });
   });
 
   it('leaves an unknown PUT outcome unproven after bounded GET reconciliation', () => {
@@ -1150,7 +1382,10 @@ describe('actual controller phases with isolated mocked cloud transport', () => 
       '200',
     );
     const current = JSON.parse(readFileSync(join(harness.root, 'service.json'), 'utf8')) as Service;
-    expect(current.spec.traffic[0]).toEqual({ revisionName: previous, percent: 100 });
+    expect(current.spec.traffic[0]).toEqual({
+      revisionName: previous,
+      percent: 100,
+    });
     expect(current.spec.traffic.find((route) => route.tag === tag)?.revisionName).toBe(
       candidateName,
     );
@@ -1181,7 +1416,10 @@ describe('actual controller phases with isolated mocked cloud transport', () => 
       const current = JSON.parse(
         readFileSync(join(harness.root, 'service.json'), 'utf8'),
       ) as Service;
-      expect(current.spec.traffic[0]).toEqual({ revisionName: previous, percent: 100 });
+      expect(current.spec.traffic[0]).toEqual({
+        revisionName: previous,
+        percent: 100,
+      });
       expect(current.spec.traffic.some((route) => route.tag === tag)).toBe(false);
       expect(current.spec.template).toEqual(fixture.service.spec.template);
       const report = harness.run('report');
@@ -1205,7 +1443,10 @@ describe('actual controller phases with isolated mocked cloud transport', () => 
     writeFileSync(join(harness.statePath, 'runtime-acceptance-status'), 'PASS\n');
     expect(harness.run('cleanup').status).toBe(1);
     const current = JSON.parse(readFileSync(join(harness.root, 'service.json'), 'utf8')) as Service;
-    current.spec.traffic[0] = { revisionName: serviceName + '-another-owner', percent: 100 };
+    current.spec.traffic[0] = {
+      revisionName: serviceName + '-another-owner',
+      percent: 100,
+    };
     current.status.traffic = structuredClone(current.spec.traffic);
     writeFileSync(join(harness.root, 'service.json'), JSON.stringify(current));
     const compensation = harness.run('rollback');
@@ -1229,7 +1470,10 @@ describe('actual controller phases with isolated mocked cloud transport', () => 
     expect(result.status, result.stderr).toBe(0);
     expect(harness.calls().filter((call) => call.method === 'PUT')).toHaveLength(1);
     const current = JSON.parse(readFileSync(join(harness.root, 'service.json'), 'utf8')) as Service;
-    expect(current.spec.traffic[0]).toEqual({ revisionName: previous, percent: 100 });
+    expect(current.spec.traffic[0]).toEqual({
+      revisionName: previous,
+      percent: 100,
+    });
     current.spec.traffic[0]!.revisionName = serviceName + '-another-owner';
     current.status.traffic = structuredClone(current.spec.traffic);
     writeFileSync(join(harness.root, 'service.json'), JSON.stringify(current));
@@ -1250,7 +1494,10 @@ describe('actual controller phases with isolated mocked cloud transport', () => 
     (health, ready) => {
       const fixture = stagedFixture();
       const harness = runtimeHarness(fixture.service, fixture.state);
-      const result = harness.run('probe', { MOCK_HEALTH: health, MOCK_READY: ready });
+      const result = harness.run('probe', {
+        MOCK_HEALTH: health,
+        MOCK_READY: ready,
+      });
       expect(result.status).toBe(1);
       expect(result.stderr).toContain('WEBHOOK_RECOVERY_HTTP_PROBE_NON200');
       expect(harness.calls().map((call) => call.method)).toEqual(['GET', 'GET']);
