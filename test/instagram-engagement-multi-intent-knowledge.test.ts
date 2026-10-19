@@ -80,7 +80,7 @@ describe('Instagram grounded multi-intent knowledge', () => {
     const match = await source.resolve('Agenda hoje?', classification.intent);
 
     expect(match?.factsVerified).toBe(true);
-    expect(match?.answer).toContain('Sunset na Toca do Morcego a partir das 16:30');
+    expect(match?.answer).toContain('as datas e os horários disponíveis do Pôr do Sol');
   });
 
   it('preserves a human-required press route when programming is mixed into the same message', async () => {
@@ -113,7 +113,7 @@ describe('Instagram grounded multi-intent knowledge', () => {
     });
 
     expect(match?.factsVerified).toBe(true);
-    expect(match?.answer).toContain('Sunset na Toca do Morcego a partir das 16:30');
+    expect(match?.answer).toContain('as datas e os horários disponíveis do Pôr do Sol');
     expect(match?.answer).not.toContain('The Party acontece');
     expect(match?.answer).not.toContain('samba e pagode');
     expect(match?.answer).toContain(TOCA_OFFICIAL_INFORMATION_URL);
@@ -125,7 +125,7 @@ describe('Instagram grounded multi-intent knowledge', () => {
       now: new Date('2026-09-18T14:30:00Z'),
     });
 
-    expect(match?.answer).toContain('Sunset na Toca do Morcego a partir das 16:30');
+    expect(match?.answer).toContain('as datas e os horários disponíveis do Pôr do Sol');
     expect(match?.answer).toContain('The Party acontece das 23:59 às 06:00');
     expect(match?.answer).not.toMatch(/R\$\s*\d/);
     expect(match?.answer).not.toMatch(/DJ\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç]+/);
@@ -182,7 +182,7 @@ describe('Instagram grounded multi-intent knowledge', () => {
 
     expect(match?.factsVerified).toBe(true);
     expect(match?.answer).toContain('Os valores dos ingressos variam de acordo com a data');
-    expect(match?.answer).toContain('Sunset na Toca do Morcego a partir das 16:30');
+    expect(match?.answer).toContain('as datas e os horários disponíveis do Pôr do Sol');
     expect(match?.answer).toContain(TOCA_OFFICIAL_INFORMATION_URL);
     expect(match?.answer).not.toContain('utm_');
     expect(match?.answer).not.toContain('fbclid');
@@ -205,7 +205,7 @@ describe('Instagram grounded multi-intent knowledge', () => {
     );
 
     expect(match?.answer).toContain('Os valores dos ingressos variam');
-    expect(match?.answer).toContain('Sunset na Toca do Morcego a partir das 16:30');
+    expect(match?.answer).toContain('as datas e os horários disponíveis do Pôr do Sol');
   });
 
   it('splits conjunction-based questions and resolves ticket plus programming independently', async () => {
@@ -223,7 +223,7 @@ describe('Instagram grounded multi-intent knowledge', () => {
     );
 
     expect(match?.answer).toContain('Os valores dos ingressos variam');
-    expect(match?.answer).toContain('Sunset na Toca do Morcego a partir das 16:30');
+    expect(match?.answer).toContain('as datas e os horários disponíveis do Pôr do Sol');
     expect(delegateResolve).toHaveBeenCalledWith('Qual o valor do ingresso', 'TICKET_INFO');
     expect(delegateResolve).toHaveBeenCalledWith('qual a programação de hoje?', 'EVENT_INFO');
   });

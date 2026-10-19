@@ -52,8 +52,8 @@
   },
   "dailyRollout": {
     "phase": "CANARY",
-    "canaryContentItemId": "MKT-20261015-SUNSET-FEED-0900",
-    "canaryScheduledAt": "2026-10-15T09:00:00-03:00",
+    "canaryContentItemId": "MKT-20261019-SUNSET-FEED-1500",
+    "canaryScheduledAt": "2026-10-19T15:00:00-03:00",
     "promoteToLimitedAfterVerifiedCanary": true,
     "verifiedCanarySchedulingStatus": "PUBLISHED_VERIFIED",
     "limited": {
@@ -66,10 +66,26 @@
     "generalAutonomy": false,
     "blindRetryAuthorized": false,
     "automaticFallbackAuthorized": false,
-    "rollForwardFromContentItemId": "MKT-20260917-SUNSET-FEED-0900",
-    "rollForwardReason": "EXPIRED_PRIOR_CANARY_NO_VERIFIED_PUBLICATION_FRESH_OWNER_APPROVED_QA_PASSED_OCTOBER",
+    "rollForwardFromContentItemId": "MKT-20261015-SUNSET-FEED-0900",
+    "rollForwardReason": "EXPIRED_CANARY_OUTCOME_UNPROVEN_DISTINCT_FUTURE_OWNER_APPROVED_QA_PASSED_FEED",
     "rollForwardAuthorizedAt": "2026-10-14T18:03:31.120Z",
-    "rollForwardAuthority": "OWNER_TOCA_OCT2026_ORGANIC_FEED_ISSUE_985_COMMENT_6171815962"
+    "rollForwardAuthority": "OWNER_TOCA_OCT2026_ORGANIC_FEED_ISSUE_985_COMMENT_6171815962",
+    "previousRollForward": {
+      "rollForwardFromContentItemId": "MKT-20260917-SUNSET-FEED-0900",
+      "rollForwardReason": "EXPIRED_PRIOR_CANARY_NO_VERIFIED_PUBLICATION_FRESH_OWNER_APPROVED_QA_PASSED_OCTOBER",
+      "rollForwardAuthorizedAt": "2026-10-14T18:03:31.120Z",
+      "rollForwardAuthority": "OWNER_TOCA_OCT2026_ORGANIC_FEED_ISSUE_985_COMMENT_6171815962"
+    },
+    "rollForwardPreparedAt": "2026-10-18T23:01:16Z",
+    "priorCanaryDisposition": {
+      "contentItemId": "MKT-20261015-SUNSET-FEED-0900",
+      "scheduledAt": "2026-10-15T09:00:00-03:00",
+      "providerOutcome": "NOT_PROVEN",
+      "automaticRetryAuthorized": false,
+      "scheduledBackfillAuthorized": false,
+      "protectedBindingPreserved": true,
+      "note": "Historical outcome remains unresolved. This roll-forward selects a different approved future item and does not retry or certify the prior publication."
+    }
   },
   "standingAuthorization": {
     "enabled": true,
@@ -195,6 +211,60 @@
         "approvedQaEvidenceId": "SQA-TOCA-20261014-SUN-0005-FEED",
         "rightsEvidence": "https://github.com/luizanunciostoca/toca-mcp-server/issues/985#issuecomment-6171815962",
         "note": "Bounded one-item canary only; legacy Sep17 baseline preserved for historical reconciliation; no automatic broad autonomy."
+      }
+    },
+    "MKT-20261019-SUNSET-FEED-1500": {
+      "expectedScheduledAt": "2026-10-19T15:00:00-03:00",
+      "operation": "SUNSET",
+      "format": "FEED",
+      "publishNowFormat": "FEED_IMAGE",
+      "contentType": "image/jpeg",
+      "masterAssetId": "MM-SUN-0002-FEED4X5-202610-JPG-V1",
+      "driveFileId": "1ZEAfWGayrkWLLsldsIM_OBFwIstnSAyA",
+      "outputSha256": "2b92b4c79c9e34040f65133a0b92957a59236a6d560c4e325bdd3743939b3f18",
+      "creativeId": "CR-MKT-20261019-SUNSET-FEED-1500-PHOTO4X5-CANDIDATE-V1",
+      "copyId": "CP-MKT-20261019-SUNSET-FEED-1500-V1",
+      "registryMessage": "O sol encontra o horizonte e o mar guarda cada tom desse encontro. Simples assim, extraordinário assim. 🌅 #TocaDoMorcego #PorDoSol #MorroDeSaoPaulo",
+      "registryCta": "Planeje seu próximo fim de tarde na Toca.",
+      "approvedCaption": "O sol encontra o horizonte e o mar guarda cada tom desse encontro. Simples assim, extraordinário assim. 🌅 #TocaDoMorcego #PorDoSol #MorroDeSaoPaulo\n\nPlaneje seu próximo fim de tarde na Toca.",
+      "correlationId": "CORR-MKT-20261019-SUNSET-FEED-1500-V1",
+      "idempotencyVersion": "V1",
+      "creativeTruthBinding": {
+        "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+        "standardId": "SUNSET_FEED_V1",
+        "creativeId": "CR-MKT-20261019-SUNSET-FEED-1500-PHOTO4X5-CANDIDATE-V1",
+        "outputSha256": "2b92b4c79c9e34040f65133a0b92957a59236a6d560c4e325bdd3743939b3f18",
+        "brandIntegrityStatus": "PASSED",
+        "venueFidelityStatus": "PASSED",
+        "qualityGateStatus": "PASSED",
+        "exactAssetBinding": true
+      },
+      "brandDeterminism": {
+        "status": "VERIFIED",
+        "standardRef": "TOCA_CREATIVE_TRUTH:SUNSET_FEED_V1:1.0",
+        "typographyRef": "EDITORIAL_TEXT_V1",
+        "assetSha256": "2b92b4c79c9e34040f65133a0b92957a59236a6d560c4e325bdd3743939b3f18"
+      },
+      "rightsClearance": {
+        "status": "CLEARED",
+        "scope": "INSTAGRAM_ORGANIC_PUBLICATION",
+        "evidenceRef": "GOOGLE_DRIVE:1ZEAfWGayrkWLLsldsIM_OBFwIstnSAyA",
+        "authority": "OWNER_TOCA_OCT2026_ORGANIC_FEED_ISSUE_985_COMMENT_6171815962",
+        "clearedAt": "2026-10-14T18:03:31.120Z",
+        "assetSha256": "2b92b4c79c9e34040f65133a0b92957a59236a6d560c4e325bdd3743939b3f18"
+      },
+      "bindingSource": {
+        "kind": "CANONICAL_MARKETING_REGISTRY_AND_EXISTING_PHOTO_QA",
+        "contentItemId": "MKT-20261019-SUNSET-FEED-1500",
+        "approvedQaEvidenceId": "SQA-TOCA-20261014-SUN-0002-FEED4X5",
+        "rightsEvidence": "https://github.com/luizanunciostoca/toca-mcp-server/issues/985#issuecomment-6171815962",
+        "note": "Exact canonical registry and independent QA binding revalidated against the downloaded 1080x1350 JPEG. One distinct future canary. Prior Oct15 outcome remains NOT_PROVEN; no retry, backfill, new caption or asset. Canonical writer still requires scheduled provenance, attempt-history scan, fresh provider duplicate preflight and final reconciliation.",
+        "verifiedAt": "2026-10-18T23:01:16Z",
+        "registryRow": 387,
+        "staticQaRow": 22,
+        "marketingMasterRow": 39,
+        "downloadedBytes": 265710,
+        "downloadedSha256": "2b92b4c79c9e34040f65133a0b92957a59236a6d560c4e325bdd3743939b3f18"
       }
     }
   }

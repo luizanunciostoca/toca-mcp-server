@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const read = (path: string): string => readFileSync(path, 'utf8');
@@ -75,6 +76,81 @@ function expectOrdered(source: string, markers: readonly string[]): void {
 }
 
 describe('Instagram webhook callback governance', () => {
+  it('executes fail-closed authorization for optional bounded runtime diagnostics', () => {
+    const start = readonlyWorkflow.indexOf('          required=(');
+    const end = readonlyWorkflow.indexOf('          CONTROL_BODY=', start);
+    const authorization = readonlyWorkflow.slice(start, end);
+    const base = [
+      'AUTHORIZED_CANDIDATE_SHA=candidate',
+      'AUTHORIZATION_STATE=ACTIVE',
+      'INSTAGRAM_ENGAGEMENT_WEBHOOK_CALLBACK_READONLY=AUTHORIZED',
+      'READ_ONLY=true',
+      'SERVICE_MUTATIONS_AUTHORIZED=false',
+      'DATABASE_MUTATIONS_AUTHORIZED=false',
+      'PROVIDER_CALLS_AUTHORIZED=false',
+      'EXTERNAL_REPLY_WRITES_AUTHORIZED=false',
+    ];
+    const optin = [
+      'INCLUDE_SANITIZED_RUNTIME_LOGS=true',
+      'RUNTIME_LOG_WINDOW=LAST_2_HOURS',
+      'RUNTIME_LOG_LIMIT=200',
+      'PUBLIC_HEALTH_PROBES=GET_HEALTH_AND_READY_ONLY',
+      'IAM_MUTATIONS_AUTHORIZED=false',
+    ];
+    const check = (markers: string[]) =>
+      spawnSync(
+        'bash',
+        [
+          '-c',
+          'set -euo pipefail\n' + authorization + '\nprintf "%s" "$INCLUDE_RUNTIME_DIAGNOSTICS"',
+        ],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, GITHUB_SHA: 'candidate', BODY: markers.join('\n') },
+        },
+      );
+    expect(check(base)).toMatchObject({ status: 0, stdout: 'false' });
+    expect(check([...base, ...optin])).toMatchObject({ status: 0, stdout: 'true' });
+    for (const markers of [
+      [...base, 'INCLUDE_SANITIZED_RUNTIME_LOGS=true'],
+      [...base, ...optin, 'INCLUDE_SANITIZED_RUNTIME_LOGS=false'],
+      [...base, ...optin, 'AUTHORIZATION_STATE=CONSUMED'],
+      [
+        ...base,
+        ...optin.filter((value) => value !== 'RUNTIME_LOG_LIMIT=200'),
+        'RUNTIME_LOG_LIMIT=1000',
+      ],
+      [...base, ...optin, 'IAM_MUTATIONS_AUTHORIZED=true'],
+    ])
+      expect(check(markers).status).not.toBe(0);
+  });
+
+  it('bounds current-revision log reads and probes with the existing identity and mutex', () => {
+    expect(readonlyWorkflow).toContain(
+      "if: steps.auth.outputs.include_runtime_diagnostics == 'true'",
+    );
+    expect(readonlyWorkflow).toContain(
+      'toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com',
+    );
+    expect(readonlyWorkflow).toContain('--limit=200 --order=desc --format=json');
+    expect(readonlyWorkflow).toContain('timestamp>=');
+    expect(readonlyWorkflow).toContain('timestamp<=');
+    expect(readonlyWorkflow).toContain('--connect-timeout 5 --max-time 15');
+    expect(readonlyWorkflow).toContain('"$WEBHOOK_URL/health"');
+    expect(readonlyWorkflow).toContain('"$WEBHOOK_URL/ready"');
+    expect(readonlyWorkflow).toContain('RAW_LOG_PAYLOAD_PUBLISHED=false');
+    for (const forbidden of [
+      '--impersonate-service-account',
+      'add-iam-policy-binding',
+      'gcloud run deploy',
+      'gcloud secrets versions access',
+      '--location-trusted',
+      '--retry',
+    ]) {
+      expect(readonlyWorkflow).not.toContain(forbidden);
+    }
+  });
+
   it('shares the callback mutex only for matching issue-triggered controllers', () => {
     for (const [path, titlePrefix, fallback] of issueScoped) {
       const workflow = read(path);

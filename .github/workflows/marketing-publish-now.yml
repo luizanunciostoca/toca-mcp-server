@@ -354,7 +354,7 @@ jobs:
           tag="$registry/$PROJECT_ID/$REPOSITORY/duplicate-preflight:${AUDITED_CODE_SHA}-${GITHUB_RUN_ID}"
           docker build -t "$tag" /tmp/instagram-duplicate-preflight
           docker push "$tag"
-          digest="$(gcloud artifacts docker images describe "$tag" --project "$PROJECT_ID" --format='value(image_summary.digest)')"
+          digest="$(bash scripts/resolve-artifact-registry-digest.sh "$tag")"
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           image="${tag%:*}@${digest}"
           caption_base64="$(jq -r .caption control/marketing-publish-now-command.json | base64 -w0)"

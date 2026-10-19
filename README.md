@@ -57,3 +57,15 @@ See `docs/architecture/README.md`, `docs/architecture/routes-capabilities-v1.md`
 `docs/architecture/toca-managed-instagram-scheduler-v1.md`,
 `docs/operations/infrastructure-control-plane.md` and
 `docs/operations/autonomy-readiness-closeout-2026-08-26.md` for the current contracts and release evidence.
+
+## AG-09 analytics source (native TOCA)
+
+AG-09 / R08 / R31 must query Meta Ads through the TOCA-owned `meta_ads.insights.get`
+route backed by `MetaAdsReadProvider` and the Meta Marketing API. Adplane,
+Windsor.ai or any other external reporting connector is not an AG-09 data source
+or automatic fallback. Missing data must not be converted to zero or invented
+revenue/ROAS. See `docs/operations/ag09-native-analytics-source.md`.
+
+The owner confirmed `luizanunciostoca/toca-mcp-server` as the canonical repository
+for this native TOCA Meta Ads route. AG-09 does not require a separate `toca-media-server`
+repository or an external reporting service.

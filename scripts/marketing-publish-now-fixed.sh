@@ -94,9 +94,7 @@ DOCKERFILE
     -f /tmp/publish-now-duplicate-preflight.Dockerfile \
     -t "$preflight_image_tag" .
   retry_command 3 5 docker push "$preflight_image_tag"
-  preflight_image_digest="$(gcloud artifacts docker images describe "$preflight_image_tag" \
-    --project "$PROJECT_ID" \
-    --format='value(image_summary.digest)')"
+  preflight_image_digest="$(bash scripts/resolve-artifact-registry-digest.sh "$preflight_image_tag")"
   [[ "$preflight_image_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
   preflight_image="${preflight_image_tag%:*}@${preflight_image_digest}"
 

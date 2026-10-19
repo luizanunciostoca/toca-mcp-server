@@ -37,6 +37,11 @@ const LOCATION_HOURS_PATTERNS = [
   'qual a programacao regular da toca',
 ];
 
+const EXACT_OPERATING_DAYS_PATTERNS = [
+  'quais os dias de funcionamento',
+  'quais os dias de funcionamento da toca',
+];
+
 const GASTRONOMY_OPERATIONAL_PATTERNS = [
   'o que tem para comer',
   'o que tem para beber',
@@ -203,7 +208,10 @@ function canonicalRoute(normalized: string): CanonicalRoute | undefined {
     };
   }
 
-  if (matchesAny(normalized, LOCATION_HOURS_PATTERNS)) {
+  if (
+    matchesAny(normalized, LOCATION_HOURS_PATTERNS) ||
+    matchesExactAny(normalized, EXACT_OPERATING_DAYS_PATTERNS)
+  ) {
     return {
       intent: 'LOCATION_HOURS',
       topic: 'LOCATION_HOURS',

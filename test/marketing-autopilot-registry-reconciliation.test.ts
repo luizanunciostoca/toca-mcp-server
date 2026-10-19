@@ -32,6 +32,8 @@ afterEach(async () => {
 type Row = Record<string, string>;
 
 type MockOptions = {
+  mode?: 'reconcile-publication' | 'record-precheck';
+  row?: Row;
   rowOverrides?: Row;
   staleReadback?: boolean;
   publicationOverrides?: Record<string, unknown>;
@@ -71,6 +73,44 @@ function canonicalRow(overrides: Row = {}): Row {
   };
 }
 
+function futureCanaryRow(overrides: Row = {}): Row {
+  // CONTENT_ITEMS row 387 with the scheduling status required for the parent handoff.
+  return {
+    content_item_id: 'MKT-20261019-SUNSET-FEED-1500',
+    scheduled_at: '2026-10-19T15:00:00-03:00',
+    timezone: 'America/Bahia',
+    operation: 'SUNSET',
+    channel: 'INSTAGRAM',
+    format: 'FEED',
+    message:
+      'O sol encontra o horizonte e o mar guarda cada tom desse encontro. Simples assim, extraordinário assim. 🌅 #TocaDoMorcego #PorDoSol #MorroDeSaoPaulo',
+    cta: 'Planeje seu próximo fim de tarde na Toca.',
+    status: 'PRODUCED',
+    approval_status: 'APPROVED',
+    approval_mode: 'EXPLICIT_APPROVAL',
+    creative_id: 'CR-MKT-20261019-SUNSET-FEED-1500-PHOTO4X5-CANDIDATE-V1',
+    copy_id: 'CP-MKT-20261019-SUNSET-FEED-1500-V1',
+    correlation_id: 'CORR-MKT-20261019-SUNSET-FEED-1500-V1',
+    master_asset_id: 'MM-SUN-0002-FEED4X5-202610-JPG-V1',
+    master_drive_file_id: '1ZEAfWGayrkWLLsldsIM_OBFwIstnSAyA',
+    master_status: 'MASTER_READY',
+    creative_standard_id: 'SUNSET_FEED_V1',
+    creative_standard_version: '1.0',
+    creative_truth_policy_id: 'TOCA_CREATIVE_TRUTH_POLICY_V1',
+    brand_integrity_status: 'PASSED',
+    venue_fidelity_status: 'PASSED',
+    quality_gate_status: 'PASSED',
+    exact_asset_binding: 'TRUE',
+    output_sha256: '2b92b4c79c9e34040f65133a0b92957a59236a6d560c4e325bdd3743939b3f18',
+    scheduling_status: 'CANARY_READY',
+    scheduling_policy: '',
+    publication_id: '',
+    provider_external_id: '',
+    provider_status: '',
+    ...overrides,
+  };
+}
+
 function hashSnapshot(row: Row): string {
   const entries = Object.entries(row)
     .map(([key, value]) => [key, value.trim()] as const)
@@ -99,11 +139,12 @@ function cellText(value: unknown): string {
 
 async function executeReconciliation(options: MockOptions = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'toca-registry-reconcile-'));
-  const baselineRow = canonicalRow();
-  let liveRow = canonicalRow(options.rowOverrides);
+  const baselineRow = options.row ?? canonicalRow();
+  let liveRow = { ...baselineRow, ...options.rowOverrides };
   const headers = Object.keys(baselineRow);
   let batchUpdateCount = 0;
   let appendCount = 0;
+  const appendedRows: unknown[][] = [];
 
   async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
@@ -141,6 +182,8 @@ async function executeReconciliation(options: MockOptions = {}) {
 
     if (request.method === 'POST' && url.pathname.includes(':append')) {
       appendCount += 1;
+      const payload = JSON.parse(await readBody(request)) as { values?: unknown[][] };
+      appendedRows.push(...(payload.values ?? []));
       response.end(JSON.stringify({ updates: { updatedRows: 1 } }));
       return;
     }
@@ -173,6 +216,7 @@ async function executeReconciliation(options: MockOptions = {}) {
       spreadsheetId: 'test-sheet',
       contentSheet: 'CONTENT_ITEMS',
       schedulerExecutionLogSheet: 'SCHEDULER_EXECUTION_LOG',
+      canonicalWriter: { workflow: '.github/workflows/marketing-publish-now.yml' },
     }),
   );
   writeFileSync(
@@ -221,14 +265,14 @@ async function executeReconciliation(options: MockOptions = {}) {
 
   const result = await new Promise<{ status: number | null; stdout: string; stderr: string }>(
     (resolve) => {
-      const child = spawn(process.execPath, [script, 'reconcile-publication'], {
+      const child = spawn(process.execPath, [script, options.mode ?? 'reconcile-publication'], {
         cwd: directory,
         env: {
           ...process.env,
           GOOGLE_ACCESS_TOKEN: 'test-token',
           MARKETING_AUTOPILOT_POLICY_PATH: policyPath,
           MARKETING_AUTOPILOT_COMMAND_PATH: commandPath,
-          MARKETING_AUTOPILOT_CONTENT_ITEM_ID: contentItemId,
+          MARKETING_AUTOPILOT_CONTENT_ITEM_ID: baselineRow.content_item_id ?? contentItemId,
           MARKETING_AUTOPILOT_PUBLICATION_EVIDENCE: publicationPath,
           MARKETING_AUTOPILOT_RECONCILIATION_EVIDENCE: reconciliationPath,
           MARKETING_AUTOPILOT_SHEETS_BASE_URL: `http://127.0.0.1:${address.port}`,
@@ -248,8 +292,47 @@ async function executeReconciliation(options: MockOptions = {}) {
     readFileSync(join(directory, 'marketing-autopilot-registry-reconciliation.json'), 'utf8'),
   ) as { status?: string; schedulerRunId?: string; writerRunId?: string; error?: string };
 
-  return { result, evidence, row: liveRow, batchUpdateCount, appendCount };
+  return { result, evidence, row: liveRow, batchUpdateCount, appendCount, appendedRows };
 }
+
+describe('Marketing Autopilot future canary precheck', () => {
+  it('records the approved Oct19 row with CANARY_READY without changing publication state', async () => {
+    const row = futureCanaryRow();
+    const run = await executeReconciliation({ mode: 'record-precheck', row });
+    expect(run.result.status, run.result.stderr).toBe(0);
+    expect(run.evidence).toMatchObject({
+      status: 'PRECHECK_RECORDED',
+      contentItemId: row.content_item_id,
+    });
+    expect(run.batchUpdateCount).toBe(0);
+    expect(run.appendCount).toBe(1);
+    expect(run.appendedRows[0]?.slice(2, 14)).toEqual([
+      row.content_item_id,
+      '888002',
+      'GITHUB_ACTIONS_CONTROL_PLANE',
+      row.scheduled_at,
+      'PRECHECK',
+      'CANARY_READY',
+      '0',
+      '0',
+      '',
+      'NOT_CALLED',
+      '',
+      '',
+    ]);
+    expect(run.row).toEqual(row);
+  });
+
+  it('still rejects the Oct19 row with missing scheduling metadata before any Registry write', async () => {
+    const row = futureCanaryRow({ scheduling_status: '' });
+    const run = await executeReconciliation({ mode: 'record-precheck', row });
+    expect(run.result.status).not.toBe(0);
+    expect(run.evidence.error).toBe('AUTOPILOT_PRECHECK_SCHEDULING_STATUS_INVALID:');
+    expect(run.batchUpdateCount).toBe(0);
+    expect(run.appendCount).toBe(0);
+    expect(run.row).toEqual(row);
+  });
+});
 
 describe('Marketing Autopilot registry reconciliation', () => {
   it('marks PUBLISHED only after verified provider/readback/write-disable evidence', async () => {
