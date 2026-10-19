@@ -5,6 +5,7 @@ import pg from 'pg';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { createRuntimeReadinessChecks } from '../src/health/runtime-readiness.js';
+import { prepareMetaWebhookRuntimeEnv } from '../src/providers/meta/meta-webhook-runtime-env.js';
 
 type ObjectValue = Record<string, unknown>;
 interface Scope extends Record<string, string> {
@@ -583,7 +584,9 @@ describe('actual source and sanitized effective configuration', () => {
     });
     await expect(
       api.sourceCompatibility(scope(), command, () =>
-        Promise.resolve('FROM node@sha256:fixture AS runtime\nENV NODE_ENV=production\n'),
+        Promise.resolve(
+          'FROM node@sha256:fixture AS runtime\nENV NODE_ENV=production\nCMD ["node", "dist/src/http.js"]\n',
+        ),
       ),
     ).resolves.toBeUndefined();
     expect(calls[2]).toEqual([
@@ -598,6 +601,10 @@ describe('actual source and sanitized effective configuration', () => {
       expect.arrayContaining([
         'src/config.ts',
         'src/health/runtime-readiness.ts',
+        'src/http-instagram-engagement.ts',
+        'src/providers/meta/meta-webhook-runtime-env.ts',
+        'src/providers/meta/meta-webhook-verify-token.ts',
+        'src/http.ts',
         'Dockerfile',
         'pnpm-lock.yaml',
       ]),
@@ -610,6 +617,236 @@ describe('actual source and sanitized effective configuration', () => {
         Promise.resolve('FROM node AS runtime\nENV NODE_ENV=development\n'),
       ),
     ).rejects.toThrow('VERIFIED_IMAGE_NODE_ENV_REQUIRED');
+  });
+  it.each([
+    'src/http-instagram-engagement.ts',
+    'src/providers/meta/meta-webhook-runtime-env.ts',
+    'src/providers/meta/meta-webhook-verify-token.ts',
+    'src/http.ts',
+  ])('refuses changed entrypoint contract %s before reading defaults', async (changedPath) => {
+    const read = vi.fn();
+    const command = vi.fn((_file: string, args: string[], code: string) => {
+      if (args[0] === 'diff' && args.includes(changedPath))
+        return Promise.reject(new api.DiagnosticError(code));
+      return Promise.resolve(args[1] === 'HEAD' ? SHA : api.EXPECTED.runtimeTreeSha);
+    });
+    await expect(api.sourceCompatibility(scope(), command, read)).rejects.toThrow(
+      'RUNTIME_READINESS_CONTRACT_CHANGED',
+    );
+    expect(read).not.toHaveBeenCalled();
+  });
+  it.each([
+    '',
+    'CMD ["node", "dist/src/http-instagram-engagement.js"]\n',
+    'CMD ["sh", "-c", "PRIVATE-COMMAND"]\n',
+    'CMD ["node", "dist/src/http.js"]\nCMD ["node", "dist/src/http.js"]\n',
+  ])('refuses an unproved image default command %j', async (cmd) => {
+    const command = (_file: string, args: string[]) =>
+      Promise.resolve(
+        args[1] === 'HEAD' ? SHA : args[0] === 'rev-parse' ? api.EXPECTED.runtimeTreeSha : '',
+      );
+    await expect(
+      api.sourceCompatibility(scope(), command, () =>
+        Promise.resolve('FROM node AS runtime\nENV NODE_ENV=production\n' + cmd),
+      ),
+    ).rejects.toThrow('VERIFIED_IMAGE_ENTRYPOINT_REQUIRED');
+  });
+});
+
+describe('canonical webhook entrypoint and effective environment', () => {
+  it.each([
+    [undefined, undefined, 'IMAGE_DEFAULT_HTTP'],
+    [[], [], 'IMAGE_DEFAULT_HTTP'],
+    [['node'], ['dist/src/http.js'], 'DIRECT_HTTP'],
+    [['node'], ['dist/src/http-instagram-engagement.js'], 'INSTAGRAM_WEBHOOK'],
+  ] as const)(
+    'recognizes the exact command %j / args %j without changing metadata',
+    (command, args, classification) => {
+      const { service, candidate, previous } = metadataFixture();
+      for (const rev of [candidate, previous]) {
+        if (command !== undefined) rev.containers[0]!.command = [...command];
+        if (args !== undefined) rev.containers[0]!.args = [...args];
+      }
+      const before = JSON.stringify({ service, candidate, previous });
+      const result = api.verifyMetadata(service, candidate, previous, scope());
+      expect(result.publicContext).toMatchObject({
+        effectiveEntrypoints: { CANDIDATE: classification, SERVING: classification },
+        nodeOptionsVerifiedEmpty: true,
+      });
+      expect(JSON.stringify({ service, candidate, previous })).toBe(before);
+      expect(api.publicResult(scope(), { metadata: result.publicContext })).toHaveProperty(
+        'metadata.effectiveEntrypoints.CANDIDATE',
+        classification,
+      );
+    },
+  );
+  it.each(['disabled', 'configured', 'derived'] as const)(
+    'checks the real wrapper footprint in %s mode without defaulting readiness fields',
+    (mode) => {
+      const { candidate } = metadataFixture();
+      setEnv(candidate, 'TOCA_DEPLOY_ENVIRONMENT');
+      const plain: NodeJS.ProcessEnv = {
+        NODE_ENV: 'production',
+        DATABASE_URL: 'postgres://PRIVATE-USER:PRIVATE-PASSWORD@PRIVATE-HOST/PRIVATE-DB',
+        PGOPTIONS: '',
+        PGPORT: '5432',
+        TOCA_READY_OUTBOX_MAX_LAG_SECONDS: '17',
+        ...Object.fromEntries(
+          candidate.containers[0]!.env.filter((entry) => entry.value !== undefined).map((entry) => [
+            entry.name,
+            entry.value,
+          ]),
+        ),
+        META_WEBHOOK_ENABLED: mode === 'disabled' ? 'false' : 'true',
+      };
+      if (mode === 'configured') {
+        plain.META_WEBHOOK_VERIFY_TOKEN_KEY = 'PRIVATE_TOKEN';
+        plain.PRIVATE_TOKEN = 'PRIVATE-TOKEN-VALUE';
+      }
+      if (mode === 'derived') {
+        plain.META_APP_SECRET_PROVIDER = 'env';
+        plain.META_APP_SECRET_KEY = 'PRIVATE_SECRET';
+        plain.PRIVATE_SECRET = 'PRIVATE-SECRET-VALUE';
+      }
+      const before = { ...plain };
+      prepareMetaWebhookRuntimeEnv(plain);
+      const changed = [...new Set([...Object.keys(before), ...Object.keys(plain)])]
+        .filter((key) => before[key] !== plain[key])
+        .sort();
+      expect(changed).toEqual(
+        mode === 'derived'
+          ? ['META_WEBHOOK_VERIFY_TOKEN_KEY', 'TOCA_DERIVED_META_WEBHOOK_VERIFY_TOKEN']
+          : [],
+      );
+      expect(plain.TOCA_DEPLOY_ENVIRONMENT).toBeUndefined();
+      expect(plain.DATABASE_URL).toBe(before.DATABASE_URL);
+      expect(plain.PGOPTIONS).toBe(before.PGOPTIONS);
+      expect(plain.PGPORT).toBe(before.PGPORT);
+      const afterRevision = structuredClone(candidate);
+      afterRevision.containers[0]!.env = Object.entries(plain).flatMap(([name, value]) =>
+        value === undefined ? [] : [{ name, value }],
+      );
+      expect(api.criticalConfiguration(afterRevision, true)).toMatchObject({
+        status: 'FAIL_OBSERVED_SIGNALS',
+        codes: ['READINESS_DEPLOY_ENVIRONMENT_REQUIRED'],
+      });
+      expect(api.outboxThreshold(afterRevision).value).toBe(17);
+    },
+  );
+  describe.each(['CANDIDATE', 'SERVING'] as const)('%s revision gates', (side) => {
+    const invalidShapes: Array<[string, ObjectValue]> = [
+      ['shell', { command: ['sh', '-c'], args: ['PRIVATE-COMMAND'] }],
+      [
+        'node preload flag',
+        {
+          command: ['node', '--import=PRIVATE-IMPORT'],
+          args: ['dist/src/http-instagram-engagement.js'],
+        },
+      ],
+      [
+        'extra argument',
+        { command: ['node'], args: ['dist/src/http-instagram-engagement.js', 'PRIVATE-ARG'] },
+      ],
+      ['other path', { command: ['node'], args: ['PRIVATE-PATH.js'] }],
+      ['missing command override', { args: ['dist/src/http-instagram-engagement.js'] }],
+      ['missing argument override', { command: ['node'] }],
+      ['string command', { command: 'node', args: ['dist/src/http-instagram-engagement.js'] }],
+      ['string args', { command: ['node'], args: 'dist/src/http-instagram-engagement.js' }],
+      ['null command', { command: null }],
+      ['null args', { args: null }],
+    ];
+    it.each(invalidShapes)(
+      'refuses %s before secret or SQL and reports only the side/class',
+      async (_name, shape) => {
+        const { service, candidate, previous } = metadataFixture();
+        Object.assign((side === 'CANDIDATE' ? candidate : previous).containers[0]!, shape);
+        const { deps, sql } = diagnosticDeps();
+        deps.metadata.mockImplementation(() =>
+          Promise.resolve(api.verifyMetadata(service, candidate, previous, scope())),
+        );
+        const failure = await api.runDiagnostic(scope(), deps).catch((error: unknown) => error);
+        const result = api.publicResult(scope(), api.failureResult(failure));
+        expect(result).toMatchObject({
+          result: 'NOT_PROVEN',
+          code: 'EFFECTIVE_ENV_ENTRYPOINT_NOT_PROVEN',
+          revisionSide: side,
+          entrypointClass: 'UNPROVEN',
+          nodeOptionsPresence: 'ABSENT',
+        });
+        expect(JSON.stringify(result)).not.toMatch(/PRIVATE|command|args/);
+        expect(deps.databaseSecret).not.toHaveBeenCalled();
+        expect(deps.openDatabase).not.toHaveBeenCalled();
+        expect(sql.calls).toEqual([]);
+      },
+    );
+    it.each(['', ' \t '])('accepts observed empty NODE_OPTIONS %j', (value) => {
+      const { service, candidate, previous } = metadataFixture();
+      setEnv(side === 'CANDIDATE' ? candidate : previous, 'NODE_OPTIONS', value);
+      expect(
+        api.verifyMetadata(service, candidate, previous, scope()).publicContext
+          .nodeOptionsVerifiedEmpty,
+      ).toBe(true);
+    });
+    it.each([
+      '--require=PRIVATE-MODULE',
+      '--import=PRIVATE-MODULE',
+      '--max-old-space-size=512',
+      'secret-reference',
+    ])('refuses unproved NODE_OPTIONS %s before secret or SQL', async (value) => {
+      const { service, candidate, previous } = metadataFixture();
+      const rev = side === 'CANDIDATE' ? candidate : previous;
+      rev.containers[0]!.command = ['node'];
+      rev.containers[0]!.args = ['dist/src/http-instagram-engagement.js'];
+      if (value === 'secret-reference')
+        rev.containers[0]!.env.push({
+          name: 'NODE_OPTIONS',
+          valueSource: { secretKeyRef: { secret: 'PRIVATE-SECRET', version: 'latest' } },
+        });
+      else setEnv(rev, 'NODE_OPTIONS', value);
+      const { deps, sql } = diagnosticDeps();
+      deps.metadata.mockImplementation(() =>
+        Promise.resolve(api.verifyMetadata(service, candidate, previous, scope())),
+      );
+      const failure = await api.runDiagnostic(scope(), deps).catch((error: unknown) => error);
+      const result = api.publicResult(scope(), api.failureResult(failure));
+      expect(result).toMatchObject({
+        result: 'NOT_PROVEN',
+        code: 'EFFECTIVE_ENV_NODE_OPTIONS_NOT_PROVEN',
+        revisionSide: side,
+        entrypointClass: 'INSTAGRAM_WEBHOOK',
+        nodeOptionsPresence:
+          value === 'secret-reference' ? 'SECRET_REFERENCE_UNOBSERVED' : 'PRESENT',
+      });
+      expect(JSON.stringify(result)).not.toMatch(/PRIVATE|require|import|old-space|secretKeyRef/);
+      expect(deps.databaseSecret).not.toHaveBeenCalled();
+      expect(deps.openDatabase).not.toHaveBeenCalled();
+      expect(sql.calls).toEqual([]);
+    });
+  });
+  it('refuses public PASS when either entrypoint or NODE_OPTIONS proof is missing and strips arbitrary observations', async () => {
+    const { deps } = diagnosticDeps();
+    const result = await api.runDiagnostic(scope(), deps);
+    expect(api.publicResult(scope(), result).result).toBe('PASS_READONLY_DIAGNOSTIC');
+    for (const key of ['effectiveEntrypoints', 'nodeOptionsVerifiedEmpty']) {
+      const incomplete = structuredClone(result);
+      delete (incomplete.metadata as ObjectValue)[key];
+      expect(api.publicResult(scope(), incomplete).result).toBe('NOT_PROVEN');
+    }
+    const untrusted = api.publicResult(scope(), {
+      revisionSide: 'PRIVATE-REVISION',
+      entrypointClass: 'PRIVATE-COMMAND',
+      nodeOptionsPresence: 'PRIVATE-ENV',
+      metadata: {
+        ...metadata().publicContext,
+        effectiveEntrypoints: { CANDIDATE: 'PRIVATE-COMMAND', SERVING: 'PRIVATE-ARGS' },
+      },
+    });
+    expect(untrusted).toMatchObject({
+      revisionSide: null,
+      entrypointClass: null,
+      nodeOptionsPresence: null,
+    });
+    expect(JSON.stringify(untrusted)).not.toContain('PRIVATE');
   });
 });
 
