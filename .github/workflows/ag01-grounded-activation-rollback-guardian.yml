@@ -9,30 +9,30 @@ on:
 
 permissions:
   contents: read
+  actions: read
   issues: read
   id-token: write
 
+# These are the producers' existing writer mutexes, including callback writers.
+# Irrelevant events cannot cancel a pending recovery in either service's group.
 concurrency:
-  group: ag01-grounded-activation-rollback-guardian
+  group: ${{ contains(fromJSON('["failure","cancelled","timed_out"]'), github.event.workflow_run.conclusion) && github.event.workflow_run.head_branch == 'main' && (github.event.workflow_run.name == 'AG-01 Grounded Runtime Activation' && 'ag01-grounded-runtime-activation' || 'instagram-engagement-webhook-callback-control') || format('ag01-guardian-irrelevant-{0}', github.run_id) }}
   cancel-in-progress: false
 
 env:
   PROJECT_ID: toca-mcp-production
   REGION: southamerica-east1
-  AG01_SERVICE: toca-ag01-orchestrator
-  DAEMON_SERVICE: toca-managed-instagram-daemon
   DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
   WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
 
 jobs:
   rollback:
     if: >-
-      github.event.workflow_run.conclusion == 'failure' &&
+      contains(fromJSON('["failure","cancelled","timed_out"]'), github.event.workflow_run.conclusion) &&
       github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 15
-
     steps:
       - name: Checkout protected main
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -41,82 +41,37 @@ jobs:
           fetch-depth: 1
 
       - name: Refuse stale failed run
-        shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           FAILED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$FAILED_HEAD_SHA"
-          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$FAILED_HEAD_SHA"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')" = "$FAILED_HEAD_SHA"
 
-      - name: Authenticate rollback identity
+      - name: Verify failed attempt and immutable pre-stage context before credentials
+        id: context
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: node scripts/ag01-activation-rollback-guard.mjs guardian-context
+
+      - name: Authenticate bounded rollback identity
+        if: steps.context.outputs.context_verified == 'true'
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
+        if: steps.context.outputs.context_verified == 'true'
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Restore canonical pre-activation traffic
-        shell: bash
+      - name: Restore only this instance while its candidate still owns all traffic
+        if: steps.context.outputs.context_verified == 'true'
         env:
-          FAILED_WORKFLOW: ${{ github.event.workflow_run.name }}
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          current_revision() {
-            local service="$1"
-            gcloud run services describe "$service" \
-              --project "$PROJECT_ID" --region "$REGION" --format=json \
-              | jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end'
-          }
-
-          restore_if_needed() {
-            local service="$1" previous="$2" current
-            current="$(current_revision "$service")"
-            if [[ "$current" == "$previous" ]]; then
-              echo "Canonical revision already owns 100% traffic; rollback mutation not required."
-              return 0
-            fi
-            gcloud run services update-traffic "$service" \
-              --project "$PROJECT_ID" --region "$REGION" \
-              --to-revisions "$previous=100" --quiet
-          }
-
-          case "$FAILED_WORKFLOW" in
-            'AG-01 Grounded Runtime Activation')
-              PREVIOUS_REVISION="$(jq -r '.activeRuntime.ag01Orchestrator.historicalVerification.canonicalProductionRevision // empty' infra/control-plane/policy.json)"
-              [[ "$PREVIOUS_REVISION" =~ ^toca-ag01-orchestrator-[a-z0-9-]+$ ]]
-              restore_if_needed "$AG01_SERVICE" "$PREVIOUS_REVISION"
-              ;;
-            'Instagram Engagement AG-01 Fallback LIMITED Activation')
-              CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
-              PREVIOUS_REVISION="$(grep '^ENGAGEMENT_PROMOTED_REVISION=' <<< "$CONTROL_BODY" | tail -1 | cut -d= -f2-)"
-              [[ "$PREVIOUS_REVISION" =~ ^toca-managed-instagram-daemon-[a-z0-9-]+$ ]]
-              restore_if_needed "$DAEMON_SERVICE" "$PREVIOUS_REVISION"
-              ;;
-            *)
-              echo "Unsupported workflow: $FAILED_WORKFLOW" >&2
-              exit 1
-              ;;
-          esac
-
-      - name: Verify restored traffic
+          RECOVERY_KIND: ${{ steps.context.outputs.kind }}
         shell: bash
-        env:
-          FAILED_WORKFLOW: ${{ github.event.workflow_run.name }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if [[ "$FAILED_WORKFLOW" == 'AG-01 Grounded Runtime Activation' ]]; then
-            SERVICE="$AG01_SERVICE"
-            EXPECTED="$(jq -r '.activeRuntime.ag01Orchestrator.historicalVerification.canonicalProductionRevision // empty' infra/control-plane/policy.json)"
-          else
-            SERVICE="$DAEMON_SERVICE"
-            CONTROL_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
-            EXPECTED="$(grep '^ENGAGEMENT_PROMOTED_REVISION=' <<< "$CONTROL_BODY" | tail -1 | cut -d= -f2-)"
-          fi
-          SERVICE_JSON="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
-          jq -e --arg expected "$EXPECTED" '.status.traffic[]? | select(.revisionName==$expected and .percent==100)' <<< "$SERVICE_JSON" >/dev/null
+        run: node scripts/ag01-activation-rollback-guard.mjs rollback "$RECOVERY_KIND"
