@@ -664,7 +664,7 @@ describe('strict metadata and existing-secret binding', () => {
     }
     expect(request).toHaveBeenCalledTimes(3);
     for (const [url, options] of request.mock.calls) {
-      expect(url).toMatch(/^https:\/\/run.googleapis.com\/v2\//);
+      expect(url).toMatch(/^https:\/\/run\.googleapis\.com\/v2\//);
       expect(options?.method).toBe('GET');
       expect(options?.redirect).toBe('error');
     }
