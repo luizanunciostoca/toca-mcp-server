@@ -1112,7 +1112,7 @@ async function requestJSON(url, options, code, oversizedCode, request = fetch) {
   }
 }
 
-async function github(path, method = 'GET', body, etag) {
+export async function github(path, method = 'GET', body, request = fetch) {
   const result = await requestJSON(
     'https://api.github.com/repos/' + REPOSITORY + '/' + path,
     {
@@ -1122,12 +1122,12 @@ async function github(path, method = 'GET', body, etag) {
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-        ...(etag ? { 'If-Match': etag } : {}),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
     'GITHUB_REQUEST_FAILED',
     'GITHUB_RESPONSE_TOO_LARGE',
+    request,
   );
   return { ...result.data, httpEtag: result.etag };
 }
@@ -1170,9 +1170,10 @@ export async function consumeAuthorization(scope, api = github) {
   const immediate = await api('issues/' + scope.issueNumber);
   requireCondition(sameIssue(before, immediate), 'LIVE_AUTHORIZATION_CHANGED');
   const body = consumedBody(immediate.body, scope);
-  // Rechecks and readback supplement the conditional request. No atomicity or
-  // automatic retry is inferred if the provider loses/rejects this response.
-  await api('issues/' + scope.issueNumber, 'PATCH', { body }, immediate.httpEtag);
+  // GitHub does not support conditional PATCH for this endpoint. The shared
+  // workflow mutex, immediate LIVE checks and exact readback remain required;
+  // they do not claim atomicity, and a lost/rejected response is never retried.
+  await api('issues/' + scope.issueNumber, 'PATCH', { body });
   const after = await api('issues/' + scope.issueNumber);
   requireCondition(after.body === body, 'AUTHORIZATION_CONSUMPTION_READBACK_FAILED');
   verifyAuthorizationScope(scope, after, new Date(), true);
@@ -1413,12 +1414,7 @@ export async function finishAuthorization(saved, result, api = github, now = new
     'AUTHORIZATION_FINALIZATION_CHANGED',
   );
   const finalBody = state === 'CONSUMED' ? closing.body : consumedBody(closing.body, scope);
-  await api(
-    'issues/' + scope.issueNumber,
-    'PATCH',
-    { body: finalBody, state: 'closed' },
-    closing.httpEtag,
-  );
+  await api('issues/' + scope.issueNumber, 'PATCH', { body: finalBody, state: 'closed' });
   const final = await api('issues/' + scope.issueNumber);
   requireCondition(
     final.state === 'closed' &&

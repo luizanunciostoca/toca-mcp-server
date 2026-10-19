@@ -78,6 +78,12 @@ interface Script {
   cloudMetadataGet(path: string, token: string, request: typeof fetch): Promise<unknown>;
   accessDatabaseSecret(context: unknown, token: string, request: typeof fetch): Promise<string>;
   databaseOptions(raw: string): ObjectValue;
+  github(
+    path: string,
+    method: string | undefined,
+    body: unknown,
+    request: typeof fetch,
+  ): Promise<ObjectValue>;
   consumeAuthorization(scope: Scope, api: unknown): Promise<void>;
   finishAuthorization(
     scope: Scope,
@@ -1000,6 +1006,65 @@ describe('end-to-end controller gates and public proof', () => {
 });
 
 describe('guarded one-use receipt and workflow boundaries', () => {
+  it('uses supported issue PATCH requests and still verifies consumption and final readback', async () => {
+    let current = issue();
+    let comment: ObjectValue | undefined;
+    const request = vi.fn<typeof fetch>((input, init) => {
+      const url = new URL(
+        typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+      );
+      const headers = new Headers(init?.headers);
+      if (headers.has('If-Match'))
+        return Promise.resolve(
+          Response.json({ message: 'Conditional PATCH is unsupported' }, { status: 400 }),
+        );
+      const path = url.pathname.replace('/repos/' + api.REPOSITORY + '/', '');
+      const payload =
+        typeof init?.body === 'string'
+          ? (JSON.parse(init.body) as { body: string; state?: string })
+          : undefined;
+      if (init?.method === 'PATCH') {
+        if (!payload) throw new Error('Expected JSON issue body');
+        current = {
+          ...current,
+          body: payload.body,
+          state: payload.state ?? current.state,
+          updated_at: NOW.toISOString(),
+        };
+      } else if (init?.method === 'POST') {
+        if (!payload) throw new Error('Expected JSON comment body');
+        comment = {
+          id: 999,
+          body: payload.body,
+          user: { login: 'github-actions[bot]' },
+        };
+        return Promise.resolve(Response.json(comment));
+      }
+      return Promise.resolve(
+        Response.json(path === 'issues/comments/999' ? comment : current, {
+          headers: { etag: 'W/"observed-representation"' },
+        }),
+      );
+    });
+    const transport = (path: string, method?: string, body?: unknown) =>
+      api.github(path, method, body, request);
+    await api.consumeAuthorization(scope(), transport);
+    expect(current.body).toContain('CONSUMED_BY_RUN_ID=' + env.GITHUB_RUN_ID);
+    const result = await api.finishAuthorization(
+      scope(),
+      api.publicResult(scope()),
+      transport,
+      NOW,
+    );
+    expect(result.status).toBe('CLOSED_OWN_AUTHORIZATION');
+    expect(current.state).toBe('closed');
+    const writes = request.mock.calls.filter(([, options]) => options?.method === 'PATCH');
+    expect(writes).toHaveLength(2);
+    expect(writes.every(([, options]) => !new Headers(options?.headers).has('If-Match'))).toBe(
+      true,
+    );
+    expect(request.mock.calls.at(-1)?.[1]?.method).toBe('GET');
+  });
   function issueApi() {
     let current = issue();
     const comments = new Map<number, { body: string; user: { login: string } }>();
