@@ -194,7 +194,9 @@ printf 'SPECIALISTS=%s' "$SPECIALISTS_ENABLED"`,
   it('uses verified instance context and the producers shared writer mutexes', () => {
     expect(guardian).toContain('AG-01 Grounded Runtime Activation');
     expect(guardian).toContain('Instagram Engagement AG-01 Fallback LIMITED Activation');
-    expect(guardian).toContain("github.event.workflow_run.conclusion == 'failure'");
+    expect(guardian).toContain(
+      'contains(fromJSON(\'["failure","cancelled","timed_out"]\'), github.event.workflow_run.conclusion)',
+    );
     expect(guardian).toContain("github.event.workflow_run.head_branch == 'main'");
     expect(guardian).toContain('actions: read');
     expect(guardian).toContain('guardian-context');
@@ -262,10 +264,17 @@ const scopeLines = Object.entries({
   EXPECTED_PREVIOUS_REVISION: previous,
   ...(kind === 'fallback' ? {
     RUNTIME_IMAGE_DIGEST: candidateDigest,
-    AG01_SERVICE_URL: 'https://toca-ag01-orchestrator-example.a.run.app',
-    AG01_AUDIENCE: 'https://toca-ag01-orchestrator-example.a.run.app',
+    AG01_SERVICE_URL: input.liveAg01Url ?? 'https://toca-ag01-orchestrator-example.a.run.app',
+    AG01_AUDIENCE: input.liveAg01Url ?? 'https://toca-ag01-orchestrator-example.a.run.app',
   } : {}),
 }).map(([key,value]) => key + '=' + value);
+if (input.specialistsAuthorized) scopeLines.push(
+  'AG01_INTERNAL_SPECIALISTS_ACTIVATION=AUTHORIZED',
+  'AG01_INTERNAL_SPECIALISTS_MODE=READ_ONLY',
+  'AG01_INTERNAL_SPECIALISTS_SIDE_EFFECTS_AUTHORIZED=false',
+  'AG01_INTERNAL_SPECIALISTS_WORKFLOWSTORE_EXISTING_SCHEMA_ONLY=true',
+  'AG01_INTERNAL_SPECIALISTS_CHATGPT_TASKS_DISPATCH=false',
+);
 let issue = {
   number: 100, user: { login: 'luizanunciostoca' }, title: workflow.title,
   state: input.consumed ? 'closed' : 'open',
@@ -283,6 +292,12 @@ let context = {
   candidateImage: 'southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/' + workflow.image + '@' + candidateDigest,
   candidateImageDigest: candidateDigest,
   policySha256: policy, prestateVerified: true, zeroTrafficStageRequired: true, rollbackOnFailure: true,
+};
+const deployInputs = {
+  image: input.deployImage ?? context.candidateImage,
+  specialistsEnabled: input.deploySpecialists ?? (input.specialistsAuthorized ? 'true' : 'false'),
+  ag01Url: input.deployAg01Url ?? input.liveAg01Url ?? 'https://toca-ag01-orchestrator-example.a.run.app',
+  ag01Audience: input.deployAg01Audience ?? input.liveAg01Url ?? 'https://toca-ag01-orchestrator-example.a.run.app',
 };
 const revisionType = 'TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION';
 let service = {
@@ -342,7 +357,7 @@ const run = {
   id: Number(identity.runId), run_attempt: 1, head_sha: identity.sourceSha,
   head_branch: 'main', repository, head_repository: repository, path: identity.workflowPath,
   name: identity.workflowName, event: 'issues', actor: {login:'luizanunciostoca'},
-  triggering_actor: {login:'luizanunciostoca'}, status:'completed',conclusion:'failure',
+  triggering_actor: {login:'luizanunciostoca'}, status:input.runStatus ?? 'completed',conclusion:input.conclusion ?? 'failure',
   run_started_at: '2026-10-19T00:00:00.000Z',
 };
 const event = {repository, workflow_run: structuredClone(run)};
@@ -368,6 +383,7 @@ if (input.expiredArtifact) artifact.expired = true;
 if (input.changedAuthorization) issue.body = issue.body.replace('EXPECTED_PREVIOUS_REVISION=' + previous, 'EXPECTED_PREVIOUS_REVISION=' + other);
 if (input.revokedAuthorization) issue.body = issue.body.replace('AUTHORIZATION_STATE=ACTIVE','AUTHORIZATION_STATE=REVOKED');
 if (input.duplicateScope) issue.body += '\nSERVICE_MUTATION_AUTHORIZED=false';
+if (input.duplicateConsistentScope) issue.body += '\nSERVICE_MUTATION_AUTHORIZED=true';
 if (input.wrongRepo) run.head_repository = {full_name:'other/repo',id:8};
 let serviceReads = 0, mutations = 0, downloads = 0, cloudReads = 0;
 const patches = [], outputs = [], events = [], evidence = [];
@@ -381,7 +397,9 @@ const deps = {
     if (path === 'branches/main') return {commit:{sha:input.mainChanged ? '9'.repeat(40) : identity.sourceSha}};
     if (path === 'issues/640') return {body:[
       'MAIN_STABILITY=PASS','EVALUATED_MAIN_SHA=' + identity.sourceSha,
-      'MERGE_RESERVATION=NONE','GENERAL_AUTONOMY=false',
+      'MERGE_RESERVATION=NONE',
+      ...(input.controlAutonomy ?? ['false']).map((value) => 'GENERAL_AUTONOMY=' + value),
+      ...(input.duplicateControlStability ? ['MAIN_STABILITY=PASS'] : []),
       'ENGAGEMENT_AUTONOMY_STAGE=LIMITED','ENGAGEMENT_AUTO_REPLY_CHANNELS=DIRECT,COMMENT',
       'DIRECT_LIMITED_RUNTIME_ACTIVE=true','COMMENT_LIMITED_RUNTIME_ACTIVE=true',
     ].join('\n')};
@@ -436,7 +454,12 @@ const deps = {
 let result = null, error = null;
 try {
   if (input.action === 'guardian') result = await guard.guardianContext(event, policy, deps);
-  else if (input.action === 'stage') result = await guard.validateStageContext(context, policy, '300', deps);
+  else if (input.action === 'guardian-rollback') {
+    result = await guard.guardianContext(event, policy, deps);
+    if (result.context) result = await guard.executeRollback(result.context, deps);
+  }
+  else if (input.action === 'stability') result = await guard.liveAuthorization(identity, deps, {stability:true});
+  else if (input.action === 'stage') result = await guard.validateStageContext(context, policy, '300', deps, deployInputs);
   else if (input.action === 'prestate') result = await guard.capturePrestate(identity, deps);
   else if (input.action === 'prepare') result = await guard.prepareContext(identity, context, context.candidateImage, policy, deps);
   else if (input.action === 'promote') result = await guard.executePromotion(context, deps);
@@ -903,5 +926,145 @@ describe('uncertain rollback responses preserve the first failure', () => {
       failureCode: 'REQUEST_OUTCOME_UNKNOWN',
       recovery: { status: 'BLOCKED', failureCode: 'SERVICE_ETAG_CONFLICT' },
     });
+  });
+});
+
+describe('canonical control duplicates and completed non-success recovery', () => {
+  it('accepts the canonical repeated GENERAL_AUTONOMY=false control facts', async () => {
+    const result = await simulate({ action: 'stability', controlAutonomy: ['false', 'false'] });
+    expect(result.error).toBeNull();
+  });
+  it.each([[], ['false', 'true'], ['true', 'false'], ['true']])(
+    'rejects absent or conflicting autonomy controls %#',
+    async (...controlAutonomy) => {
+      const result = await simulate({ action: 'stability', controlAutonomy });
+      expect(result.error).toBe('MAIN_STABILITY_BLOCKED');
+      expect(result.patches).toEqual([]);
+    },
+  );
+  it('retains unique authorization and all other unique control markers', async () => {
+    expect((await simulate({ action: 'stability', duplicateConsistentScope: true })).error).toBe(
+      'AUTHORIZATION_MARKER_COUNT',
+    );
+    expect((await simulate({ action: 'stability', duplicateControlStability: true })).error).toBe(
+      'AUTHORIZATION_MARKER_COUNT',
+    );
+  });
+  it.each(['cancelled', 'timed_out'])(
+    'recovers %s only through verified context and own traffic',
+    async (conclusion) => {
+      const result = await simulate({ action: 'guardian-rollback', conclusion, traffic: 'own' });
+      expect(result.error).toBeNull();
+      expect(result.result).toMatchObject({ decision: 'INSTANCE_PRESTATE_RESTORED' });
+      expect(result.patches).toHaveLength(1);
+      expect(result.traffic).toEqual([
+        { revision: 'toca-ag01-orchestrator-previous', percent: 100 },
+      ]);
+    },
+  );
+  it.each(['cancelled', 'timed_out'])(
+    'performs no cloud read without an artifact after %s',
+    async (conclusion) => {
+      const result = await simulate({ action: 'guardian-rollback', conclusion, noArtifact: true });
+      expect(result.error).toBeNull();
+      expect(result.result).toMatchObject({ decision: 'NOOP_LEGACY_OR_NO_STAGE_CONTEXT' });
+      expect(result.cloudReads).toBe(0);
+      expect(result.patches).toEqual([]);
+    },
+  );
+  it.each(['success', 'neutral', 'skipped'])(
+    'rejects unrelated conclusion %s',
+    async (conclusion) => {
+      const result = await simulate({ action: 'guardian-rollback', conclusion, traffic: 'own' });
+      expect(result.error).toBe('INVALID_GUARDIAN_EVENT');
+      expect(result.cloudReads).toBe(0);
+    },
+  );
+  it('rejects a noncompleted run and keeps stale-attempt protection for cancellation', async () => {
+    expect(
+      (
+        await simulate({
+          action: 'guardian-rollback',
+          conclusion: 'cancelled',
+          runStatus: 'in_progress',
+        })
+      ).error,
+    ).toBe('ORIGIN_RUN_NOT_RECOVERABLE');
+    const stale = await simulate({
+      action: 'guardian-rollback',
+      conclusion: 'cancelled',
+      staleAttempt: true,
+      traffic: 'own',
+    });
+    expect(stale.result).toMatchObject({ decision: 'NOOP_STALE_ATTEMPT' });
+    expect(stale.patches).toEqual([]);
+  });
+});
+
+describe('effective deploy inputs remain bound to the live authorization scope', () => {
+  it('blocks an old enabled flag after all specialist opt-in markers were removed before prestate', async () => {
+    const result = await simulate({
+      action: 'stage',
+      noCandidate: true,
+      deploySpecialists: 'true',
+    });
+    expect(result.error).toBe('EFFECTIVE_SPECIALIST_SCOPE_MISMATCH');
+    expect(result.patches).toEqual([]);
+    expect(result.cloudReads).toBe(0);
+  });
+  it('blocks an old disabled flag when the live scope now explicitly requests specialists', async () => {
+    const result = await simulate({
+      action: 'stage',
+      noCandidate: true,
+      specialistsAuthorized: true,
+      deploySpecialists: 'false',
+    });
+    expect(result.error).toBe('EFFECTIVE_SPECIALIST_SCOPE_MISMATCH');
+    expect(result.cloudReads).toBe(0);
+  });
+  it.each([false, true])(
+    'accepts the effective specialist flag only with its current matching opt-in=%s',
+    async (specialistsAuthorized) => {
+      const result = await simulate({ action: 'stage', noCandidate: true, specialistsAuthorized });
+      expect(result.error).toBeNull();
+      expect(result.result).toMatchObject({ decision: 'LIVE_STAGE_PRECONDITIONS_VERIFIED' });
+    },
+  );
+  it.each(['deployAg01Url', 'deployAg01Audience'])(
+    'blocks stale fallback input %s after the live scope changed',
+    async (key) => {
+      const result = await simulate({
+        action: 'stage',
+        kind: 'fallback',
+        noCandidate: true,
+        liveAg01Url: 'https://toca-ag01-orchestrator-new.a.run.app',
+        [key]: 'https://toca-ag01-orchestrator-example.a.run.app',
+      });
+      expect(result.error).toBe('EFFECTIVE_FALLBACK_SCOPE_MISMATCH');
+      expect(result.patches).toEqual([]);
+      expect(result.cloudReads).toBe(0);
+    },
+  );
+  it.each(['ag01', 'fallback'])(
+    'rejects an effective image differing from the authenticated context for %s',
+    async (kind) => {
+      const result = await simulate({
+        action: 'stage',
+        kind,
+        noCandidate: true,
+        deployImage: 'unrelated/image@sha256:' + 'a'.repeat(64),
+      });
+      expect(result.error).toBe('EFFECTIVE_DEPLOY_IMAGE_MISMATCH');
+      expect(result.cloudReads).toBe(0);
+    },
+  );
+  it('passes the actual deploy environment into the stage validator', () => {
+    const helper = readFileSync('scripts/ag01-activation-rollback-guard.mjs', 'utf8');
+    expect(helper).toContain(
+      "image: context.kind === 'ag01' ? process.env.IMAGE : process.env.RUNTIME_IMAGE",
+    );
+    expect(helper).toContain('specialistsEnabled: process.env.SPECIALISTS_ENABLED');
+    expect(helper).toContain('ag01Url: process.env.AG01_URL');
+    expect(helper).toContain('ag01Audience: process.env.AG01_AUDIENCE');
   });
 });

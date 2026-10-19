@@ -26,6 +26,7 @@ const CONTEXT_FILE = 'activation-recovery/rollback-context.json';
 const PRESTATE_FILE = 'activation-recovery/prestate.json';
 const DIAGNOSTIC_FILE = 'activation-recovery/prestate-diagnostic.json';
 const REVISION_TYPE = 'TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION';
+const RECOVERABLE_CONCLUSIONS = new Set(['failure', 'cancelled', 'timed_out']);
 
 export const WORKFLOWS = Object.freeze({
   ag01: {
@@ -152,6 +153,15 @@ function marker(body, key, required = true) {
   if (!required && values.length === 0) return undefined;
   requireCondition(values.length === 1, 'AUTHORIZATION_MARKER_COUNT');
   return values[0].slice(key.length + 1);
+}
+
+function consistentControlMarker(body, key, expected) {
+  requireCondition(typeof body === 'string', 'INVALID_CONTROL_BODY');
+  const lines = body.split(/\r?\n/).filter((line) => line.startsWith(key + '='));
+  requireCondition(
+    lines.length > 0 && lines.every((line) => line === key + '=' + expected),
+    'MAIN_STABILITY_BLOCKED',
+  );
 }
 
 export function authorizationScope(issue, identity, allowConsumed = false) {
@@ -382,7 +392,8 @@ export async function liveAuthorization(
         COMMENT_LIMITED_RUNTIME_ACTIVE: 'true',
       });
     for (const [key, value] of Object.entries(markers)) {
-      requireCondition(marker(control.body, key) === value, 'MAIN_STABILITY_BLOCKED');
+      if (key === 'GENERAL_AUTONOMY') consistentControlMarker(control.body, key, value);
+      else requireCondition(marker(control.body, key) === value, 'MAIN_STABILITY_BLOCKED');
     }
   }
   return { scope, fingerprint: sha256(JSON.stringify(scope)) };
@@ -638,8 +649,8 @@ function validateRun(run, expected, completed) {
   );
   if (completed)
     requireCondition(
-      run.status === 'completed' && run.conclusion === 'failure',
-      'ORIGIN_RUN_NOT_FAILED',
+      run.status === 'completed' && RECOVERABLE_CONCLUSIONS.has(run.conclusion),
+      'ORIGIN_RUN_NOT_RECOVERABLE',
     );
 }
 
@@ -700,12 +711,31 @@ async function readArtifactContext(artifact, run, expected, policySha256, deps) 
   return context;
 }
 
-export async function validateStageContext(context, policySha256, artifactId, deps) {
+export async function validateStageContext(context, policySha256, artifactId, deps, deployInputs) {
   const authorization = await liveAuthorization(context, deps, { stability: true });
   requireCondition(
     authorization.fingerprint === context.authorizationFingerprint,
     'AUTHORIZATION_CHANGED',
   );
+  requireCondition(
+    deployInputs?.image === context.candidateImage,
+    'EFFECTIVE_DEPLOY_IMAGE_MISMATCH',
+  );
+  if (context.kind === 'ag01') {
+    const expected =
+      authorization.scope.AG01_INTERNAL_SPECIALISTS_ACTIVATION === 'AUTHORIZED' ? 'true' : 'false';
+    requireCondition(
+      deployInputs.specialistsEnabled === expected,
+      'EFFECTIVE_SPECIALIST_SCOPE_MISMATCH',
+    );
+  } else {
+    requireCondition(
+      deployInputs.ag01Url === authorization.scope.AG01_SERVICE_URL &&
+        deployInputs.ag01Audience === authorization.scope.AG01_AUDIENCE &&
+        context.candidateImageDigest === authorization.scope.RUNTIME_IMAGE_DIGEST,
+      'EFFECTIVE_FALLBACK_SCOPE_MISMATCH',
+    );
+  }
   const run = await deps.github('actions/runs/' + context.runId);
   validateRun(run, context, false);
   const artifact = await deps.github('actions/artifacts/' + positiveId(artifactId));
@@ -752,7 +782,7 @@ export async function guardianContext(event, policySha256, deps) {
   requireCondition(
     event.repository?.full_name === REPOSITORY &&
       origin.head_branch === 'main' &&
-      origin.conclusion === 'failure',
+      RECOVERABLE_CONCLUSIONS.has(origin.conclusion),
     'INVALID_GUARDIAN_EVENT',
   );
   const latest = await deps.github('actions/runs/' + expected.runId);
@@ -1323,7 +1353,12 @@ async function main() {
   );
   if (command === 'validate-stage') {
     deps.evidence(
-      await validateStageContext(context, policySha256, process.env.CONTEXT_ARTIFACT_ID, deps),
+      await validateStageContext(context, policySha256, process.env.CONTEXT_ARTIFACT_ID, deps, {
+        image: context.kind === 'ag01' ? process.env.IMAGE : process.env.RUNTIME_IMAGE,
+        specialistsEnabled: process.env.SPECIALISTS_ENABLED,
+        ag01Url: process.env.AG01_URL,
+        ag01Audience: process.env.AG01_AUDIENCE,
+      }),
     );
     return;
   }
