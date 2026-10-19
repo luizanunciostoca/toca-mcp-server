@@ -1,0 +1,124 @@
+name: AG09 Native Meta Readonly Acceptance
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  id-token: write
+
+concurrency:
+  # Share the activation/guardian mutex: the observed AG01 revision must remain
+  # the same throughout the single mission and its persisted readback.
+  group: ${{ github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — AG09 native Meta READONLY acceptance AUTO') && 'ag01-grounded-runtime-activation' || format('ag09-readonly-irrelevant-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.actor == github.repository_owner &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — AG09 native Meta READONLY acceptance AUTO')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    env:
+      AUTHORIZATION_ISSUE_NUMBER: ${{ github.event.issue.number }}
+      AG09_ACCEPTANCE_DIR: /tmp/ag09-readonly-${{ github.run_id }}-${{ github.run_attempt }}
+      CLOUD_SQL_PROXY_PATH: /tmp/ag09-cloud-sql-proxy-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout exact controller and observed runtime history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Validate LIVE single-use authorization and certified main
+        id: authorize
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ag09-native-meta-readonly-acceptance.mjs authorize
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.0
+
+      - name: Compile existing Core and canonical read stores
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Obtain pinned existing Cloud SQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            'https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.24.1/cloud-sql-proxy.linux.amd64' \
+            --output "$CLOUD_SQL_PROXY_PATH"
+          echo "fae2766aac9d614a2bdef2f2a7778f3d054f3acd5ff07a81a9e300bd471512eb  $CLOUD_SQL_PROXY_PATH" | sha256sum --check --status
+          chmod 700 "$CLOUD_SQL_PROXY_PATH"
+
+      - name: Authenticate existing governed GCP identity
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify LIVE service, existing grants and read-only database access
+        id: preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ag09-native-meta-readonly-acceptance.mjs preflight
+
+      - name: Obtain private invoker token for the observed service
+        id: invoker
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+          service_account: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: ${{ steps.preflight.outputs.base_url }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Execute one AG09 mission and verify durable Core and Meta evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ID_TOKEN: ${{ steps.invoker.outputs.id_token }}
+        run: node scripts/ag09-native-meta-readonly-acceptance.mjs execute
+
+      - name: Persist sanitized result and consume only this authorization
+        if: always() && steps.authorize.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ag09-native-meta-readonly-acceptance.mjs finish
+
+      - name: Upload scoped evidence without provider rows or secret payloads
+        if: always() && steps.authorize.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ag09-native-meta-readonly-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.AG09_ACCEPTANCE_DIR }}/context.json
+            ${{ env.AG09_ACCEPTANCE_DIR }}/result.json
+            ${{ env.AG09_ACCEPTANCE_DIR }}/finalization.json
+          if-no-files-found: error
+          retention-days: 7
