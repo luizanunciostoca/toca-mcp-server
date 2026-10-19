@@ -44,13 +44,19 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = 'refs/heads/main'
+          [[ "${GITHUB_RUN_ATTEMPT:-0}" == '1' ]] || {
+            echo 'SHADOW_BUILD_NEW_AUTHORIZATION_REQUIRED_FOR_RERUN' >&2
+            exit 1
+          }
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
-          ISSUE_JSON="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -er '.issue.number' "$GITHUB_EVENT_PATH")"
+          [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '.body // ""')"
-          ISSUE_NUMBER="$(printf '%s' "$ISSUE_JSON" | jq -r '.number')"
 
-          printf '%s' "$ISSUE_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '
+          printf '%s' "$ISSUE_JSON" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" --arg issue "$ISSUE_NUMBER" '
+            ((.number | tostring) == $issue) and
             (.state == "open") and
             (.user.login == $owner) and
             (.title | startswith("PRODUCTION AUTHORIZATION — Instagram engagement shadow runtime build AUTO"))
@@ -70,10 +76,13 @@ jobs:
             "EXTERNAL_REPLY_WRITES_AUTHORIZED=false"
           )
           for required in "${required_lines[@]}"; do
-            grep -Fxq "$required" <<< "$BODY" || {
-              echo "Missing exact authorization field: $required" >&2
+            key="${required%%=*}"
+            key_count="$(grep -Ec "^${key}=" <<< "$BODY" || true)"
+            value_count="$(grep -Fxc "$required" <<< "$BODY" || true)"
+            if [[ "$key_count" != '1' || "$value_count" != '1' ]]; then
+              echo 'SHADOW_BUILD_AUTHORIZATION_NOT_UNIQUE_OR_EXACT' >&2
               exit 1
-            }
+            fi
           done
 
           echo "AUTHORIZATION_ISSUE_NUMBER=$ISSUE_NUMBER" >> "$GITHUB_ENV"
@@ -217,6 +226,7 @@ jobs:
       - name: Reuse or build immutable shadow runtime
         id: image
         env:
+          GH_TOKEN: ${{ github.token }}
           CANDIDATE_SOURCE_SHA: ${{ steps.broker.outputs.candidate_source_sha }}
           CANDIDATE_DIGEST: ${{ steps.broker.outputs.candidate_digest }}
         shell: bash
@@ -226,14 +236,54 @@ jobs:
           test "$GCP_REGION" = 'southamerica-east1'
           test "$GCP_ARTIFACT_REPOSITORY" = 'toca-mcp'
 
+          validate_live_build_authorization() {
+            [[ "${GITHUB_RUN_ATTEMPT:-0}" == '1' ]] || {
+              echo 'SHADOW_BUILD_NEW_AUTHORIZATION_REQUIRED_FOR_RERUN' >&2
+              return 1
+            }
+            test "$GITHUB_REF" = 'refs/heads/main'
+            test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+            [[ "$AUTHORIZATION_ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]
+            local issue_json body current_main_sha required key key_count value_count
+            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${AUTHORIZATION_ISSUE_NUMBER}")"
+            printf '%s' "$issue_json" | jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" --arg issue "$AUTHORIZATION_ISSUE_NUMBER" '
+              ((.number | tostring) == $issue) and
+              (.state == "open") and
+              (.user.login == $owner) and
+              (.title | startswith("PRODUCTION AUTHORIZATION — Instagram engagement shadow runtime build AUTO"))
+            ' >/dev/null
+            current_main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+            test "$current_main_sha" = "$GITHUB_SHA"
+            body="$(printf '%s' "$issue_json" | jq -r '.body // ""')"
+            local required_lines=(
+              "AUTHORIZED_CANDIDATE_SHA=$GITHUB_SHA"
+              'AUTHORIZATION_STATE=ACTIVE'
+              'INSTAGRAM_ENGAGEMENT_SHADOW_RUNTIME_BUILD=AUTHORIZED'
+              'AUTO_BUILD_AUTHORIZED=true'
+              'RUNTIME_BUILD_ONLY=true'
+              'DATABASE_MUTATIONS_AUTHORIZED=false'
+              'SERVICE_DEPLOY_AUTHORIZED=false'
+              'EXTERNAL_REPLY_WRITES_AUTHORIZED=false'
+            )
+            for required in "${required_lines[@]}"; do
+              key="${required%%=*}"
+              key_count="$(grep -Ec "^${key}=" <<< "$body" || true)"
+              value_count="$(grep -Fxc "$required" <<< "$body" || true)"
+              if [[ "$key_count" != '1' || "$value_count" != '1' ]]; then
+                echo 'SHADOW_BUILD_AUTHORIZATION_NOT_UNIQUE_OR_EXACT' >&2
+                return 1
+              fi
+            done
+          }
+
+          validate_live_build_authorization
           REUSED=false
           DIGEST=''
           RUNTIME_SOURCE_SHA="$GITHUB_SHA"
           if [[ "$CANDIDATE_SOURCE_SHA" == "$GITHUB_SHA" ]] && \
             [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             CANDIDATE_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$CANDIDATE_DIGEST"
-            if DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$CANDIDATE_IMAGE" \
-              --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)' 2>/dev/null)" && \
+            if DESCRIBED_DIGEST="$(bash scripts/resolve-artifact-registry-digest.sh "$CANDIDATE_IMAGE")" && \
               [[ "$DESCRIBED_DIGEST" == "$CANDIDATE_DIGEST" ]]; then
               DIGEST="$CANDIDATE_DIGEST"
               RUNTIME_SOURCE_SHA="$CANDIDATE_SOURCE_SHA"
@@ -243,10 +293,11 @@ jobs:
 
           if [[ "$REUSED" != 'true' ]]; then
             IMAGE_TAG="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:instagram-engagement-shadow-${GITHUB_SHA}"
+            validate_live_build_authorization
             docker build --pull -t "$IMAGE_TAG" .
+            validate_live_build_authorization
             docker push "$IMAGE_TAG"
-            DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" \
-              --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+            DIGEST="$(bash scripts/resolve-artifact-registry-digest.sh "$IMAGE_TAG")"
             RUNTIME_SOURCE_SHA="$GITHUB_SHA"
           fi
 
@@ -257,8 +308,7 @@ jobs:
             exit 1
           }
           IMMUTABLE_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$DIGEST"
-          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$IMMUTABLE_IMAGE" \
-            --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          DESCRIBED_DIGEST="$(bash scripts/resolve-artifact-registry-digest.sh "$IMMUTABLE_IMAGE")"
           test "$DESCRIBED_DIGEST" = "$DIGEST"
 
           echo "runtime_source_sha=$RUNTIME_SOURCE_SHA" >> "$GITHUB_OUTPUT"
