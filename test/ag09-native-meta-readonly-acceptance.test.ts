@@ -55,6 +55,7 @@ interface Script {
   REQUIRED_MARKERS: Record<string, string>;
   instanceFromEnv(env: unknown): Record<string, string>;
   authorizationScope(issue: unknown, instance: unknown, now?: Date, consumed?: boolean): Scope;
+  verifyAuthorizationScope(issue: unknown, scope: unknown, now?: Date, consumed?: boolean): Scope;
   requireStableMain(control: unknown, main: string, instance: unknown): void;
   requireExistingExecutionPolicy(policy: unknown): void;
   revisionContext(
@@ -317,6 +318,69 @@ describe('AG09 authorization and current certified source', () => {
     expect(api.requestFor(scope).message).toContain(api.ACCOUNT);
   });
 
+  it('revalidates repeated ACTIVE reads using the complete previous scope', () => {
+    let current = scope;
+    for (let readback = 0; readback < 3; readback++) {
+      current = api.verifyAuthorizationScope(issue(), current, NOW);
+      expect(current).toEqual(scope);
+    }
+  });
+
+  it('rebuilds derived fields from the live authorization without inheriting prior context', () => {
+    const current = api.authorizationScope(
+      issue(),
+      {
+        ...scope,
+        authorizationFingerprint: 'prior-fingerprint-must-not-be-hashed',
+        issueBodyHash: 'prior-body-hash',
+        correlationId: 'another-correlation',
+        idempotencyKey: 'another-request',
+        runtimeSourceSha: SHA,
+        account: 'another-account',
+        currency: 'USD',
+        unrelatedContext: { status: 'previous-readback' },
+      },
+      NOW,
+    );
+    expect(current).toEqual(scope);
+  });
+
+  it.each([
+    ['runtimeSourceSha', SHA],
+    ['runtimeTreeSha', SHA],
+    ['revision', api.SERVICE + '-another-revision'],
+    ['digest', 'sha256:' + 'e'.repeat(64)],
+    ['correlationId', 'another-correlation'],
+    ['idempotencyKey', 'another-request'],
+    ['issueBodyHash', 'e'.repeat(64)],
+    ['account', 'another-account'],
+    ['currency', 'USD'],
+    ['sourceSha', RUNTIME_SHA],
+    ['authorizationFingerprint', 'e'.repeat(64)],
+    ['unrelatedContext', 'previous-readback'],
+  ])('rejects saved scope tampering in %s at the LIVE verification gate', (key, value) => {
+    expect(() => api.verifyAuthorizationScope(issue(), { ...scope, [key]: value }, NOW)).toThrow(
+      'AUTHORIZATION_CHANGED',
+    );
+  });
+
+  it.each([
+    ['repository', 'someone/else'],
+    ['runId', '39200000001'],
+    ['runAttempt', '2'],
+  ])('keeps immutable instance field %s bound to the readback fingerprint', (key, value) => {
+    const changed = api.authorizationScope(issue(), { ...scope, [key]: value }, NOW);
+    expect(changed.authorizationFingerprint).not.toBe(scope.authorizationFingerprint);
+  });
+
+  it.each([
+    ['sourceSha', RUNTIME_SHA, 'MARKER_MISMATCH_AUTHORIZED_CONTROLLER_SHA'],
+    ['actor', 'another-user', 'LIVE_OWNER_AUTHORIZATION_REQUIRED'],
+    ['issueNumber', '1101', 'LIVE_OWNER_AUTHORIZATION_REQUIRED'],
+  ])('rejects an altered %s in the complete previous scope', (key, value, code) => {
+    expect(() => api.authorizationScope(issue(), { ...scope, [key]: value }, NOW)).toThrow(code);
+  });
+
   it.each([
     ['GITHUB_RUN_ATTEMPT', '2'],
     ['GITHUB_ACTOR', 'another-user'],
@@ -377,6 +441,56 @@ describe('AG09 authorization and current certified source', () => {
     expect(() =>
       api.authorizationScope(issue({ CONSUMED_BY_RUN_ID: env.GITHUB_RUN_ID }), instance, NOW),
     ).toThrow('AUTHORIZATION_REPLAY_MARKERS');
+  });
+
+  it('revalidates ACTIVE to CONSUMED and repeated consumed reads using the complete scope', () => {
+    const consumed = issue({
+      AUTHORIZATION_STATE: 'CONSUMED',
+      CONSUMED_BY_RUN_ID: env.GITHUB_RUN_ID,
+      CONSUMED_BY_RUN_ATTEMPT: '1',
+    });
+    let current = scope;
+    for (let readback = 0; readback < 3; readback++) {
+      current = api.verifyAuthorizationScope(consumed, current, NOW, true);
+      expect(current).toEqual(scope);
+    }
+  });
+
+  it.each([false, true])(
+    'keeps body changes detectable on full-scope readback (consumed=%s)',
+    (consumed) => {
+      const changed = issue(
+        consumed
+          ? {
+              AUTHORIZATION_STATE: 'CONSUMED',
+              CONSUMED_BY_RUN_ID: env.GITHUB_RUN_ID,
+              CONSUMED_BY_RUN_ATTEMPT: '1',
+            }
+          : {},
+      );
+      changed.body += '\nThe owner changed the authorized scope.';
+      const current = api.authorizationScope(changed, scope, NOW, consumed);
+      expect(current.issueBodyHash).not.toBe(scope.issueBodyHash);
+      expect(current.authorizationFingerprint).not.toBe(scope.authorizationFingerprint);
+      expect(() => api.verifyAuthorizationScope(changed, scope, NOW, consumed)).toThrow(
+        'AUTHORIZATION_CHANGED',
+      );
+    },
+  );
+
+  it('rejects CONSUMED by another attempt when rebuilding from the complete scope', () => {
+    expect(() =>
+      api.verifyAuthorizationScope(
+        issue({
+          AUTHORIZATION_STATE: 'CONSUMED',
+          CONSUMED_BY_RUN_ID: env.GITHUB_RUN_ID,
+          CONSUMED_BY_RUN_ATTEMPT: '2',
+        }),
+        scope,
+        NOW,
+        true,
+      ),
+    ).toThrow('MARKER_MISMATCH_CONSUMED_BY_RUN_ATTEMPT');
   });
 
   it.each([

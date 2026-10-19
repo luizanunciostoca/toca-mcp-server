@@ -156,8 +156,15 @@ export function authorizationScope(issue, instance, now = new Date(), consumed =
     get('CONSUMED_BY_RUN_ID', instance.runId);
     get('CONSUMED_BY_RUN_ATTEMPT', instance.runAttempt);
   } else requireCondition(!/^CONSUMED_BY_RUN_/m.test(issue.body), 'AUTHORIZATION_REPLAY_MARKERS');
+  // Live checks pass the previous scope; retain only its immutable identity.
+  // Derived fields, including the old fingerprint, must be rebuilt below.
   const scope = {
-    ...instance,
+    repository: instance.repository,
+    sourceSha: instance.sourceSha,
+    runId: instance.runId,
+    runAttempt: instance.runAttempt,
+    actor: instance.actor,
+    issueNumber: instance.issueNumber,
     runtimeSourceSha: get('EXPECTED_RUNTIME_SOURCE_SHA'),
     runtimeTreeSha: get('EXPECTED_RUNTIME_TREE_SHA'),
     revision: get('EXPECTED_AG01_REVISION'),
@@ -200,6 +207,17 @@ export function authorizationScope(issue, instance, now = new Date(), consumed =
   scope.issueBodyHash = hash(normalizedAuthorizationBody(issue.body));
   scope.authorizationFingerprint = fingerprint(scope);
   return scope;
+}
+
+export function verifyAuthorizationScope(issue, scope, now = new Date(), consumed = false) {
+  const { authorizationFingerprint, ...savedScope } = scope;
+  requireCondition(fingerprint(savedScope) === authorizationFingerprint, 'AUTHORIZATION_CHANGED');
+  const current = authorizationScope(issue, scope, now, consumed);
+  requireCondition(
+    current.authorizationFingerprint === authorizationFingerprint,
+    'AUTHORIZATION_CHANGED',
+  );
+  return current;
 }
 
 function normalizedAuthorizationBody(body) {
@@ -833,11 +851,7 @@ async function liveAuthorization(scope, consumed = false) {
     github('issues/640'),
   ]);
   requireStableMain(control, main.object?.sha, scope);
-  const current = authorizationScope(issue, scope, new Date(), consumed);
-  requireCondition(
-    current.authorizationFingerprint === scope.authorizationFingerprint,
-    'AUTHORIZATION_CHANGED',
-  );
+  verifyAuthorizationScope(issue, scope, new Date(), consumed);
   return issue;
 }
 
