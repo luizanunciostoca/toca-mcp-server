@@ -37,7 +37,11 @@ describe('Instagram engagement shadow runtime build-only workflow', () => {
   it('only publishes an immutable Artifact Registry runtime and sanitized evidence', () => {
     expect(workflow).toContain('docker build --pull -t "$IMAGE_TAG" .');
     expect(workflow).toContain('docker push "$IMAGE_TAG"');
-    expect(workflow).toContain('gcloud artifacts docker images describe');
+    for (const image of ['CANDIDATE_IMAGE', 'IMAGE_TAG', 'IMMUTABLE_IMAGE']) {
+      expect(workflow).toContain(
+        'bash scripts/resolve-artifact-registry-digest.sh "$' + image + '"',
+      );
+    }
     expect(workflow).toContain('^sha256:[0-9a-f]{64}$');
     expect(workflow).toContain('SHADOW_RUNTIME_BUILD_STATUS=PASS');
     expect(workflow).toContain('BUILD_ONLY=true');

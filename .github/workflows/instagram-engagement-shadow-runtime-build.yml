@@ -232,8 +232,7 @@ jobs:
           if [[ "$CANDIDATE_SOURCE_SHA" == "$GITHUB_SHA" ]] && \
             [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             CANDIDATE_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$CANDIDATE_DIGEST"
-            if DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$CANDIDATE_IMAGE" \
-              --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)' 2>/dev/null)" && \
+            if DESCRIBED_DIGEST="$(bash scripts/resolve-artifact-registry-digest.sh "$CANDIDATE_IMAGE")" && \
               [[ "$DESCRIBED_DIGEST" == "$CANDIDATE_DIGEST" ]]; then
               DIGEST="$CANDIDATE_DIGEST"
               RUNTIME_SOURCE_SHA="$CANDIDATE_SOURCE_SHA"
@@ -245,8 +244,7 @@ jobs:
             IMAGE_TAG="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server:instagram-engagement-shadow-${GITHUB_SHA}"
             docker build --pull -t "$IMAGE_TAG" .
             docker push "$IMAGE_TAG"
-            DIGEST="$(gcloud artifacts docker images describe "$IMAGE_TAG" \
-              --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+            DIGEST="$(bash scripts/resolve-artifact-registry-digest.sh "$IMAGE_TAG")"
             RUNTIME_SOURCE_SHA="$GITHUB_SHA"
           fi
 
@@ -257,8 +255,7 @@ jobs:
             exit 1
           }
           IMMUTABLE_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$GCP_ARTIFACT_REPOSITORY/server@$DIGEST"
-          DESCRIBED_DIGEST="$(gcloud artifacts docker images describe "$IMMUTABLE_IMAGE" \
-            --project "$GCP_PROJECT_ID" --format='value(image_summary.digest)')"
+          DESCRIBED_DIGEST="$(bash scripts/resolve-artifact-registry-digest.sh "$IMMUTABLE_IMAGE")"
           test "$DESCRIBED_DIGEST" = "$DIGEST"
 
           echo "runtime_source_sha=$RUNTIME_SOURCE_SHA" >> "$GITHUB_OUTPUT"
