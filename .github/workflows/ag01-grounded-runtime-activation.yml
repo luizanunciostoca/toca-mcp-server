@@ -6,11 +6,12 @@ on:
 
 permissions:
   contents: read
+  actions: read
   issues: write
   id-token: write
 
 concurrency:
-  group: ag01-grounded-runtime-activation
+  group: ${{ github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'PRODUCTION AUTHORIZATION — AG-01 grounded runtime activation AUTO') && 'ag01-grounded-runtime-activation' || format('ag01-grounded-irrelevant-{0}', github.run_id) }}
   cancel-in-progress: false
 
 env:
@@ -48,9 +49,10 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')" = "$GITHUB_SHA"
-          ISSUE_JSON="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON")"
-          ISSUE_NUMBER="$(jq -r '.number' <<< "$ISSUE_JSON")"
           jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '.state=="open" and .user.login==$owner and (.title|startswith("PRODUCTION AUTHORIZATION — AG-01 grounded runtime activation AUTO"))' <<< "$ISSUE_JSON" >/dev/null
           required=(
             "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
@@ -138,21 +140,24 @@ jobs:
       - name: Capture private production prestate
         id: prestate
         env:
-          EXPECTED_PREVIOUS_REVISION: ${{ steps.authz.outputs.expected_previous_revision }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
-        run: |
-          set -euo pipefail
-          SERVICE_JSON="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
-          IAM_JSON="$(gcloud run services get-iam-policy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
-          PRE_REVISION="$(jq -r '[.status.traffic[]? | select((.percent // 0)==100 and (.revisionName // "")!="") | .revisionName] | if length==1 then .[0] else empty end' <<< "$SERVICE_JSON")"
-          test "$PRE_REVISION" = "$EXPECTED_PREVIOUS_REVISION"
-          BASE_URL="$(jq -r '.status.url // empty' <<< "$SERVICE_JSON")"
-          test -n "$BASE_URL"
-          ! jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members//[])[]? | select(.=="allUsers")' <<< "$IAM_JSON" >/dev/null
-          PRE_JSON="$(gcloud run revisions describe "$PRE_REVISION" --project "$PROJECT_ID" --region "$REGION" --format=json)"
-          jq -e --arg sa "$RUNTIME_SERVICE_ACCOUNT" '.spec.serviceAccountName==$sa and ([.status.conditions[]? | select(.type=="Ready") | .status]|last)=="True"' <<< "$PRE_JSON" >/dev/null
-          echo "pre_revision=$PRE_REVISION" >> "$GITHUB_OUTPUT"
-          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
+        run: node scripts/ag01-activation-rollback-guard.mjs prestate ag01
+
+      - name: Upload sanitized prestate diagnostic
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: activation-prestate-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: activation-recovery/prestate-diagnostic.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Revalidate LIVE single-use authorization before first mutation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: node scripts/ag01-activation-rollback-guard.mjs authorize ag01
 
       - name: Configure Artifact Registry authentication
         shell: bash
@@ -173,21 +178,41 @@ jobs:
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
+      - name: Persist authenticated instance prestate before stage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECOVERY_IMAGE: ${{ steps.image.outputs.image }}
+        shell: bash
+        run: node scripts/ag01-activation-rollback-guard.mjs prepare ag01
+
+      - name: Upload required immutable rollback context before stage
+        id: rollback_context
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: activation-rollback-context-${{ github.run_id }}-${{ github.run_attempt }}
+          path: activation-recovery/rollback-context.json
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Stage private AG-01 candidate at zero traffic
         id: stage
         env:
+          GH_TOKEN: ${{ github.token }}
+          CONTEXT_ARTIFACT_ID: ${{ steps.rollback_context.outputs.artifact-id }}
+          CANDIDATE_SUFFIX: ${{ steps.prestate.outputs.candidate_suffix }}
+          CANDIDATE_TAG: ${{ steps.prestate.outputs.candidate_tag }}
           IMAGE: ${{ steps.image.outputs.image }}
           PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
           SPECIALISTS_ENABLED: ${{ steps.authz.outputs.specialists_enabled }}
         shell: bash
         run: |
           set -euo pipefail
+          node scripts/ag01-activation-rollback-guard.mjs validate-stage ag01
           [[ "$SPECIALISTS_ENABLED" == true || "$SPECIALISTS_ENABLED" == false ]]
-          SHORT="${GITHUB_SHA::8}"
-          SUFFIX="gnd-${SHORT}-${GITHUB_RUN_ATTEMPT}"
-          TAG="grounded-${SHORT}-${GITHUB_RUN_ATTEMPT}"
+          SUFFIX="$CANDIDATE_SUFFIX"
+          TAG="$CANDIDATE_TAG"
           CANDIDATE="${SERVICE}-${SUFFIX}"
-          gcloud run deploy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --image "$IMAGE" --service-account "$RUNTIME_SERVICE_ACCOUNT" --revision-suffix "$SUFFIX" --update-env-vars "TOCA_RELEASE_SHA=$GITHUB_SHA,INSTAGRAM_PUBLICATION_WRITES_ENABLED=false,TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED=$SPECIALISTS_ENABLED" --tag "$TAG" --no-traffic --no-allow-unauthenticated --quiet
+          gcloud run deploy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --image "$IMAGE" --service-account "$RUNTIME_SERVICE_ACCOUNT" --revision-suffix "$SUFFIX" --update-env-vars "TOCA_RELEASE_SHA=$GITHUB_SHA,INSTAGRAM_PUBLICATION_WRITES_ENABLED=false,TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED=$SPECIALISTS_ENABLED,TOCA_ACTIVATION_RUN_ID=$GITHUB_RUN_ID,TOCA_ACTIVATION_RUN_ATTEMPT=$GITHUB_RUN_ATTEMPT,TOCA_ACTIVATION_CONTROLLER_SHA=$GITHUB_SHA" --tag "$TAG" --no-traffic --no-allow-unauthenticated --quiet
           SERVICE_JSON="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           URL="$(jq -r --arg tag "$TAG" '.status.traffic[]? | select(.tag==$tag) | .url // empty' <<< "$SERVICE_JSON")"
           test -n "$URL"
@@ -229,9 +254,22 @@ jobs:
           jq -e '.status=="GROUNDED" and (.answer|type=="string" and length>0) and (.confidence>=0.85) and (.citedResourceIds|length>0) and (.evidence|length>0)' /tmp/grounded-answer.json >/dev/null
           echo 'DRIVE_SCOPE=READ_ONLY' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify official sunset ticket calendar on candidate
+        env:
+          ID_TOKEN: ${{ steps.candidate_token.outputs.id_token }}
+          PROBE_URL: ${{ steps.stage.outputs.candidate_url }}
+          CALENDAR_ANSWER_FILE: /tmp/calendar-candidate-answer.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg key "calendar-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" '{idempotencyKey:$key,message:"Em quais dias funciona o Pôr do Sol?",expectedIntent:"LOCATION_HOURS",correlationId:$key}' > /tmp/calendar-candidate-request.json
+          curl --fail-with-body --silent --show-error -H "Authorization: Bearer $ID_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/calendar-candidate-request.json "$PROBE_URL/v1/knowledge/answer" > "$CALENDAR_ANSWER_FILE"
+          node scripts/ag01-activation-rollback-guard.mjs calendar-evidence candidate
+
       - name: Promote exact candidate transactionally
         id: promote
         env:
+          GH_TOKEN: ${{ github.token }}
           CANDIDATE: ${{ steps.stage.outputs.candidate_revision }}
           PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
         shell: bash
@@ -239,18 +277,15 @@ jobs:
           set -euo pipefail
           current_revision(){ gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent//0)==100 and (.revisionName//"")!="") | .revisionName] | if length==1 then .[0] else empty end'; }
           rollback(){
-            [[ "${TRAFFIC_CHANGED:-false}" == true ]] || return 0
-            [[ "$(current_revision)" == "$CANDIDATE" ]] || return 0
-            gcloud run services update-traffic "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "$PRE_REVISION=100" --quiet
+            [[ "${PROMOTION_ATTEMPTED:-false}" == true ]] || return 0
+            node scripts/ag01-activation-rollback-guard.mjs rollback ag01
           }
           test "$(current_revision)" = "$PRE_REVISION"
           IAM_JSON="$(gcloud run services get-iam-policy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           ! jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members//[])[]? | select(.=="allUsers")' <<< "$IAM_JSON" >/dev/null
-          TRAFFIC_CHANGED=false
+          PROMOTION_ATTEMPTED=true
           trap rollback ERR
-          gcloud run services update-traffic "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "$CANDIDATE=100" --quiet
-          TRAFFIC_CHANGED=true
-          echo 'traffic_changed=true' >> "$GITHUB_OUTPUT"
+          node scripts/ag01-activation-rollback-guard.mjs promote ag01
           test "$(current_revision)" = "$CANDIDATE"
           IAM_JSON="$(gcloud run services get-iam-policy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           ! jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members//[])[]? | select(.=="allUsers")' <<< "$IAM_JSON" >/dev/null
@@ -287,6 +322,18 @@ jobs:
           CURRENT_REVISION_JSON="$(gcloud run revisions describe "$CURRENT" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           jq -e --arg specialists "$SPECIALISTS_ENABLED" '[.spec.containers[0].env[]? | select(.name=="TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED") | .value] | last == $specialists' <<< "$CURRENT_REVISION_JSON" >/dev/null
 
+      - name: Verify official sunset ticket calendar on base
+        env:
+          ID_TOKEN: ${{ steps.base_token.outputs.id_token }}
+          PROBE_URL: ${{ steps.prestate.outputs.base_url }}
+          CALENDAR_ANSWER_FILE: /tmp/calendar-base-answer.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg key "calendar-base-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" '{idempotencyKey:$key,message:"Em quais dias funciona o Pôr do Sol?",expectedIntent:"LOCATION_HOURS",correlationId:$key}' > /tmp/calendar-base-request.json
+          curl --fail-with-body --silent --show-error -H "Authorization: Bearer $ID_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/calendar-base-request.json "$PROBE_URL/v1/knowledge/answer" > "$CALENDAR_ANSWER_FILE"
+          node scripts/ag01-activation-rollback-guard.mjs calendar-evidence base
+
       - name: Publish sanitized activation evidence
         if: success()
         env:
@@ -308,6 +355,8 @@ jobs:
           SPECIALIST_READONLY_FLAG_VERIFIED=$SPECIALISTS_ENABLED
           SPECIALIST_CORE_PRODUCER_ACK=NOT_PROVEN_BY_GROUNDED_PROBE
           GROUNDING_PROBE=PASS
+          SUNSET_TICKET_CALENDAR_PROBE=GROUNDED_URL_CITATIONS_VERIFIED
+          SUNSET_TICKET_CALENDAR_SEMANTIC_REVIEW=REQUIRED
           DRIVE_SCOPE=READ_ONLY
           DIRECT_PROVIDER_WRITE=false
           EXTERNAL_BUSINESS_SIDE_EFFECT=false
@@ -321,7 +370,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ag01-grounded-runtime-activation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ag01-grounded-evidence/sanitized-evidence.env
+          path: |
+            ag01-grounded-evidence/sanitized-evidence.env
+            ag01-grounded-evidence/calendar-*.json
           if-no-files-found: warn
           retention-days: 90
 
@@ -341,16 +392,8 @@ jobs:
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="AUTHORIZATION_CONSUMED=true\nWORKFLOW_STATUS=$JOB_STATUS\nREUSE_PROHIBITED=true" >/dev/null
 
       - name: Roll back if any post-promotion step failed
-        if: failure() && steps.promote.outputs.traffic_changed == 'true'
+        if: failure() && steps.promote.outputs.promotion_attempted == 'true'
         env:
-          CANDIDATE: ${{ steps.stage.outputs.candidate_revision }}
-          PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
-        run: |
-          set -euo pipefail
-          CURRENT="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent//0)==100) | .revisionName] | if length==1 then .[0] else empty end')"
-          if [[ "$CURRENT" == "$CANDIDATE" ]]; then
-            gcloud run services update-traffic "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "$PRE_REVISION=100" --quiet
-          fi
-          FINAL="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent//0)==100) | .revisionName] | if length==1 then .[0] else empty end')"
-          test "$FINAL" = "$PRE_REVISION" || test "$FINAL" != "$CANDIDATE"
+        run: node scripts/ag01-activation-rollback-guard.mjs rollback ag01

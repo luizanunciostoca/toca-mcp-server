@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   issues: write
   id-token: write
 
@@ -59,9 +60,10 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')" = "$GITHUB_SHA"
-          ISSUE_JSON="$(jq -c '.issue' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+          [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          ISSUE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           BODY="$(jq -r '.body // ""' <<< "$ISSUE_JSON")"
-          ISSUE_NUMBER="$(jq -r '.number' <<< "$ISSUE_JSON")"
           jq -e --arg owner "$GITHUB_REPOSITORY_OWNER" '.state=="open" and .user.login==$owner and (.title|startswith("PRODUCTION AUTHORIZATION — Instagram AG-01 grounded fallback LIMITED activation AUTO"))' <<< "$ISSUE_JSON" >/dev/null
           required=(
             "AUTHORIZED_CONTROLLER_SHA=$GITHUB_SHA"
@@ -88,7 +90,7 @@ jobs:
           AG01_AUDIENCE="$(grep '^AG01_AUDIENCE=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
           PREVIOUS="$(grep '^EXPECTED_PREVIOUS_REVISION=' <<< "$BODY" | tail -1 | cut -d= -f2-)"
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "$AG01_URL" =~ ^https://[a-z0-9-]+\.run\.app$ ]]
+          [[ "$AG01_URL" =~ ^https://[a-z0-9-]+(\.[a-z0-9-]+)?\.run\.app$ ]]
           test "$AG01_AUDIENCE" = "$AG01_URL"
           [[ "$PREVIOUS" =~ ^toca-managed-instagram-daemon-[a-z0-9-]+$ ]]
           CONTROL="$(gh api "repos/${GITHUB_REPOSITORY}/issues/640" --jq '.body // ""')"
@@ -129,6 +131,12 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
+      - name: Revalidate LIVE single-use authorization before first mutation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: node scripts/ag01-activation-rollback-guard.mjs authorize fallback
+
       - name: Verify healthy Instagram webhook ingress before AG-01 mutation
         env:
           RUNTIME_IMAGE: ${{ steps.authz.outputs.runtime_image }}
@@ -140,6 +148,7 @@ jobs:
       - name: Verify immutable image AG-01 privacy and LIMITED prestate
         id: prestate
         env:
+          GH_TOKEN: ${{ github.token }}
           RUNTIME_IMAGE: ${{ steps.authz.outputs.runtime_image }}
           RUNTIME_DIGEST: ${{ steps.authz.outputs.runtime_digest }}
           AG01_URL: ${{ steps.authz.outputs.ag01_url }}
@@ -147,6 +156,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node scripts/ag01-activation-rollback-guard.mjs prestate fallback
           test "$(gcloud artifacts docker images describe "$RUNTIME_IMAGE" --project "$PROJECT_ID" --format='value(image_summary.digest)')" = "$RUNTIME_DIGEST"
           SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           PRE_REVISION="$(jq -r '[.status.traffic[]? | select((.percent//0)==100 and (.revisionName//"")!="") | .revisionName] | if length==1 then .[0] else empty end' <<< "$SERVICE_JSON")"
@@ -166,6 +176,15 @@ jobs:
           echo "pre_revision=$PRE_REVISION" >> "$GITHUB_OUTPUT"
           echo "scheduler_fingerprint=$FINGERPRINT" >> "$GITHUB_OUTPUT"
           echo "ag01_revision=$AG01_REVISION" >> "$GITHUB_OUTPUT"
+
+      - name: Upload sanitized prestate diagnostic
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: activation-prestate-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: activation-recovery/prestate-diagnostic.json
+          if-no-files-found: warn
+          retention-days: 90
 
       - name: Mint AG-01 private health token
         id: ag01_token
@@ -192,9 +211,29 @@ jobs:
           curl --fail-with-body --silent --show-error -H "Authorization: Bearer $ID_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/ag01-request.json "$AG01_URL/v1/knowledge/answer" >/tmp/ag01-answer.json
           jq -e '.status=="GROUNDED" and (.confidence>=0.85) and (.citedResourceIds|length>0)' /tmp/ag01-answer.json >/dev/null
 
+      - name: Persist authenticated instance prestate before stage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECOVERY_IMAGE: ${{ steps.authz.outputs.runtime_image }}
+        shell: bash
+        run: node scripts/ag01-activation-rollback-guard.mjs prepare fallback
+
+      - name: Upload required immutable rollback context before stage
+        id: rollback_context
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: activation-rollback-context-${{ github.run_id }}-${{ github.run_attempt }}
+          path: activation-recovery/rollback-context.json
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Stage daemon candidate with grounded fallback at zero traffic
         id: stage
         env:
+          GH_TOKEN: ${{ github.token }}
+          CONTEXT_ARTIFACT_ID: ${{ steps.rollback_context.outputs.artifact-id }}
+          CANDIDATE_SUFFIX: ${{ steps.prestate.outputs.candidate_suffix }}
+          CANDIDATE_TAG: ${{ steps.prestate.outputs.candidate_tag }}
           RUNTIME_IMAGE: ${{ steps.authz.outputs.runtime_image }}
           RUNTIME_DIGEST: ${{ steps.authz.outputs.runtime_digest }}
           AG01_URL: ${{ steps.authz.outputs.ag01_url }}
@@ -203,10 +242,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SHORT="${GITHUB_SHA::8}"
-          SUFFIX="ag01-${SHORT}-${GITHUB_RUN_ATTEMPT}"
+          node scripts/ag01-activation-rollback-guard.mjs validate-stage fallback
+          SUFFIX="$CANDIDATE_SUFFIX"
+          TAG="$CANDIDATE_TAG"
           CANDIDATE="${DAEMON_SERVICE}-${SUFFIX}"
-          gcloud run deploy "$DAEMON_SERVICE" --project "$PROJECT_ID" --region "$REGION" --image "$RUNTIME_IMAGE" --revision-suffix "$SUFFIX" --update-env-vars "INSTAGRAM_ENGAGEMENT_AG01_GROUNDED_FALLBACK_ENABLED=true,INSTAGRAM_ENGAGEMENT_AG01_SERVICE_URL=$AG01_URL,INSTAGRAM_ENGAGEMENT_AG01_AUDIENCE=$AG01_AUDIENCE,INSTAGRAM_ENGAGEMENT_AG01_TIMEOUT_MS=8000" --no-traffic --quiet
+          gcloud run deploy "$DAEMON_SERVICE" --project "$PROJECT_ID" --region "$REGION" --image "$RUNTIME_IMAGE" --service-account "$RUNTIME_SERVICE_ACCOUNT" --revision-suffix "$SUFFIX" --update-env-vars "INSTAGRAM_ENGAGEMENT_AG01_GROUNDED_FALLBACK_ENABLED=true,INSTAGRAM_ENGAGEMENT_AG01_SERVICE_URL=$AG01_URL,INSTAGRAM_ENGAGEMENT_AG01_AUDIENCE=$AG01_AUDIENCE,INSTAGRAM_ENGAGEMENT_AG01_TIMEOUT_MS=8000,TOCA_ACTIVATION_RUN_ID=$GITHUB_RUN_ID,TOCA_ACTIVATION_RUN_ATTEMPT=$GITHUB_RUN_ATTEMPT,TOCA_ACTIVATION_CONTROLLER_SHA=$GITHUB_SHA" --tag "$TAG" --no-traffic --quiet
           REV_JSON="$(gcloud run revisions describe "$CANDIDATE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           jq -e --arg sa "$RUNTIME_SERVICE_ACCOUNT" --arg digest "$RUNTIME_DIGEST" --arg url "$AG01_URL" --arg audience "$AG01_AUDIENCE" '.spec.serviceAccountName==$sa and ([.status.conditions[]? | select(.type=="Ready") | .status]|last)=="True" and (.spec.containers[0].image|contains($digest)) and ([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_RUNTIME_ENABLED") | .value]|last)=="true" and ([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value]|last)=="true" and ([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_BATCH_SIZE") | .value]|last)=="1" and ([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS") | .value]|last)=="DIRECT,COMMENT" and (([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value]|last//"false")=="false") and ([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_AG01_GROUNDED_FALLBACK_ENABLED") | .value]|last)=="true" and ([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_AG01_SERVICE_URL") | .value]|last)==$url and ([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_AG01_AUDIENCE") | .value]|last)==$audience and ([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_AG01_TIMEOUT_MS") | .value]|last)=="8000"' <<< "$REV_JSON" >/dev/null
           SERVICE_JSON="$(gcloud run services describe "$DAEMON_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
@@ -216,6 +256,7 @@ jobs:
       - name: Cut over exact candidate transactionally and verify LIMITED readback
         id: promote
         env:
+          GH_TOKEN: ${{ github.token }}
           CANDIDATE: ${{ steps.stage.outputs.candidate_revision }}
           PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
           PRE_SCHEDULER_FINGERPRINT: ${{ steps.prestate.outputs.scheduler_fingerprint }}
@@ -230,20 +271,17 @@ jobs:
           scheduler_fingerprint(){ gcloud scheduler jobs describe "$SCHEDULER_JOB" --project "$PROJECT_ID" --location "$REGION" --format=json | jq -c '{state,schedule,timeZone,httpTarget}' | sha256sum | awk '{print $1}'; }
           current_ag01(){ gcloud run services describe "$AG01_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent//0)==100 and (.revisionName//"")!="") | .revisionName] | if length==1 then .[0] else empty end'; }
           rollback(){
-            [[ "${TRAFFIC_CHANGED:-false}" == true ]] || return 0
-            [[ "$(current_revision)" == "$CANDIDATE" ]] || return 0
-            gcloud run services update-traffic "$DAEMON_SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "$PRE_REVISION=100" --quiet
+            [[ "${PROMOTION_ATTEMPTED:-false}" == true ]] || return 0
+            node scripts/ag01-activation-rollback-guard.mjs rollback fallback
           }
           test "$(current_revision)" = "$PRE_REVISION"
           test "$(scheduler_fingerprint)" = "$PRE_SCHEDULER_FINGERPRINT"
           test "$(current_ag01)" = "$EXPECTED_AG01_REVISION"
           AG01_IAM="$(gcloud run services get-iam-policy "$AG01_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           ! jq -e '.bindings[]? | select(.role=="roles/run.invoker") | (.members//[])[]? | select(.=="allUsers")' <<< "$AG01_IAM" >/dev/null
-          TRAFFIC_CHANGED=false
+          PROMOTION_ATTEMPTED=true
           trap rollback ERR
-          gcloud run services update-traffic "$DAEMON_SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "$CANDIDATE=100" --quiet
-          TRAFFIC_CHANGED=true
-          echo 'traffic_changed=true' >> "$GITHUB_OUTPUT"
+          node scripts/ag01-activation-rollback-guard.mjs promote fallback
           test "$(current_revision)" = "$CANDIDATE"
           REV_JSON="$(gcloud run revisions describe "$CANDIDATE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           jq -e --arg digest "$RUNTIME_DIGEST" --arg url "$AG01_URL" --arg audience "$AG01_AUDIENCE" '(.spec.containers[0].image|contains($digest)) and ([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_AUTO_REPLY_CHANNELS") | .value]|last)=="DIRECT,COMMENT" and ([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_AG01_GROUNDED_FALLBACK_ENABLED") | .value]|last)=="true" and ([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_AG01_SERVICE_URL") | .value]|last)==$url and ([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_ENGAGEMENT_AG01_AUDIENCE") | .value]|last)==$audience and (([.spec.containers[0].env[]? | select(.name=="INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value]|last//"false")=="false")' <<< "$REV_JSON" >/dev/null
@@ -292,16 +330,8 @@ jobs:
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" -f body="AUTHORIZATION_CONSUMED=true\nWORKFLOW_STATUS=$JOB_STATUS\nREUSE_PROHIBITED=true" >/dev/null
 
       - name: Roll back if any post-cutover step failed
-        if: failure() && steps.promote.outputs.traffic_changed == 'true'
+        if: failure() && steps.promote.outputs.promotion_attempted == 'true'
         env:
-          CANDIDATE: ${{ steps.stage.outputs.candidate_revision }}
-          PRE_REVISION: ${{ steps.prestate.outputs.pre_revision }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
-        run: |
-          set -euo pipefail
-          CURRENT="$(gcloud run services describe "$DAEMON_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent//0)==100) | .revisionName] | if length==1 then .[0] else empty end')"
-          if [[ "$CURRENT" == "$CANDIDATE" ]]; then
-            gcloud run services update-traffic "$DAEMON_SERVICE" --project "$PROJECT_ID" --region "$REGION" --to-revisions "$PRE_REVISION=100" --quiet
-          fi
-          FINAL="$(gcloud run services describe "$DAEMON_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json | jq -r '[.status.traffic[]? | select((.percent//0)==100) | .revisionName] | if length==1 then .[0] else empty end')"
-          test "$FINAL" = "$PRE_REVISION" || test "$FINAL" != "$CANDIDATE"
+        run: node scripts/ag01-activation-rollback-guard.mjs rollback fallback
