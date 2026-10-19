@@ -16,6 +16,10 @@ const SOURCE_DATES: readonly {
   readonly marker: string;
   readonly updatedOn: string;
 }[] = [
+  {
+    marker: 'https://tocadomorcego.com.br/produtos/experiencia-por-do-sol-3822.html',
+    updatedOn: '2026-10-18',
+  },
   { marker: '1Sr4jKNvWZQSlAr3g7klkw_Eou3yLESrcOv2Ednjk7g4', updatedOn: '2026-08-28' },
   { marker: '1Die7TmOHK8sP6uyZQM4S_hVfe81aoNAhpmBWulCAld4', updatedOn: '2026-09-02' },
   { marker: '1PKLkxUGVOUOT4yLWiMr6O0eNfmtQiymQWITs_-_h6fo', updatedOn: '2026-08-08' },
