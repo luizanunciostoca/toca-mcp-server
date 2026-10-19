@@ -31,6 +31,7 @@ function approved(
   answer: string,
   source: string,
   factsToValidate: string,
+  sourceUpdatedOn = '2026-09-16',
 ): InstagramEngagementKnowledgeSnapshotRow {
   return {
     faqId,
@@ -42,7 +43,7 @@ function approved(
     answer,
     source,
     factsToValidate,
-    sourceUpdatedOn: '2026-09-16',
+    sourceUpdatedOn,
     status: 'APROVADO',
     operationalValidity: 'ATIVO_ATE_SUBSTITUICAO_CANONICA',
   };
@@ -50,6 +51,10 @@ function approved(
 
 const OPS =
   'TOCA_OS — 08_OPERACOES — HOMOLOGACAO_E_PARAMETROS_OPERACIONAIS_v1.1 — Drive ID 1Sr4jKNvWZQSlAr3g7klkw_Eou3yLESrcOv2Ednjk7g4';
+const SUNSET_TICKET_CALENDAR_URL =
+  'https://tocadomorcego.com.br/produtos/experiencia-por-do-sol-3822.html';
+const SUNSET_CALENDAR_ANSWER = `Para consultar as datas e os horários disponíveis do Pôr do Sol e comprar seu ingresso, acesse a página oficial: ${SUNSET_TICKET_CALENDAR_URL}. Se a data desejada não aparecer ou estiver sem ingressos, confirme a operação nos canais oficiais.`;
+const SUNSET_CALENDAR_SOURCE = `${OPS}; Direção Toca — orientação sobre dias de funcionamento 2026-10-18 (America/Bahia); Calendário oficial de ingressos do Sunset — ${SUNSET_TICKET_CALENDAR_URL}`;
 const LOCATION =
   'Localização Estável — Toca do Morcego — Drive ID 1Die7TmOHK8sP6uyZQM4S_hVfe81aoNAhpmBWulCAld4';
 const BRAND =
@@ -72,15 +77,21 @@ export const INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE: readonly InstagramEngagemen
         'O Sunset abre que horas?',
         'Sunset começa quando?',
         'O Sunset funciona todos os dias?',
+        'Quais dias tem Sunset?',
+        'Em quais dias acontece o Sunset?',
+        'Que dias tem pôr do sol na Toca?',
+        'Tem Sunset segunda?',
+        'Tem Sunset na segunda-feira?',
         'Que horas começa o pôr do sol na Toca?',
         'Qual horário do pôr do sol?',
       ],
       'LOCATION_HOURS',
       'LOW',
       'AUTO_REPLY_ALLOWED',
-      'O Sunset acontece todos os dias, a partir das 16:30, no horário da Bahia. O horário de encerramento pode variar conforme a operação do dia e não deve ser presumido.',
-      OPS,
-      'Se a pergunta for sobre horário de encerramento ou evento especial, validar a operação/evento vigente.',
+      SUNSET_CALENDAR_ANSWER,
+      SUNSET_CALENDAR_SOURCE,
+      'Consultar o calendário oficial para a data solicitada; não afirmar funcionamento diário nem inferir fechamento por data ausente, ingressos esgotados ou falha de leitura. Horário de encerramento e evento especial exigem validação vigente.',
+      '2026-10-18',
     ),
     approved(
       'FAQ-002',
@@ -260,6 +271,14 @@ export const INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE: readonly InstagramEngagemen
       'Quais dias e horários a Toca funciona?',
       [
         'Que dias a Toca abre?',
+        'Quais dias a Toca abre?',
+        'Quais os dias de funcionamento?',
+        'Quais dias vocês funcionam?',
+        'Vocês abrem quais dias?',
+        'A Toca abre segunda?',
+        'A Toca abre na segunda-feira?',
+        'Vocês abrem segunda-feira?',
+        'Abrem amanhã?',
         'Qual o horário de funcionamento?',
         'A Toca abre todo dia?',
         'Quando a Toca abre?',
@@ -268,9 +287,10 @@ export const INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE: readonly InstagramEngagemen
       'LOCATION_HOURS',
       'LOW',
       'AUTO_REPLY_ALLOWED',
-      'Na operação regular, o Sunset acontece todos os dias a partir das 16:30. A The Party acontece às sextas-feiras, das 23:59 às 06:00. Eventos especiais possuem programação própria, e o encerramento do Sunset não deve ser presumido.',
-      OPS,
-      'Eventos especiais e exceções operacionais prevalecem quando oficialmente confirmados.',
+      `${SUNSET_CALENDAR_ANSWER} A The Party acontece às sextas-feiras, das 23:59 às 06:00. Eventos especiais possuem programação própria.`,
+      SUNSET_CALENDAR_SOURCE,
+      'Dias de Sunset devem ser consultados no calendário oficial; não afirmar funcionamento diário nem inferir fechamento por data ausente, ingressos esgotados ou falha de leitura. Eventos especiais e exceções operacionais prevalecem quando oficialmente confirmados.',
+      '2026-10-18',
     ),
     approved(
       'FAQ-012',
@@ -398,6 +418,7 @@ export const INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE: readonly InstagramEngagemen
       'Hoje tem Sunset?',
       [
         'Tem Sunset hoje?',
+        'Tem Sunset amanhã?',
         'Hoje tem pôr do sol na Toca?',
         'Todo dia tem Sunset?',
         'Tem Sunset todos os dias?',
@@ -406,9 +427,10 @@ export const INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE: readonly InstagramEngagemen
       'LOCATION_HOURS',
       'LOW',
       'AUTO_REPLY_ALLOWED',
-      'O Sunset acontece todos os dias, a partir das 16:30, no horário da Bahia. Se houver uma exceção operacional comunicada oficialmente, a informação vigente prevalece.',
-      OPS,
-      'Não presumir exceções; se houver conflito com programação oficial atual, a fonte atual prevalece.',
+      SUNSET_CALENDAR_ANSWER,
+      SUNSET_CALENDAR_SOURCE,
+      'Consultar a data solicitada no calendário oficial, considerando o horário da Bahia; não confirmar abertura diária nem inferir fechamento por data ausente, ingressos esgotados ou falha de leitura. A programação oficial vigente prevalece.',
+      '2026-10-18',
     ),
     approved(
       'FAQ-020',

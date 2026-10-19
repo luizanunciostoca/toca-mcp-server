@@ -34,7 +34,7 @@ describe('Instagram customer-facing reply UX', () => {
     });
 
     expect(match?.answer).toContain(
-      'Hoje tem Sunset na Toca do Morcego a partir das 16:30, no horário da Bahia.',
+      'Para consultar as datas e os horários disponíveis do Pôr do Sol e comprar seu ingresso, acesse a página oficial:',
     );
     expect(match?.answer.toLowerCase()).not.toContain('canônica');
     expect(match?.answer.toLowerCase()).not.toContain('canonica');
@@ -67,7 +67,7 @@ describe('Instagram customer-facing reply UX', () => {
 
     expect(match?.factsVerified).toBe(true);
     expect(match?.answer).toContain('Os valores dos ingressos variam de acordo com a data.');
-    expect(match?.answer).toContain('Hoje tem Sunset na Toca do Morcego a partir das 16:30');
+    expect(match?.answer).toContain('as datas e os horários disponíveis do Pôr do Sol');
     expect(match?.answer).toContain(
       `Para conferir a programação atualizada, valores e ingressos, acesse: ${TOCA_OFFICIAL_INFORMATION_URL}`,
     );

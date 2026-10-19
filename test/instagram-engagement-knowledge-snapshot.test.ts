@@ -57,7 +57,7 @@ describe('Instagram engagement canonical knowledge snapshot', () => {
 
   it('preserves source freshness instead of stamping old facts with the snapshot date', () => {
     expect(
-      INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.find((row) => row.faqId === 'FAQ-001')
+      INSTAGRAM_ENGAGEMENT_CURRENT_KNOWLEDGE.find((row) => row.faqId === 'FAQ-002')
         ?.sourceUpdatedOn,
     ).toBe('2026-08-28');
     expect(
