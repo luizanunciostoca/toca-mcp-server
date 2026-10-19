@@ -129,6 +129,12 @@ export function instanceIdentity({
   const candidateSuffix = workflow.suffix + '-' + unique;
   const candidateRevision = workflow.service + '-' + candidateSuffix;
   requireCondition(candidateRevision.length <= 63, 'CANDIDATE_NAME_TOO_LONG');
+  // Cloud Run limits service name + traffic tag to 46 characters. GitHub run
+  // IDs are unique; base36 preserves every run/attempt digit without truncation.
+  // The authenticated context and revision retain the complete source identity.
+  const candidateTag =
+    workflow.tag[0] + '-' + BigInt(runId).toString(36) + '-' + BigInt(runAttempt).toString(36);
+  requireCondition(workflow.service.length + candidateTag.length <= 46, 'CANDIDATE_TAG_TOO_LONG');
   return {
     kind,
     repository,
@@ -143,7 +149,7 @@ export function instanceIdentity({
     service: workflow.service,
     candidateSuffix,
     candidateRevision,
-    candidateTag: workflow.tag + '-' + unique,
+    candidateTag,
   };
 }
 
@@ -1144,6 +1150,8 @@ export function extractContextArchive(bytes) {
     const names = execFileSync('unzip', ['-Z1', archive], {
       encoding: 'utf8',
       maxBuffer: 8192,
+      timeout: 5000,
+      killSignal: 'SIGKILL',
       stdio: ['ignore', 'pipe', 'pipe'],
     })
       .trim()
@@ -1155,6 +1163,8 @@ export function extractContextArchive(bytes) {
     const json = execFileSync('unzip', ['-p', archive, 'rollback-context.json'], {
       encoding: 'utf8',
       maxBuffer: 32768,
+      timeout: 5000,
+      killSignal: 'SIGKILL',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     return JSON.parse(json);

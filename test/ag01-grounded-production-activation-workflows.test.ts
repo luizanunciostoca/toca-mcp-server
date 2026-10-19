@@ -1,6 +1,15 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import {
+  chmodSync,
+  closeSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
@@ -631,13 +640,61 @@ describe('instance rollback guard behavioral execution', () => {
   it('uses different candidate and tag identities across runs and attempts', async () => {
     const result = await simulate({ action: 'identity' });
     const identities = result.result as unknown as Array<{
+      service: string;
       candidateRevision: string;
       candidateTag: string;
     }>;
     expect(new Set(identities.map((value) => value.candidateRevision)).size).toBe(3);
     expect(new Set(identities.map((value) => value.candidateTag)).size).toBe(3);
     expect(identities.every((value) => value.candidateRevision.length <= 63)).toBe(true);
+    expect(
+      identities.every((value) => value.service.length + value.candidateTag.length <= 46),
+    ).toBe(true);
   });
+  it.each(['ag01', 'fallback'])(
+    'fits the real Cloud Run service/tag budget for %s without truncating instance IDs',
+    (kind) => {
+      const guard = guardModule as {
+        instanceIdentity(input: Record<string, string>): {
+          service: string;
+          candidateRevision: string;
+          candidateTag: string;
+          runId: string;
+          runAttempt: string;
+          sourceSha: string;
+        };
+      };
+      const sourceSha = '8c0a7bac7baf2cb6815861a5dc2c724be8a5af27';
+      const inputs = [
+        ['39199426972', '1'],
+        ['39199426973', '1'],
+        ['39199426972', '2'],
+        ['999999999999999', '1'],
+        ['999999999999999', '999'],
+      ];
+      const tags = inputs.map(([runId, runAttempt]) => {
+        const identity = guard.instanceIdentity({
+          kind,
+          repository: 'luizanunciostoca/toca-mcp-server',
+          sourceSha,
+          runId: runId!,
+          runAttempt: runAttempt!,
+          authorizationIssue: '1078',
+        });
+        expect(identity.service.length + identity.candidateTag.length).toBeLessThanOrEqual(46);
+        expect(identity.candidateTag).toMatch(/^[a-z]-[0-9a-z]+-[0-9a-z]+$/);
+        expect(identity.candidateRevision.length).toBeLessThanOrEqual(63);
+        expect(identity.runId).toBe(runId);
+        expect(identity.runAttempt).toBe(runAttempt);
+        expect(identity.sourceSha).toBe(sourceSha);
+        const [, encodedRun, encodedAttempt] = identity.candidateTag.split('-');
+        expect(BigInt(parseInt(encodedRun!, 36)).toString()).toBe(runId);
+        expect(BigInt(parseInt(encodedAttempt!, 36)).toString()).toBe(runAttempt);
+        return identity.candidateTag;
+      });
+      expect(new Set(tags).size).toBe(inputs.length);
+    },
+  );
 });
 describe('authenticated recovery artifacts and live single-use authorization', () => {
   it.each(['ag01', 'fallback'])(
@@ -798,21 +855,108 @@ const archiveGuard = guardModule as {
   ) => Promise<Buffer>;
 };
 function zipFixture(entries: Array<[string, string]>) {
-  const result = spawnSync('python3', [
-    '-c',
+  const result = spawnSync(
+    'python3',
     [
-      'import io, json, sys, zipfile',
-      'output = io.BytesIO()',
-      'with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:',
-      '    for name, value in json.loads(sys.argv[1]): archive.writestr(name, value)',
-      'sys.stdout.buffer.write(output.getvalue())',
-    ].join('\n'),
-    JSON.stringify(entries),
-  ]);
+      '-c',
+      [
+        'import io, json, sys, zipfile',
+        'output = io.BytesIO()',
+        'with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:',
+        '    for name, value in json.loads(sys.argv[1]): archive.writestr(name, value)',
+        'sys.stdout.buffer.write(output.getvalue())',
+      ].join('\n'),
+      JSON.stringify(entries),
+    ],
+    {
+      timeout: 5000,
+      killSignal: 'SIGKILL',
+      maxBuffer: 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
   expect(result.status).toBe(0);
   return result.stdout;
 }
 describe('real ZIP parser and bounded artifact download', () => {
+  it.each(['listing-overflow', 'body-overflow', 'stalled'] as const)(
+    'rejects a SIGTERM-resistant unzip without hanging the runner: %s',
+    (mode) => {
+      const folder = mkdtempSync(join(tmpdir(), 'ag01-unzip-boundary-'));
+      try {
+        const executable = join(folder, 'unzip');
+        writeFileSync(
+          executable,
+          [
+            '#!/usr/bin/env node',
+            "process.on('SIGTERM', () => {});",
+            'const mode = process.env.AG01_UNZIP_TEST_MODE;',
+            "if (mode === 'body-overflow' && process.argv.includes('-Z1')) {",
+            "  process.stdout.write('rollback-context.json\\n');",
+            '} else {',
+            "  if (mode !== 'stalled') process.stdout.write('x'.repeat(65536));",
+            '  setInterval(() => {}, 1000);',
+            '}',
+          ].join('\n') + '\n',
+        );
+        chmodSync(executable, 0o700);
+        const script = [
+          'const guard = await import(process.argv[1]);',
+          'try {',
+          "  guard.extractContextArchive(Buffer.from('fixture-only'));",
+          "  process.stdout.write('UNEXPECTED_ACCEPTANCE');",
+          '  process.exitCode = 1;',
+          '} catch (error) {',
+          "  process.stdout.write(error.code === 'INVALID_ARTIFACT_ARCHIVE' ? error.code : 'UNEXPECTED_ERROR');",
+          "  if (error.code !== 'INVALID_ARTIFACT_ARCHIVE') process.exitCode = 2;",
+          '}',
+        ].join('\n');
+        // GNU timeout kills this isolated process group on regression, including
+        // a child that ignores SIGTERM. Vitest's own timer cannot interrupt a
+        // synchronous execFileSync blocked inside the tested module.
+        const stdoutPath = join(folder, 'stdout');
+        const stderrPath = join(folder, 'stderr');
+        const stdout = openSync(stdoutPath, 'w');
+        const stderr = openSync(stderrPath, 'w');
+        let result;
+        try {
+          result = spawnSync(
+            'timeout',
+            [
+              '--signal=KILL',
+              '8s',
+              process.execPath,
+              '--input-type=module',
+              '-e',
+              script,
+              pathToFileURL(resolve('scripts/ag01-activation-rollback-guard.mjs')).href,
+            ],
+            {
+              encoding: 'utf8',
+              timeout: 9000,
+              killSignal: 'SIGKILL',
+              stdio: ['ignore', stdout, stderr],
+              env: {
+                ...process.env,
+                PATH: folder + delimiter + (process.env.PATH ?? ''),
+                AG01_UNZIP_TEST_MODE: mode,
+              },
+            },
+          );
+        } finally {
+          closeSync(stdout);
+          closeSync(stderr);
+        }
+        expect(result.error).toBeUndefined();
+        expect(result.status, readFileSync(stderrPath, 'utf8')).toBe(0);
+        expect(readFileSync(stdoutPath, 'utf8')).toBe('INVALID_ARTIFACT_ARCHIVE');
+      } finally {
+        rmSync(folder, { recursive: true, force: true });
+      }
+    },
+    12000,
+  );
+
   it('reads a single JSON member without executing or extracting it', () => {
     const payload = { proof: 'example-only', text: '$(touch /tmp/untrusted)' };
     const bytes = zipFixture([['rollback-context.json', JSON.stringify(payload)]]);
