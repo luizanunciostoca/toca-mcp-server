@@ -185,10 +185,10 @@ function revisionImage(revision, container) {
     digestPattern.test(image.slice(imagePrefix.length)), 'REVISION_IMAGE_NOT_IMMUTABLE');
   return image.slice(imagePrefix.length);
 }
-function validateRevision(revision, name, digest) {
+function validateRevision(revision, name, digest, requireReady = true) {
   check(revision.metadata?.name === name &&
     revision.metadata?.labels?.['serving.knative.dev/service'] === serviceName, 'REVISION_IDENTITY_MISMATCH');
-  check(revision.status?.conditions?.some((entry) => entry.type === 'Ready' && entry.status === 'True'), 'REVISION_NOT_READY');
+  if (requireReady) check(revision.status?.conditions?.some((entry) => entry.type === 'Ready' && entry.status === 'True'), 'REVISION_NOT_READY');
   check(typeof revision.metadata.uid === 'string' && revision.metadata.uid.length > 0, 'REVISION_UID_MISSING');
   const target = runtimeContainer(revision);
   check(revisionImage(revision, target.container) === digest, 'REVISION_IMAGE_MISMATCH');
@@ -413,7 +413,8 @@ try {
     else {
       assertContext(state, service, view);
       check(state.stageVerified === true && state.candidateUid === input.candidate?.metadata?.uid, 'ROLLBACK_CONTEXT_INCOMPLETE');
-      validateRevision(input.candidate, state.candidate, state.auth.digest);
+      // An unhealthy own candidate is precisely a reason to restore the ready prestate.
+      validateRevision(input.candidate, state.candidate, state.auth.digest, false);
       check(service.spec.template.metadata?.name === state.candidate &&
         equal(templateView(service.spec.template), state.candidateTemplate) &&
         equal(templateView(input.candidate), state.candidateTemplate), 'ROLLBACK_CANDIDATE_CHANGED');

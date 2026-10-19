@@ -106,15 +106,15 @@ jobs:
         shell: bash
         run: bash .github/scripts/instagram-engagement-webhook-runtime-align.sh verify
 
-      - name: Restore previous traffic only while this candidate still owns it
-        if: (failure() || cancelled()) && steps.prestate.outcome == 'success'
-        shell: bash
-        run: bash .github/scripts/instagram-engagement-webhook-runtime-align.sh rollback
-
       - name: Remove only the temporary tag belonging to this instance
         if: always() && steps.prestate.outcome == 'success'
         shell: bash
         run: bash .github/scripts/instagram-engagement-webhook-runtime-align.sh cleanup
+
+      - name: Restore previous traffic after any runtime or cleanup failure while this candidate owns it
+        if: (failure() || cancelled()) && steps.prestate.outcome == 'success'
+        shell: bash
+        run: bash .github/scripts/instagram-engagement-webhook-runtime-align.sh rollback
 
       - name: Publish sanitized acceptance and compensation evidence
         if: always() && steps.auth.outputs.authorization_issue != ''

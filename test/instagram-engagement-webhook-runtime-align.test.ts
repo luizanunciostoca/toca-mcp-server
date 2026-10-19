@@ -841,6 +841,40 @@ describe('serving revision clone and zero traffic gates', () => {
 });
 
 describe('ownership-aware compensation and final acceptance', () => {
+  it.each(['False', 'Unknown'])('restores its own unhealthy candidate with Ready=%s', (status) => {
+    const fixture = promotedFixture();
+    fixture.candidate.status.conditions = [{ type: 'Ready', status }];
+    fixture.service.status.conditions = [{ type: 'Ready', status: 'False' }];
+    const rollback = model<Transition>('rollback', {
+      ...fixture,
+      previous: fixture.input.revision,
+    });
+    expect(rollback.decision).toBe('RESTORE_OWN_CANDIDATE');
+    expect(rollback.request.metadata.resourceVersion).toBe(
+      fixture.service.metadata.resourceVersion,
+    );
+    expect(rollback.expectedTraffic).toMatchObject({ percentages: { [previous]: 100 } });
+    expect(rollback.request.spec.template).toEqual(fixture.service.spec.template);
+  });
+
+  it.each(['False', 'Unknown'])(
+    'denies rollback to an unhealthy previous revision with Ready=%s',
+    (status) => {
+      const fixture = promotedFixture();
+      fixture.input.revision.status.conditions = [{ type: 'Ready', status }];
+      rejects('rollback', { ...fixture, previous: fixture.input.revision }, 'REVISION_NOT_READY');
+    },
+  );
+
+  it.each(['candidate', 'promote', 'promoted', 'accepted'])(
+    'keeps an unhealthy candidate ineligible for %s',
+    (action) => {
+      const fixture = promotedFixture();
+      fixture.candidate.status.conditions = [{ type: 'Ready', status: 'False' }];
+      rejects(action, fixture, 'REVISION_NOT_READY');
+    },
+  );
+
   it('restores only its own 100% candidate, retaining current third-party tags', () => {
     const fixture = promotedFixture();
     fixture.service.spec.traffic.push({ revisionName: previous, percent: 0, tag: 'added-later' });
@@ -1095,7 +1129,12 @@ describe('actual controller phases with isolated mocked cloud transport', () => 
 
   it('leaves an unknown PUT outcome unproven after bounded GET reconciliation', () => {
     const fixture = promotedFixture();
-    const harness = runtimeHarness(fixture.service, fixture.state);
+    const harness = runtimeHarness(
+      fixture.service,
+      fixture.state,
+      fixture.candidate,
+      fixture.input.revision,
+    );
     const result = harness.run('cleanup', { MOCK_MODE: 'unknown' });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('WEBHOOK_RECOVERY_TRANSITION_OUTCOME_UNKNOWN');
@@ -1103,6 +1142,79 @@ describe('actual controller phases with isolated mocked cloud transport', () => 
     expect(readFileSync(join(harness.statePath, 'failure-code'), 'utf8').trim()).toBe(
       'TRANSITION_OUTCOME_UNKNOWN',
     );
+    const compensation = harness.run('rollback');
+    expect(compensation.status, compensation.stderr).toBe(0);
+    expect(harness.calls().filter((call) => call.method === 'PUT')).toHaveLength(2);
+    expect(readFileSync(join(harness.statePath, 'cleanup-http-status'), 'utf8').trim()).toBe('000');
+    expect(readFileSync(join(harness.statePath, 'rollback-http-status'), 'utf8').trim()).toBe(
+      '200',
+    );
+    const current = JSON.parse(readFileSync(join(harness.root, 'service.json'), 'utf8')) as Service;
+    expect(current.spec.traffic[0]).toEqual({ revisionName: previous, percent: 100 });
+    expect(current.spec.traffic.find((route) => route.tag === tag)?.revisionName).toBe(
+      candidateName,
+    );
+  });
+
+  it.each(['False', 'Unknown'])(
+    'compensates after post-cleanup acceptance finds its candidate Ready=%s without repeating cleanup',
+    (status) => {
+      const fixture = promotedFixture();
+      fixture.candidate.status.conditions = [{ type: 'Ready', status }];
+      const harness = runtimeHarness(
+        fixture.service,
+        fixture.state,
+        fixture.candidate,
+        fixture.input.revision,
+      );
+      writeFileSync(join(harness.statePath, 'runtime-acceptance-status'), 'PASS\n');
+      const cleanup = harness.run('cleanup');
+      expect(cleanup.status).toBe(1);
+      expect(cleanup.stderr).toContain('WEBHOOK_RECOVERY_REVISION_NOT_READY');
+      expect(harness.calls().filter((call) => call.method === 'PUT')).toHaveLength(1);
+      expect(readFileSync(join(harness.statePath, 'cleanup-status'), 'utf8').trim()).toBe(
+        'APPLIED_CONFIRMED_BY_READBACK',
+      );
+      const compensation = harness.run('rollback');
+      expect(compensation.status, compensation.stderr).toBe(0);
+      expect(harness.calls().filter((call) => call.method === 'PUT')).toHaveLength(2);
+      const current = JSON.parse(
+        readFileSync(join(harness.root, 'service.json'), 'utf8'),
+      ) as Service;
+      expect(current.spec.traffic[0]).toEqual({ revisionName: previous, percent: 100 });
+      expect(current.spec.traffic.some((route) => route.tag === tag)).toBe(false);
+      expect(current.spec.template).toEqual(fixture.service.spec.template);
+      const report = harness.run('report');
+      expect(report.status, report.stderr).toBe(0);
+      const text = readFileSync(join(harness.root, 'report.env'), 'utf8');
+      expect(text).toContain('INSTAGRAM_WEBHOOK_RUNTIME_ALIGNMENT_STATUS=FAIL');
+      expect(text).toContain('ROLLBACK_STATUS=APPLIED_CONFIRMED_BY_READBACK');
+      expect(text).not.toMatch(/DO_NOT_PUBLISH|FAKE_TOKEN|valueFrom|secretKeyRef/);
+    },
+  );
+
+  it('does not undo a new owner after post-cleanup acceptance fails', () => {
+    const fixture = promotedFixture();
+    fixture.candidate.status.conditions = [{ type: 'Ready', status: 'False' }];
+    const harness = runtimeHarness(
+      fixture.service,
+      fixture.state,
+      fixture.candidate,
+      fixture.input.revision,
+    );
+    writeFileSync(join(harness.statePath, 'runtime-acceptance-status'), 'PASS\n');
+    expect(harness.run('cleanup').status).toBe(1);
+    const current = JSON.parse(readFileSync(join(harness.root, 'service.json'), 'utf8')) as Service;
+    current.spec.traffic[0] = { revisionName: serviceName + '-another-owner', percent: 100 };
+    current.status.traffic = structuredClone(current.spec.traffic);
+    writeFileSync(join(harness.root, 'service.json'), JSON.stringify(current));
+    const compensation = harness.run('rollback');
+    expect(compensation.status, compensation.stderr).toBe(0);
+    expect(harness.calls().filter((call) => call.method === 'PUT')).toHaveLength(1);
+    expect(readFileSync(join(harness.statePath, 'rollback-status'), 'utf8').trim()).toBe(
+      'NOOP_SUPERSEDED',
+    );
+    expect(JSON.parse(readFileSync(join(harness.root, 'service.json'), 'utf8'))).toEqual(current);
   });
 
   it('uses the same guarded transport for rollback and performs no PUT when superseded', () => {
@@ -1166,8 +1278,8 @@ describe('governed workflow wiring', () => {
       'probe',
       'promote',
       'verify',
-      'rollback',
       'cleanup',
+      'rollback',
       'report',
     ];
     let previousPosition = -1;
