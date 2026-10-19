@@ -631,13 +631,61 @@ describe('instance rollback guard behavioral execution', () => {
   it('uses different candidate and tag identities across runs and attempts', async () => {
     const result = await simulate({ action: 'identity' });
     const identities = result.result as unknown as Array<{
+      service: string;
       candidateRevision: string;
       candidateTag: string;
     }>;
     expect(new Set(identities.map((value) => value.candidateRevision)).size).toBe(3);
     expect(new Set(identities.map((value) => value.candidateTag)).size).toBe(3);
     expect(identities.every((value) => value.candidateRevision.length <= 63)).toBe(true);
+    expect(
+      identities.every((value) => value.service.length + value.candidateTag.length <= 46),
+    ).toBe(true);
   });
+  it.each(['ag01', 'fallback'])(
+    'fits the real Cloud Run service/tag budget for %s without truncating instance IDs',
+    (kind) => {
+      const guard = guardModule as {
+        instanceIdentity(input: Record<string, string>): {
+          service: string;
+          candidateRevision: string;
+          candidateTag: string;
+          runId: string;
+          runAttempt: string;
+          sourceSha: string;
+        };
+      };
+      const sourceSha = '8c0a7bac7baf2cb6815861a5dc2c724be8a5af27';
+      const inputs = [
+        ['39199426972', '1'],
+        ['39199426973', '1'],
+        ['39199426972', '2'],
+        ['999999999999999', '1'],
+        ['999999999999999', '999'],
+      ];
+      const tags = inputs.map(([runId, runAttempt]) => {
+        const identity = guard.instanceIdentity({
+          kind,
+          repository: 'luizanunciostoca/toca-mcp-server',
+          sourceSha,
+          runId: runId!,
+          runAttempt: runAttempt!,
+          authorizationIssue: '1078',
+        });
+        expect(identity.service.length + identity.candidateTag.length).toBeLessThanOrEqual(46);
+        expect(identity.candidateTag).toMatch(/^[a-z]-[0-9a-z]+-[0-9a-z]+$/);
+        expect(identity.candidateRevision.length).toBeLessThanOrEqual(63);
+        expect(identity.runId).toBe(runId);
+        expect(identity.runAttempt).toBe(runAttempt);
+        expect(identity.sourceSha).toBe(sourceSha);
+        const [, encodedRun, encodedAttempt] = identity.candidateTag.split('-');
+        expect(BigInt(parseInt(encodedRun!, 36)).toString()).toBe(runId);
+        expect(BigInt(parseInt(encodedAttempt!, 36)).toString()).toBe(runAttempt);
+        return identity.candidateTag;
+      });
+      expect(new Set(tags).size).toBe(inputs.length);
+    },
+  );
 });
 describe('authenticated recovery artifacts and live single-use authorization', () => {
   it.each(['ag01', 'fallback'])(
