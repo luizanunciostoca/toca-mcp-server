@@ -125,6 +125,16 @@ jobs:
 
           gcloud logging read             "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${WEBHOOK_SERVICE_NAME}\" AND resource.labels.revision_name=\"${EXPECTED_REVISION}\""             --project "$GCP_PROJECT_ID" --freshness=7d --limit=300 --order=asc --format=json > "$logs_json"
 
+          # Preserve the existing dedicated reader and revision scope. Publish check names only.
+          readiness_input="$(mktemp)"
+          readiness_result="$(mktemp)"
+          jq -n --slurpfile logs "$logs_json" --arg revision "$EXPECTED_REVISION" \
+            '{logs:$logs[0],revision:$revision}' > "$readiness_input"
+          bash .github/scripts/instagram-engagement-webhook-runtime-align.sh model log-diagnostics \
+            "$readiness_input" > "$readiness_result"
+          readiness_evidence="$(jq -er '.status' "$readiness_result")"
+          readiness_failed="$(jq -er 'if .status == "NOT_PROVEN" then "NOT_PROVEN" else .failedChecks | join(",") end' "$readiness_result")"
+
           ready_status="$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .status] | last // "UNKNOWN"' "$target_json")"
           ready_reason="$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .reason] | last // "UNKNOWN"' "$target_json")"
           [[ "$ready_status" =~ ^(True|False|Unknown|UNKNOWN)$ ]] || ready_status=UNKNOWN
@@ -212,6 +222,8 @@ jobs:
             echo "TARGET_READY_REASON=$ready_reason"
             echo "CLASSIFICATION=$classification"
             echo "APPROVED_ERROR_TOKENS=${found:-NONE}"
+            echo "READINESS_LOG_EVIDENCE=$readiness_evidence"
+            echo "READINESS_FAILED_CHECKS=$readiness_failed"
             echo "ENV_PRESENCE=$env_summary"
             echo "CANDIDATE_RUNTIME_SA_MATCH=$target_sa_ok"
             echo "HEALTHY_RUNTIME_SA_MATCH=$healthy_sa_ok"
