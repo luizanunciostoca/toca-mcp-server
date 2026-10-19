@@ -19,13 +19,22 @@ read_digest() {
   fi
   if ! digest="$(jq -ers '
     if length == 1 then .[0] else error("single descriptor required") end |
-    select(.schemaVersion == 2) |
+    select(type == "object") |
     select(.mediaType | IN(
       "application/vnd.docker.distribution.manifest.v2+json",
       "application/vnd.docker.distribution.manifest.list.v2+json",
       "application/vnd.oci.image.manifest.v1+json",
       "application/vnd.oci.image.index.v1+json"
     )) |
+    # buildx emits an OCI Descriptor for a single image: it has no
+    # schemaVersion. Index/list output includes schemaVersion and manifests.
+    # Both forms identify the top-level object by digest and positive size.
+    select(.size | type == "number" and . > 0 and floor == .) |
+    select(if (.mediaType | IN(
+      "application/vnd.docker.distribution.manifest.list.v2+json",
+      "application/vnd.oci.image.index.v1+json"
+    )) then .schemaVersion == 2 and (.manifests | type == "array" and length > 0)
+    else (has("schemaVersion") | not) or .schemaVersion == 2 end) |
     .digest | select(type == "string" and length == 71 and test("^sha256:[a-f0-9]{64}$"))
   ' <<< "$manifest" 2>/dev/null)"; then
     echo 'REGISTRY_MANIFEST_DIGEST_INVALID' >&2

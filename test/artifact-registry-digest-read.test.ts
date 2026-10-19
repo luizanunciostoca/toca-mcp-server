@@ -9,9 +9,9 @@ const prefix = 'southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/'
 const digest = 'sha256:' + 'a'.repeat(64);
 const manifest = (sha = digest) =>
   JSON.stringify({
-    schemaVersion: 2,
     mediaType: 'application/vnd.docker.distribution.manifest.v2+json',
     digest: sha,
+    size: 2832,
   });
 
 function run({
@@ -58,7 +58,7 @@ if [[ "$4" == *@* ]]; then printf '%s' "$DIGEST_TEST_IMMUTABLE"; else printf '%s
 }
 
 describe('registry-only immutable digest resolution', () => {
-  it('reads the exact tag and independently verifies its immutable reference', () => {
+  it('reads a single-image buildx descriptor without schemaVersion and verifies its immutable reference', () => {
     const result = run();
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(digest + '\n');
@@ -73,8 +73,61 @@ describe('registry-only immutable digest resolution', () => {
       schemaVersion: 2,
       mediaType: 'application/vnd.oci.image.index.v1+json',
       digest,
+      size: 855,
+      manifests: [
+        {
+          mediaType: 'application/vnd.oci.image.manifest.v1+json',
+          digest: 'sha256:' + 'b'.repeat(64),
+          size: 673,
+          platform: { architecture: 'amd64', os: 'linux' },
+        },
+      ],
     });
     expect(run({ tag: index, immutable: index }).status).toBe(0);
+    const dockerList = index.replace(
+      'application/vnd.oci.image.index.v1+json',
+      'application/vnd.docker.distribution.manifest.list.v2+json',
+    );
+    expect(run({ tag: dockerList, immutable: dockerList }).stdout).toBe(digest + '\n');
+    const ociImage = manifest().replace(
+      'application/vnd.docker.distribution.manifest.v2+json',
+      'application/vnd.oci.image.manifest.v1+json',
+    );
+    expect(run({ tag: ociImage, immutable: ociImage }).stdout).toBe(digest + '\n');
+  });
+
+  it('keeps index schema checks while validating descriptor size and top-level shape', () => {
+    const descriptor = JSON.parse(manifest()) as {
+      mediaType: string;
+      digest: string;
+      size: number;
+    };
+    for (const tag of [
+      JSON.stringify({ ...descriptor, schemaVersion: 1 }),
+      JSON.stringify({ ...descriptor, schemaVersion: null }),
+      JSON.stringify({ ...descriptor, size: 0 }),
+      JSON.stringify({ ...descriptor, size: -1 }),
+      JSON.stringify({ ...descriptor, size: 1.5 }),
+      JSON.stringify({ ...descriptor, size: '2832' }),
+      JSON.stringify({ ...descriptor, size: undefined }),
+      JSON.stringify({ ...descriptor, mediaType: 'application/json' }),
+      JSON.stringify({ ...descriptor, mediaType: 'application/vnd.oci.image.index.v1+json' }),
+      JSON.stringify({
+        ...descriptor,
+        schemaVersion: 2,
+        mediaType: 'application/vnd.oci.image.index.v1+json',
+        manifests: [],
+      }),
+      JSON.stringify([descriptor]),
+    ]) {
+      const result = run({ tag });
+      expect(result.status, tag).not.toBe(0);
+      expect(result.calls).toHaveLength(1);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toBe('REGISTRY_MANIFEST_DIGEST_INVALID\n');
+    }
+    const explicitSchema = JSON.stringify({ ...descriptor, schemaVersion: 2 });
+    expect(run({ tag: explicitSchema, immutable: explicitSchema }).status).toBe(0);
   });
 
   it('fails on denied access without changing identities, retrying or publishing raw errors', () => {
