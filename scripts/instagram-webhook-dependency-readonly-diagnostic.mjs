@@ -57,6 +57,10 @@ export const REQUIRED_MARKERS = Object.freeze({
   EXPECTED_CLOUD_SQL_INSTANCE: EXPECTED.cloudSqlInstance,
 });
 export const CONTRACT_PATHS = Object.freeze([
+  'src/http-instagram-engagement.ts',
+  'src/providers/meta/meta-webhook-runtime-env.ts',
+  'src/providers/meta/meta-webhook-verify-token.ts',
+  'src/http.ts',
   'src/config.ts',
   'src/health/runtime-readiness.ts',
   'src/health/readiness.ts',
@@ -103,6 +107,13 @@ const GCP_STATUSES = new Set([
   'RESOURCE_EXHAUSTED',
   'INVALID_ARGUMENT',
 ]);
+const ENTRYPOINT_CLASSES = new Set([
+  'IMAGE_DEFAULT_HTTP',
+  'DIRECT_HTTP',
+  'INSTAGRAM_WEBHOOK',
+  'UNPROVEN',
+]);
+const REVISION_SIDES = new Set(['CANDIDATE', 'SERVING']);
 
 export class DiagnosticError extends Error {
   constructor(code, details = {}) {
@@ -112,6 +123,13 @@ export class DiagnosticError extends Error {
     this.httpStatus = Number.isInteger(details.httpStatus) ? details.httpStatus : null;
     this.providerStatus = GCP_STATUSES.has(details.providerStatus) ? details.providerStatus : null;
     this.sqlState = SQL_STATES.has(details.sqlState) ? details.sqlState : null;
+    this.revisionSide = REVISION_SIDES.has(details.revisionSide) ? details.revisionSide : null;
+    this.entrypointClass = ENTRYPOINT_CLASSES.has(details.entrypointClass)
+      ? details.entrypointClass
+      : null;
+    this.nodeOptionsPresence = PRESENCE.has(details.nodeOptionsPresence)
+      ? details.nodeOptionsPresence
+      : null;
   }
 }
 const requireCondition = (value, code) => {
@@ -509,6 +527,33 @@ function secretVersion(revision) {
   return ref.version;
 }
 
+function verifyEntrypoint(revision, revisionSide) {
+  const container = revision.containers[0];
+  const empty = (value) => value === undefined || (Array.isArray(value) && value.length === 0);
+  const exact = (value, expected) =>
+    Array.isArray(value) && value.length === 1 && value[0] === expected;
+  let entrypointClass = 'UNPROVEN';
+  if (empty(container.command) && empty(container.args)) entrypointClass = 'IMAGE_DEFAULT_HTTP';
+  else if (exact(container.command, 'node')) {
+    if (exact(container.args, 'dist/src/http.js')) entrypointClass = 'DIRECT_HTTP';
+    else if (exact(container.args, 'dist/src/http-instagram-engagement.js'))
+      entrypointClass = 'INSTAGRAM_WEBHOOK';
+  }
+  const options = observedField(envEntries(revision), 'NODE_OPTIONS');
+  const details = { revisionSide, entrypointClass, nodeOptionsPresence: options.presence };
+  if (entrypointClass === 'UNPROVEN')
+    throw new DiagnosticError('EFFECTIVE_ENV_ENTRYPOINT_NOT_PROVEN', details);
+  if (
+    options.presence === 'SECRET_REFERENCE_UNOBSERVED' ||
+    (options.value !== undefined && options.value.trim() !== '')
+  )
+    throw new DiagnosticError('EFFECTIVE_ENV_NODE_OPTIONS_NOT_PROVEN', details);
+  // The verified wrapper only prepares the two webhook verification-token keys
+  // before importing http.js. It never normalizes readiness or database fields.
+  // Do not execute it here: its secret-dependent initialization is outside READ scope.
+  return entrypointClass;
+}
+
 export function verifyMetadata(service, candidate, previous, scope) {
   let traffic;
   try {
@@ -520,6 +565,7 @@ export function verifyMetadata(service, candidate, previous, scope) {
     traffic.size === 1 && traffic.get(scope.previousRevision) === 100,
     'SERVING_PREVIOUS_100_PERCENT_REQUIRED',
   );
+  const entrypoints = {};
   for (const [revision, name, digest, isPrevious] of [
     [candidate, scope.candidateRevision, scope.candidateDigest, false],
     [previous, scope.previousRevision, scope.previousDigest, true],
@@ -549,11 +595,8 @@ export function verifyMetadata(service, candidate, previous, scope) {
         container.image.endsWith('@' + digest),
       'REVISION_DIGEST_MISMATCH',
     );
-    requireCondition(
-      (!container.command?.length || JSON.stringify(container.command) === '["node"]') &&
-        (!container.args?.length || JSON.stringify(container.args) === '["dist/src/http.js"]'),
-      'EFFECTIVE_ENV_ENTRYPOINT_NOT_PROVEN',
-    );
+    const side = isPrevious ? 'SERVING' : 'CANDIDATE';
+    entrypoints[side] = verifyEntrypoint(revision, side);
     if (isPrevious)
       requireCondition(
         revision.conditions?.some(
@@ -596,6 +639,8 @@ export function verifyMetadata(service, candidate, previous, scope) {
       candidateSourceVerified: true,
       expectedDigestsVerified: true,
       existingDatabaseReferenceVerified: true,
+      effectiveEntrypoints: entrypoints,
+      nodeOptionsVerifiedEmpty: true,
     },
     candidate,
   };
@@ -781,6 +826,7 @@ const FAILURE_CODES = new Set([
   'REVISION_IDENTITY_MISMATCH',
   'REVISION_DIGEST_MISMATCH',
   'EFFECTIVE_ENV_ENTRYPOINT_NOT_PROVEN',
+  'EFFECTIVE_ENV_NODE_OPTIONS_NOT_PROVEN',
   'SERVING_REVISION_NOT_READY',
   'CANDIDATE_RUNTIME_SOURCE_MISMATCH',
   'DATABASE_REFERENCE_CHANGED_BETWEEN_REVISIONS',
@@ -799,6 +845,7 @@ const FAILURE_CODES = new Set([
   'RUNTIME_TREE_MISMATCH',
   'RUNTIME_READINESS_CONTRACT_CHANGED',
   'VERIFIED_IMAGE_NODE_ENV_REQUIRED',
+  'VERIFIED_IMAGE_ENTRYPOINT_REQUIRED',
   'GITHUB_REQUEST_FAILED',
   'GITHUB_RESPONSE_INVALID',
   'GITHUB_RESPONSE_TOO_LARGE',
@@ -884,6 +931,9 @@ export function publicResult(scope, input = {}) {
         : null,
     providerStatus: GCP_STATUSES.has(input.providerStatus) ? input.providerStatus : null,
     sqlState: SQL_STATES.has(input.sqlState) ? input.sqlState : null,
+    revisionSide: REVISION_SIDES.has(input.revisionSide) ? input.revisionSide : null,
+    entrypointClass: ENTRYPOINT_CLASSES.has(input.entrypointClass) ? input.entrypointClass : null,
+    nodeOptionsPresence: PRESENCE.has(input.nodeOptionsPresence) ? input.nodeOptionsPresence : null,
   };
   const critical = input.criticalConfiguration;
   if (critical) {
@@ -935,6 +985,13 @@ export function publicResult(scope, input = {}) {
       candidateSourceVerified: input.metadata.candidateSourceVerified === true,
       expectedDigestsVerified: input.metadata.expectedDigestsVerified === true,
       existingDatabaseReferenceVerified: input.metadata.existingDatabaseReferenceVerified === true,
+      effectiveEntrypoints: Object.fromEntries(
+        [...REVISION_SIDES].map((side) => {
+          const value = input.metadata.effectiveEntrypoints?.[side];
+          return [side, ENTRYPOINT_CLASSES.has(value) ? value : 'UNPROVEN'];
+        }),
+      ),
+      nodeOptionsVerifiedEmpty: input.metadata.nodeOptionsVerifiedEmpty === true,
     };
   }
   if (input.outbox) {
@@ -985,6 +1042,8 @@ export function publicResult(scope, input = {}) {
       output.metadata.candidateSourceVerified &&
       output.metadata.expectedDigestsVerified &&
       output.metadata.existingDatabaseReferenceVerified &&
+      Object.values(output.metadata.effectiveEntrypoints).every((value) => value !== 'UNPROVEN') &&
+      output.metadata.nodeOptionsVerifiedEmpty &&
       output.criticalConfiguration &&
       Object.keys(output.criticalConfiguration.fields).length === fieldNames.length &&
       output.outbox?.transactionReadOnlyVerified &&
@@ -1012,6 +1071,9 @@ export function failureResult(error) {
     sqlState: SQL_STATES.has(error?.sqlState ?? error?.code)
       ? (error.sqlState ?? error.code)
       : null,
+    revisionSide: error instanceof DiagnosticError ? error.revisionSide : null,
+    entrypointClass: error instanceof DiagnosticError ? error.entrypointClass : null,
+    nodeOptionsPresence: error instanceof DiagnosticError ? error.nodeOptionsPresence : null,
   };
 }
 
@@ -1060,6 +1122,11 @@ export async function sourceCompatibility(scope, runCommand = command, read = re
       [...runtime.matchAll(/^ENV NODE_ENV=(.*)$/gm)].length === 1 &&
       /^ENV NODE_ENV=production$/m.test(runtime),
     'VERIFIED_IMAGE_NODE_ENV_REQUIRED',
+  );
+  requireCondition(
+    [...runtime.matchAll(/^CMD\s+(.*)$/gm)].length === 1 &&
+      /^CMD \["node", "dist\/src\/http\.js"\]$/m.test(runtime),
+    'VERIFIED_IMAGE_ENTRYPOINT_REQUIRED',
   );
 }
 
