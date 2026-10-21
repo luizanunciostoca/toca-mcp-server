@@ -1,0 +1,138 @@
+name: TEMP Staging Effective Access fd37 V7 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  diagnose-effective-access:
+    if: github.head_ref == 'ops/diag-staging-ingress-fd37-20260823'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fd3799153cf41b6d573dde8889f355247b7eaf74
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Load staging coordinates
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'fd3799153cf41b6d573dde8889f355247b7eaf74'
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging.env
+          cat /tmp/staging.env >> "$GITHUB_ENV"
+          set -a; source /tmp/staging.env; set +a
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_PROJECT_NUMBER" = '729069789107'
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate staging deployer only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Resolve candidate and current serving endpoints
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/service.json
+          SERVICE_URL="$(jq -r '.status.url // empty' /tmp/service.json)"
+          CANDIDATE_URL="$(jq -r 'first(.status.traffic[]? | select(.tag == "staging-mcp-fd37991") | .url) // empty' /tmp/service.json)"
+          SERVING_URL="$(jq -r 'first(.status.traffic[]? | select(.percent == 100) | .url) // empty' /tmp/service.json)"
+          SERVING_REVISION="$(jq -r 'first(.status.traffic[]? | select(.percent == 100) | .revisionName) // empty' /tmp/service.json)"
+          SERVING_TAG="$(jq -r 'first(.status.traffic[]? | select(.percent == 100) | .tag) // empty' /tmp/service.json)"
+          test -n "$SERVICE_URL"; test -n "$CANDIDATE_URL"; test -n "$SERVING_URL"; test -n "$SERVING_REVISION"
+          echo "service_url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
+          echo "candidate_url=$CANDIDATE_URL" >> "$GITHUB_OUTPUT"
+          echo "serving_url=$SERVING_URL" >> "$GITHUB_OUTPUT"
+          echo "serving_revision=$SERVING_REVISION" >> "$GITHUB_OUTPUT"
+          echo "serving_tag=$SERVING_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Mint token for canonical service URL
+        id: token
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+          token_format: id_token
+          id_token_audience: ${{ steps.state.outputs.service_url }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Compare current serving revision and troubleshoot effective IAM
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MCP_TOKEN: ${{ steps.token.outputs.id_token }}
+          SERVICE_URL: ${{ steps.state.outputs.service_url }}
+          CANDIDATE_URL: ${{ steps.state.outputs.candidate_url }}
+          SERVING_URL: ${{ steps.state.outputs.serving_url }}
+          SERVING_REVISION: ${{ steps.state.outputs.serving_revision }}
+          SERVING_TAG: ${{ steps.state.outputs.serving_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v7
+          status() { curl --silent --show-error --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $MCP_TOKEN" "$1/healthz" || true; }
+          CANDIDATE_HTTP="$(status "$CANDIDATE_URL")"
+          SERVING_HTTP="$(status "$SERVING_URL")"
+          SERVICE_HTTP="$(status "$SERVICE_URL")"
+
+          CANDIDATE_LOG_COUNT="$(gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$GCP_CLOUD_RUN_MCP_SERVICE\" AND resource.labels.revision_name=\"toca-mcp-next-staging-mcp-fd379915\" AND httpRequest.requestUrl:\"healthz\"" --project "$GCP_PROJECT_ID" --freshness=10m --limit=50 --format=json 2>/dev/null | jq 'length' || echo unknown)"
+          SERVING_LOG_COUNT="$(gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$GCP_CLOUD_RUN_MCP_SERVICE\" AND resource.labels.revision_name=\"$SERVING_REVISION\" AND httpRequest.requestUrl:\"healthz\"" --project "$GCP_PROJECT_ID" --freshness=10m --limit=50 --format=json 2>/dev/null | jq 'length' || echo unknown)"
+
+          TROUBLESHOOT_ACCESS=PASS
+          RESOURCE="//run.googleapis.com/projects/${GCP_PROJECT_ID}/locations/${GCP_REGION}/services/${GCP_CLOUD_RUN_MCP_SERVICE}"
+          if gcloud policy-intelligence troubleshoot-policy iam "$RESOURCE" \
+            --principal-email="$GCP_DEPLOY_SERVICE_ACCOUNT" \
+            --permission=run.routes.invoke \
+            --project="$GCP_PROJECT_ID" \
+            --format=json > /tmp/v7/troubleshoot.json 2>/tmp/v7/troubleshoot.err; then
+            IAM_ACCESS="$(jq -r '.access // .overallAccessState // .accessState // "unknown"' /tmp/v7/troubleshoot.json)"
+            IAM_ERRORS="$(jq -c '[.. | objects | select(has("errors")) | .errors[]? | {code:(.code // null),message:(.message // "" | tostring | .[0:160])}] | unique | .[0:10]' /tmp/v7/troubleshoot.json)"
+          else
+            TROUBLESHOOT_ACCESS=DENIED_OR_UNSUPPORTED
+            IAM_ACCESS=unknown
+            IAM_ERRORS=unavailable
+          fi
+
+          cat > /tmp/comment.md <<EOF
+          STAGING_EFFECTIVE_ACCESS_DIAG_V7 RUN_ID=${GITHUB_RUN_ID} CANDIDATE=fd3799153cf41b6d573dde8889f355247b7eaf74
+
+          CURRENT_SERVING_REVISION=${SERVING_REVISION}
+          CURRENT_SERVING_TAG=${SERVING_TAG}
+          CANDIDATE_TAG_HTTP=${CANDIDATE_HTTP}
+          CURRENT_100_PERCENT_TAG_HTTP=${SERVING_HTTP}
+          CANONICAL_SERVICE_HTTP=${SERVICE_HTTP}
+          CANDIDATE_HEALTHZ_LOG_COUNT=${CANDIDATE_LOG_COUNT}
+          CURRENT_SERVING_HEALTHZ_LOG_COUNT=${SERVING_LOG_COUNT}
+
+          POLICY_TROUBLESHOOTER_ACCESS=${TROUBLESHOOT_ACCESS}
+          RUN_ROUTES_INVOKE_EFFECTIVE=${IAM_ACCESS}
+          POLICY_TROUBLESHOOTER_ERRORS=${IAM_ERRORS}
+
+          READ_ONLY=true
+          TOKEN_EXPOSED=false
+          PRODUCTION_ACCESS=false
+          PROVIDER_ACCESS=false
+          TRAFFIC_MUTATION=false
+          IAM_MUTATION=false
+          EOF
+          gh issue comment 151 --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md

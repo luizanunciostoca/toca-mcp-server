@@ -1,0 +1,152 @@
+name: TEMP Staging Auth Diagnostic fd37 V5 2026-08-23
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  diagnose-auth:
+    if: github.head_ref == 'ops/diag-staging-ingress-fd37-20260823'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    steps:
+      - name: Checkout exact frozen candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fd3799153cf41b6d573dde8889f355247b7eaf74
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Load staging coordinates
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'fd3799153cf41b6d573dde8889f355247b7eaf74'
+          node scripts/export-staging-deploy-config.mjs infra/environments/staging.json > /tmp/staging.env
+          cat /tmp/staging.env >> "$GITHUB_ENV"
+          set -a; source /tmp/staging.env; set +a
+          test "$GCP_PROJECT_ID" = 'toca-mcp-next-staging'
+          test "$GCP_PROJECT_NUMBER" = '729069789107'
+          echo "wif=$GCP_WORKLOAD_IDENTITY_PROVIDER" >> "$GITHUB_OUTPUT"
+          echo "deployer_sa=$GCP_DEPLOY_SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate staging deployer only
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Read exact invoker binding shape and service URL
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/service.json
+          gcloud run services get-iam-policy "$GCP_CLOUD_RUN_MCP_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json > /tmp/iam.json
+          SERVICE_URL="$(jq -r '.status.url // empty' /tmp/service.json)"
+          TAG_URL="$(jq -r 'first(.status.traffic[]? | select(.tag == "staging-mcp-fd37991") | .url) // empty' /tmp/service.json)"
+          MEMBER="serviceAccount:$GCP_DEPLOY_SERVICE_ACCOUNT"
+          MATCHING="$(jq -c --arg member "$MEMBER" '[.bindings[]? | select(.role == "roles/run.invoker") | select(any(.members[]?; . == $member)) | {conditionPresent:(.condition != null),conditionTitle:(.condition.title // null)}]' /tmp/iam.json)"
+          UNCONDITIONAL="$(jq --arg member "$MEMBER" '[.bindings[]? | select(.role == "roles/run.invoker") | select(any(.members[]?; . == $member)) | select(.condition == null)] | length' /tmp/iam.json)"
+          CONDITIONAL="$(jq --arg member "$MEMBER" '[.bindings[]? | select(.role == "roles/run.invoker") | select(any(.members[]?; . == $member)) | select(.condition != null)] | length' /tmp/iam.json)"
+          test -n "$SERVICE_URL"; test -n "$TAG_URL"
+          echo "service_url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
+          echo "tag_url=$TAG_URL" >> "$GITHUB_OUTPUT"
+          echo "matching=$MATCHING" >> "$GITHUB_OUTPUT"
+          echo "unconditional=$UNCONDITIONAL" >> "$GITHUB_OUTPUT"
+          echo "conditional=$CONDITIONAL" >> "$GITHUB_OUTPUT"
+
+      - name: Mint token without email claim
+        id: token_no_email
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+          token_format: id_token
+          id_token_audience: ${{ steps.state.outputs.service_url }}
+          id_token_include_email: false
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Mint token with email claim
+        id: token_with_email
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.wif }}
+          service_account: ${{ steps.config.outputs.deployer_sa }}
+          token_format: id_token
+          id_token_audience: ${{ steps.state.outputs.service_url }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Compare sanitized token claims and HTTP result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOKEN_NO_EMAIL: ${{ steps.token_no_email.outputs.id_token }}
+          TOKEN_WITH_EMAIL: ${{ steps.token_with_email.outputs.id_token }}
+          SERVICE_URL: ${{ steps.state.outputs.service_url }}
+          TAG_URL: ${{ steps.state.outputs.tag_url }}
+          MATCHING_BINDINGS: ${{ steps.state.outputs.matching }}
+          UNCONDITIONAL_BINDINGS: ${{ steps.state.outputs.unconditional }}
+          CONDITIONAL_BINDINGS: ${{ steps.state.outputs.conditional }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          decode_payload() {
+            python3 - "$1" <<'PY'
+          import base64, json, sys
+          token = sys.argv[1]
+          part = token.split('.')[1]
+          part += '=' * (-len(part) % 4)
+          data = json.loads(base64.urlsafe_b64decode(part.encode()))
+          safe = {
+            'aud': data.get('aud'),
+            'iss': data.get('iss'),
+            'email_present': bool(data.get('email')),
+            'email_verified': data.get('email_verified'),
+            'sub_present': bool(data.get('sub')),
+            'azp_present': bool(data.get('azp')),
+          }
+          print(json.dumps(safe, separators=(',', ':')))
+          PY
+          }
+          NO_EMAIL_CLAIMS="$(decode_payload "$TOKEN_NO_EMAIL")"
+          WITH_EMAIL_CLAIMS="$(decode_payload "$TOKEN_WITH_EMAIL")"
+          status() { curl --silent --show-error --output /dev/null --write-out '%{http_code}' -H "Authorization: Bearer $1" "$2/healthz" || true; }
+          NO_EMAIL_TAG_HTTP="$(status "$TOKEN_NO_EMAIL" "$TAG_URL")"
+          WITH_EMAIL_TAG_HTTP="$(status "$TOKEN_WITH_EMAIL" "$TAG_URL")"
+          WITH_EMAIL_SERVICE_HTTP="$(status "$TOKEN_WITH_EMAIL" "$SERVICE_URL")"
+
+          cat > /tmp/comment.md <<EOF
+          STAGING_AUTH_DIAG_V5 RUN_ID=${GITHUB_RUN_ID} CANDIDATE=fd3799153cf41b6d573dde8889f355247b7eaf74
+
+          MCP_DEPLOYER_INVOKER_BINDINGS=${MATCHING_BINDINGS}
+          MCP_DEPLOYER_INVOKER_UNCONDITIONAL_COUNT=${UNCONDITIONAL_BINDINGS}
+          MCP_DEPLOYER_INVOKER_CONDITIONAL_COUNT=${CONDITIONAL_BINDINGS}
+
+          TOKEN_WITHOUT_EMAIL_SAFE_CLAIMS=${NO_EMAIL_CLAIMS}
+          TOKEN_WITH_EMAIL_SAFE_CLAIMS=${WITH_EMAIL_CLAIMS}
+          TAG_HTTP_WITHOUT_EMAIL=${NO_EMAIL_TAG_HTTP}
+          TAG_HTTP_WITH_EMAIL=${WITH_EMAIL_TAG_HTTP}
+          SERVICE_HTTP_WITH_EMAIL=${WITH_EMAIL_SERVICE_HTTP}
+
+          READ_ONLY=true
+          TOKEN_EXPOSED=false
+          PRODUCTION_ACCESS=false
+          PROVIDER_ACCESS=false
+          TRAFFIC_MUTATION=false
+          IAM_MUTATION=false
+          EOF
+          gh issue comment 151 --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
