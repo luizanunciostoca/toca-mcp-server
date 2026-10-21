@@ -68,6 +68,8 @@ export interface OrchestratorCheckpoint {
   readonly messageId: string;
   /** Immutable anchor used by opt-in durable specialist mission TTL across restarts. */
   readonly missionCreatedAt?: string;
+  /** Durable choice for the current step; never reselected after invocation or flag changes. */
+  readonly executionPath?: 'CORE' | 'SPECIALIST' | null;
   readonly correlationId: string;
   readonly causationId: string | null;
   readonly plan: OrchestratorPlan;

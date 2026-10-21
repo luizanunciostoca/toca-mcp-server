@@ -51,6 +51,8 @@ export interface TocaOrchestratorRuntimeDependencies {
   readonly planner: PlanBuilder;
   readonly core: CoreCapabilityGateway;
   readonly specialistMissions?: Ag01SpecialistMissionCoordinator;
+  /** Controls new selections only; the coordinator stays available for durable reconciliation. */
+  readonly specialistMissionsEnabled?: boolean;
   readonly deadLetters: DeadLetterSink;
   readonly budget?: Partial<OrchestratorBudget>;
   readonly now?: () => Date;
@@ -311,11 +313,93 @@ export class TocaOrchestratorRuntime {
         return responseFrom(conversation, checkpoint, duplicate, outputs, reason);
       }
 
+      const specialistMissions = this.dependencies.specialistMissions;
+      let executionPath: OrchestratorCheckpoint['executionPath'] = checkpoint.executionPath;
+      if (executionPath != null && executionPath !== 'CORE' && executionPath !== 'SPECIALIST') {
+        const reason = 'AG01_EXECUTION_PATH_INVALID';
+        ({ conversation, checkpoint } = await this.#humanRequired(
+          conversation,
+          checkpoint,
+          reason,
+        ));
+        return responseFrom(conversation, checkpoint, duplicate, outputs, reason);
+      }
+      // Legacy checkpoints did not record the branch. Reconcile the existing deterministic
+      // mission before considering a direct-Core retry, regardless of the current flag.
+      if (
+        !executionPath &&
+        checkpoint.currentAttempt > 0 &&
+        checkpoint.plan.primaryAgent !== 'AG-01'
+      ) {
+        if (!specialistMissions) {
+          const reason = 'AG01_SPECIALIST_RECOVERY_UNAVAILABLE';
+          ({ conversation, checkpoint } = await this.#humanRequired(
+            conversation,
+            checkpoint,
+            reason,
+          ));
+          return responseFrom(conversation, checkpoint, duplicate, outputs, reason);
+        }
+        try {
+          const mission = await specialistMissions.findPlannedMission(
+            `${checkpoint.runId}:${step.stepId}`,
+            identity,
+          );
+          if (!mission) throw new Error('AG01_LEGACY_EXECUTION_PATH_UNPROVEN');
+          executionPath = 'SPECIALIST';
+        } catch (error) {
+          const reason = `AG01_SPECIALIST_RECOVERY_FAILED:${normalizeErrorCode(error)}`;
+          ({ conversation, checkpoint } = await this.#humanRequired(
+            conversation,
+            checkpoint,
+            reason,
+          ));
+          return responseFrom(conversation, checkpoint, duplicate, outputs, reason);
+        }
+      }
+      executionPath ??=
+        specialistMissions &&
+        this.dependencies.specialistMissionsEnabled !== false &&
+        checkpoint.missionCreatedAt &&
+        checkpoint.plan.primaryAgent !== 'AG-01' &&
+        !inspection.sideEffects &&
+        !inspection.approvalRequired &&
+        specialistMissions.supports(inspection.canonicalCapabilityId)
+          ? 'SPECIALIST'
+          : 'CORE';
+      if (executionPath === 'SPECIALIST' && (!specialistMissions || !checkpoint.missionCreatedAt)) {
+        const reason = 'AG01_SPECIALIST_RECOVERY_UNAVAILABLE';
+        ({ conversation, checkpoint } = await this.#humanRequired(
+          conversation,
+          checkpoint,
+          reason,
+        ));
+        return responseFrom(conversation, checkpoint, duplicate, outputs, reason);
+      }
+      if (
+        executionPath === 'SPECIALIST' &&
+        (inspection.sideEffects ||
+          inspection.approvalRequired ||
+          !specialistMissions?.supports(inspection.canonicalCapabilityId))
+      ) {
+        const reason = 'AG01_MISSION_CORE_READONLY_BOUNDARY';
+        ({ conversation, checkpoint } = await this.#humanRequired(
+          conversation,
+          checkpoint,
+          reason,
+        ));
+        return responseFrom(conversation, checkpoint, duplicate, outputs, reason);
+      }
+      // A pending claim or saved DONE is reconciliation, not another tool attempt.
+      const reconcilingSpecialist: boolean =
+        executionPath === 'SPECIALIST' && checkpoint.currentAttempt > 0;
+
       const circuit = await this.dependencies.conversations.getCircuit(
         identity.principal.tenantId,
         inspection.canonicalCapabilityId,
       );
       if (
+        !reconcilingSpecialist &&
         circuit?.openedUntil &&
         Date.parse(circuit.openedUntil) > Date.parse(this.#now().toISOString())
       ) {
@@ -328,7 +412,11 @@ export class TocaOrchestratorRuntime {
         return responseFrom(conversation, checkpoint, duplicate, outputs, reason);
       }
 
-      if (checkpoint.status === 'RUNNING' && checkpoint.currentAttempt > 0) {
+      if (
+        executionPath === 'CORE' &&
+        checkpoint.status === 'RUNNING' &&
+        checkpoint.currentAttempt > 0
+      ) {
         if (inspection.sideEffects) {
           const reason = `PROVIDER_OUTCOME_UNCERTAIN_AFTER_RESTART:${inspection.canonicalCapabilityId}`;
           ({ conversation, checkpoint } = await this.#humanRequired(
@@ -351,7 +439,7 @@ export class TocaOrchestratorRuntime {
         });
       }
 
-      if (inspection.approvalRequired) {
+      if (executionPath === 'CORE' && inspection.approvalRequired) {
         if (!checkpoint.approvalId) {
           const requested = await this.dependencies.core.requestApproval({
             capabilityId: inspection.canonicalCapabilityId,
@@ -399,7 +487,7 @@ export class TocaOrchestratorRuntime {
         }
       }
 
-      if (checkpoint.totalToolCalls >= this.#budget.maxTotalAttempts) {
+      if (!reconcilingSpecialist && checkpoint.totalToolCalls >= this.#budget.maxTotalAttempts) {
         return this.#deadLetter(
           conversation,
           checkpoint,
@@ -413,8 +501,9 @@ export class TocaOrchestratorRuntime {
       checkpoint = {
         ...checkpoint,
         status: 'RUNNING',
-        currentAttempt: checkpoint.currentAttempt + 1,
-        totalToolCalls: checkpoint.totalToolCalls + 1,
+        executionPath,
+        currentAttempt: checkpoint.currentAttempt + (reconcilingSpecialist ? 0 : 1),
+        totalToolCalls: checkpoint.totalToolCalls + (reconcilingSpecialist ? 0 : 1),
         humanReason: null,
         lastErrorCode: null,
         updatedAt: this.#now().toISOString(),
@@ -428,13 +517,8 @@ export class TocaOrchestratorRuntime {
 
       try {
         const execution = await withTimeout(
-          this.dependencies.specialistMissions &&
-            checkpoint.missionCreatedAt &&
-            checkpoint.plan.primaryAgent !== 'AG-01' &&
-            !inspection.sideEffects &&
-            !inspection.approvalRequired &&
-            this.dependencies.specialistMissions.supports(inspection.canonicalCapabilityId)
-            ? this.dependencies.specialistMissions.executePlannedStep({
+          executionPath === 'SPECIALIST' && specialistMissions && checkpoint.missionCreatedAt
+            ? specialistMissions.executePlannedStep({
                 routeId: checkpoint.plan.routeId,
                 capabilityId: inspection.canonicalCapabilityId,
                 payload: step.payload,
@@ -476,6 +560,7 @@ export class TocaOrchestratorRuntime {
           ...checkpoint,
           nextStepIndex,
           currentAttempt: 0,
+          executionPath: null,
           approvalId: null,
           status: succeeded ? 'SUCCEEDED' : 'READY',
           humanReason: null,
@@ -490,6 +575,32 @@ export class TocaOrchestratorRuntime {
         if (succeeded) return responseFrom(conversation, checkpoint, duplicate, outputs, null);
       } catch (error) {
         const errorCode = normalizeErrorCode(error);
+        if (executionPath === 'SPECIALIST') {
+          if (errorCode === 'AG01_TOOL_TIMEOUT' || errorCode === 'AG01_MISSION_ALREADY_CLAIMED') {
+            // withTimeout does not cancel Core. Keep its durable claim and poll on resume.
+            checkpoint = {
+              ...checkpoint,
+              status: 'RUNNING',
+              humanReason: null,
+              lastErrorCode: 'AG01_SPECIALIST_RECONCILIATION_PENDING',
+              updatedAt: this.#now().toISOString(),
+            };
+            conversation = await this.#updateConversation(conversation, {
+              status: 'ACTIVE',
+              checkpoint,
+              now: checkpoint.updatedAt,
+            });
+            return responseFrom(conversation, checkpoint, duplicate, outputs, null);
+          }
+          const reason = `AG01_SPECIALIST_REVIEW_REQUIRED:${errorCode}`;
+          ({ conversation, checkpoint } = await this.#humanRequired(
+            conversation,
+            checkpoint,
+            reason,
+            errorCode,
+          ));
+          return responseFrom(conversation, checkpoint, duplicate, outputs, reason);
+        }
         const openedUntil = new Date(
           this.#now().getTime() + this.#budget.circuitOpenMs,
         ).toISOString();
