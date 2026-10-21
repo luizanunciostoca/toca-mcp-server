@@ -1,0 +1,362 @@
+name: Photo Enhancement Batch
+
+on:
+  push:
+    branches:
+      - feat/design-photo-enhance-mcp
+    paths:
+      - .github/workflows/photo-enhancement-batch.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: photo-enhancement-batch-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: toca-mcp-production
+  REGION: southamerica-east1
+  RUNTIME_SERVICE_ACCOUNT: toca-mcp-runtime@toca-mcp-production.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+  PUBLICATION_ASSET_BUCKET: toca-mcp-publication-assets
+  PINNED_IMAGE: southamerica-east1-docker.pkg.dev/toca-mcp-production/toca-mcp/server@sha256:ac98d394ba31aca43055c864a89dd8335c143ae7b9f83e34537842257f99c1cb
+  BATCH_ID: feed-20260903-20260909-v1
+
+jobs:
+  enhance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - short: sun0268
+            content_item_id: MKT-20260903-SUNSET-FEED-0900
+            source_asset_id: SUN-0268
+            source_drive_file_id: 1bhYlL2AvmA9tTFDxYQyQnlX3bK-ZUS2f
+          - short: sun0289
+            content_item_id: MKT-20260903-SUNSET-FEED-1500
+            source_asset_id: SUN-0289
+            source_drive_file_id: 1BmGNUURdeNkIUWJuJBwZ6jY5Q6gaLIfT
+          - short: sun0031
+            content_item_id: MKT-20260904-SUNSET-FEED-0900
+            source_asset_id: SUN-0031
+            source_drive_file_id: 1stz5KEnRbEQkXi5B0AiPpHQ1xJ6HN-v6
+          - short: tp0130
+            content_item_id: MKT-20260904-THEPARTY-FEED-1900
+            source_asset_id: TP-0130
+            source_drive_file_id: 1wRkNvKPwA9c8y39yQgD7-ioswR-ewGbQ
+          - short: sun0400
+            content_item_id: MKT-20260905-SUNSET-FEED-0900
+            source_asset_id: SUN-0400
+            source_drive_file_id: 1qEU_X3rnUFO98sn7VCiGpvlcwUQNKEVG
+          - short: sun0299
+            content_item_id: MKT-20260905-SUNSET-FEED-1500
+            source_asset_id: SUN-0299
+            source_drive_file_id: 1GOMSEC1mtQyp8K-nG7VqpyEIzk281yDW
+          - short: sun0036
+            content_item_id: MKT-20260906-SUNSET-FEED-0900
+            source_asset_id: SUN-0036
+            source_drive_file_id: 1MyzVOiGabusgwDBFtPurQ_Z1iddV7Fu3
+          - short: sun0353
+            content_item_id: MKT-20260906-SUNSET-FEED-1500
+            source_asset_id: SUN-0353
+            source_drive_file_id: 1RzK46hDzUaVFO_6DSKIUtRvabTCELoD9
+          - short: sun0039
+            content_item_id: MKT-20260907-SUNSET-FEED-0900
+            source_asset_id: SUN-0039
+            source_drive_file_id: 1IyYaH24Fo_GodI6jP14140lGu15s1_7d
+          - short: sun0354
+            content_item_id: MKT-20260907-SUNSET-FEED-1500
+            source_asset_id: SUN-0354
+            source_drive_file_id: 1Yz6vMOv5j4gVvdA87cbeCYm9VimMJ0hJ
+          - short: sun0402
+            content_item_id: MKT-20260908-SUNSET-FEED-0900
+            source_asset_id: SUN-0402
+            source_drive_file_id: 1SsmolmvNZKxMkCnP-pcN1Azbskvj_csH
+          - short: sun0272
+            content_item_id: MKT-20260908-SUNSET-FEED-1500
+            source_asset_id: SUN-0272
+            source_drive_file_id: 1z5mgyKc2IH-EpRhuCA_WUdHrMiLXnwZ8
+          - short: sun0292
+            content_item_id: MKT-20260909-SUNSET-FEED-0900
+            source_asset_id: SUN-0292
+            source_drive_file_id: 1yKJJOpDiGIYmRSRNgjEcLpRFdtyiqn7e
+          - short: sun0404
+            content_item_id: MKT-20260909-SUNSET-FEED-1500
+            source_asset_id: SUN-0404
+            source_drive_file_id: 1KaIAIAFahudDGwy9xCeErPdPckHp41h6
+    env:
+      SHORT: ${{ matrix.short }}
+      CONTENT_ITEM_ID: ${{ matrix.content_item_id }}
+      SOURCE_ASSET_ID: ${{ matrix.source_asset_id }}
+      SOURCE_DRIVE_FILE_ID: ${{ matrix.source_drive_file_id }}
+    steps:
+      - name: Authenticate to Google Cloud and Drive
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive.readonly
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Bind immutable execution identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          CORRELATION_ID="batch-${BATCH_ID}-${SOURCE_ASSET_ID}"
+          REVIEW_CORRELATION_ID="review-${BATCH_ID}-${SOURCE_ASSET_ID}"
+          ENHANCE_JOB_NAME="toca-enhance-${SHORT}"
+          REVIEW_JOB_NAME="toca-review-${SHORT}"
+          {
+            echo "CORRELATION_ID=$CORRELATION_ID"
+            echo "REVIEW_CORRELATION_ID=$REVIEW_CORRELATION_ID"
+            echo "ENHANCE_JOB_NAME=$ENHANCE_JOB_NAME"
+            echo "REVIEW_JOB_NAME=$REVIEW_JOB_NAME"
+          } >> "$GITHUB_ENV"
+
+      - name: Download exact source for independent evidence
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+            "https://www.googleapis.com/drive/v3/files/${SOURCE_DRIVE_FILE_ID}?alt=media&supportsAllDrives=true" \
+            --output source-original.bin
+          test -s source-original.bin
+          SOURCE_MIME="$(file --brief --mime-type source-original.bin)"
+          case "$SOURCE_MIME" in
+            image/jpeg|image/png|image/webp) ;;
+            *) echo "Unexpected source MIME: $SOURCE_MIME" >&2; exit 1 ;;
+          esac
+          SOURCE_SHA256="$(sha256sum source-original.bin | awk '{print $1}')"
+          {
+            echo "SOURCE_EVIDENCE_SHA256=$SOURCE_SHA256"
+            echo "SOURCE_EVIDENCE_MIME=$SOURCE_MIME"
+          } >> "$GITHUB_ENV"
+
+      - name: Write isolated runtime environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/photo-enhancement-batch-env.yaml <<EOF
+          NODE_ENV: "production"
+          MCP_ENABLED: "false"
+          INSTAGRAM_PUBLICATION_WRITES_ENABLED: "false"
+          INSTAGRAM_ENGAGEMENT_WRITES_ENABLED: "false"
+          META_ADS_WRITE_ENABLED: "false"
+          GCP_PROJECT_ID: "$PROJECT_ID"
+          INSTAGRAM_PUBLICATION_ASSET_BUCKET: "$PUBLICATION_ASSET_BUCKET"
+          TOCA_CREATIVE_GOOGLE_SERVICE_ACCOUNT_EMAIL: "$RUNTIME_SERVICE_ACCOUNT"
+          EOF
+
+      - name: Deploy exact pinned enhancement job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$ENHANCE_JOB_NAME" \
+            --image "$PINNED_IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args="dist/src/photo-enhancement-smoke.js,--content-item-id,$CONTENT_ITEM_ID,--source-asset-id,$SOURCE_ASSET_ID,--source-drive-file-id,$SOURCE_DRIVE_FILE_ID,--correlation-id,$CORRELATION_ID" \
+            --env-vars-file /tmp/photo-enhancement-batch-env.yaml \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 180s \
+            --quiet
+
+      - name: Verify pinned image and zero external write authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_JSON="$(gcloud run jobs describe "$ENHANCE_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          printf '%s' "$JOB_JSON" | jq -e --arg expectedImage "$PINNED_IMAGE" '
+            .spec.template.spec.template.spec.containers[0] as $container |
+            ($container.image == $expectedImage) and
+            ($container.command == ["node"]) and
+            ($container.args[0] == "dist/src/photo-enhancement-smoke.js") and
+            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$container.env[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$container.env[] | select(.name == "META_ADS_WRITE_ENABLED") | .value] == ["false"])
+          ' >/dev/null
+
+      - name: Execute governed enhancement
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$ENHANCE_JOB_NAME" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --wait \
+            --quiet
+
+      - name: Capture and validate enhancement evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT_JSON=""
+          LOGS_JSON='[]'
+          for attempt in $(seq 1 15); do
+            LOGS_JSON="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${ENHANCE_JOB_NAME}\"" \
+              --project "$PROJECT_ID" \
+              --freshness=30m \
+              --limit=200 \
+              --order=asc \
+              --format=json || printf '[]')"
+            RESULT_JSON="$(printf '%s' "$LOGS_JSON" | jq -c \
+              --arg contentItemId "$CONTENT_ITEM_ID" \
+              --arg sourceAssetId "$SOURCE_ASSET_ID" \
+              --arg sourceDriveFileId "$SOURCE_DRIVE_FILE_ID" '
+                def parsed:
+                  if ((.jsonPayload? | type) == "object" and (.jsonPayload.sourceAssetId? != null)) then .jsonPayload
+                  elif ((.jsonPayload.message? | type) == "string") then (.jsonPayload.message | fromjson? // empty)
+                  elif ((.textPayload? | type) == "string") then (.textPayload | fromjson? // empty)
+                  else empty end;
+                [ .[] | parsed | select(
+                    .contentItemId? == $contentItemId and
+                    .sourceAssetId? == $sourceAssetId and
+                    .sourceDriveFileId? == $sourceDriveFileId
+                  ) ] | last // empty
+              ')"
+            [ -n "$RESULT_JSON" ] && break
+            sleep 4
+          done
+          test -n "$RESULT_JSON"
+          printf '%s\n' "$RESULT_JSON" > enhancement-evidence.json
+          jq -e \
+            --arg contentItemId "$CONTENT_ITEM_ID" \
+            --arg sourceAssetId "$SOURCE_ASSET_ID" \
+            --arg sourceDriveFileId "$SOURCE_DRIVE_FILE_ID" '
+              .contentItemId == $contentItemId and
+              .sourceAssetId == $sourceAssetId and
+              .sourceDriveFileId == $sourceDriveFileId and
+              .sourceImageBound == true and
+              .editMode == "ENHANCE_EXISTING_IMAGE" and
+              .editorProvider == "LOCAL_IMAGEMAGICK" and
+              .reviewRequired == true and
+              .promotionEligible == false and
+              (.sourceSha256 | test("^[a-f0-9]{64}$")) and
+              (.outputSha256 | test("^[a-f0-9]{64}$")) and
+              (.publicationAsset.objectName | length > 0) and
+              .publicationAsset.contentType == "image/jpeg"
+            ' enhancement-evidence.json >/dev/null
+          test "$(jq -r .sourceSha256 enhancement-evidence.json)" = "$SOURCE_EVIDENCE_SHA256"
+          {
+            echo "ENHANCED_OBJECT_NAME=$(jq -r .publicationAsset.objectName enhancement-evidence.json)"
+            echo "ENHANCED_OUTPUT_SHA256=$(jq -r .outputSha256 enhancement-evidence.json)"
+          } >> "$GITHUB_ENV"
+
+      - name: Deploy exact pinned ephemeral review-link job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "$REVIEW_JOB_NAME" \
+            --image "$PINNED_IMAGE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --command node \
+            --args="dist/src/photo-enhancement-review-link.js,--object-name,$ENHANCED_OBJECT_NAME,--expected-sha256,$ENHANCED_OUTPUT_SHA256,--correlation-id,$REVIEW_CORRELATION_ID" \
+            --env-vars-file /tmp/photo-enhancement-batch-env.yaml \
+            --tasks 1 \
+            --max-retries 0 \
+            --task-timeout 60s \
+            --quiet
+
+      - name: Verify pinned review job and zero external write authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          JOB_JSON="$(gcloud run jobs describe "$REVIEW_JOB_NAME" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          printf '%s' "$JOB_JSON" | jq -e --arg expectedImage "$PINNED_IMAGE" '
+            .spec.template.spec.template.spec.containers[0] as $container |
+            ($container.image == $expectedImage) and
+            ($container.command == ["node"]) and
+            ($container.args[0] == "dist/src/photo-enhancement-review-link.js") and
+            ([$container.env[] | select(.name == "INSTAGRAM_PUBLICATION_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$container.env[] | select(.name == "INSTAGRAM_ENGAGEMENT_WRITES_ENABLED") | .value] == ["false"]) and
+            ([$container.env[] | select(.name == "META_ADS_WRITE_ENABLED") | .value] == ["false"])
+          ' >/dev/null
+
+      - name: Execute ephemeral review-link job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute "$REVIEW_JOB_NAME" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --wait \
+            --quiet
+
+      - name: Download and independently verify exact output
+        shell: bash
+        run: |
+          set -euo pipefail
+          REVIEW_JSON=""
+          LOGS_JSON='[]'
+          for attempt in $(seq 1 12); do
+            LOGS_JSON="$(gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${REVIEW_JOB_NAME}\"" \
+              --project "$PROJECT_ID" \
+              --freshness=10m \
+              --limit=100 \
+              --order=asc \
+              --format=json || printf '[]')"
+            REVIEW_JSON="$(printf '%s' "$LOGS_JSON" | jq -c --arg correlationId "$REVIEW_CORRELATION_ID" '
+              def parsed:
+                if ((.jsonPayload? | type) == "object" and (.jsonPayload.reviewUrl? != null)) then .jsonPayload
+                elif ((.jsonPayload.message? | type) == "string") then (.jsonPayload.message | fromjson? // empty)
+                elif ((.textPayload? | type) == "string") then (.textPayload | fromjson? // empty)
+                else empty end;
+              [ .[] | parsed | select(.correlationId? == $correlationId and .reviewUrl? != null) ] | last // empty
+            ')"
+            [ -n "$REVIEW_JSON" ] && break
+            sleep 3
+          done
+          test -n "$REVIEW_JSON"
+          test "$(printf '%s' "$REVIEW_JSON" | jq -r .objectName)" = "$ENHANCED_OBJECT_NAME"
+          test "$(printf '%s' "$REVIEW_JSON" | jq -r .expectedSha256)" = "$ENHANCED_OUTPUT_SHA256"
+          REVIEW_URL="$(printf '%s' "$REVIEW_JSON" | jq -r .reviewUrl)"
+          test "$REVIEW_URL" != "null"
+          curl --fail --silent --show-error --location "$REVIEW_URL" --output enhanced-output.jpg
+          unset REVIEW_URL
+          test -s enhanced-output.jpg
+          OBSERVED_OUTPUT_SHA256="$(sha256sum enhanced-output.jpg | awk '{print $1}')"
+          test "$OBSERVED_OUTPUT_SHA256" = "$ENHANCED_OUTPUT_SHA256"
+          jq -n \
+            --arg batchId "$BATCH_ID" \
+            --arg contentItemId "$CONTENT_ITEM_ID" \
+            --arg sourceAssetId "$SOURCE_ASSET_ID" \
+            --arg sourceDriveFileId "$SOURCE_DRIVE_FILE_ID" \
+            --arg sourceMime "$SOURCE_EVIDENCE_MIME" \
+            --arg sourceSha256 "$SOURCE_EVIDENCE_SHA256" \
+            --arg objectName "$ENHANCED_OBJECT_NAME" \
+            --arg expectedSha256 "$ENHANCED_OUTPUT_SHA256" \
+            --arg observedSha256 "$OBSERVED_OUTPUT_SHA256" \
+            --arg pinnedImage "$PINNED_IMAGE" \
+            '{batchId:$batchId,contentItemId:$contentItemId,sourceAssetId:$sourceAssetId,sourceDriveFileId:$sourceDriveFileId,sourceMime:$sourceMime,sourceSha256:$sourceSha256,objectName:$objectName,expectedSha256:$expectedSha256,observedSha256:$observedSha256,pinnedImage:$pinnedImage,verification:"EPHEMERAL_RUNTIME_SIGNED_URL_INDEPENDENT_CI_READBACK",match:true,externalWritesEnabled:false}' \
+            > readback-evidence.json
+
+      - name: Upload source, output and durable evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: enhancement-${{ env.SOURCE_ASSET_ID }}-${{ env.BATCH_ID }}
+          path: |
+            source-original.bin
+            enhanced-output.jpg
+            enhancement-evidence.json
+            readback-evidence.json
+          if-no-files-found: error
+          retention-days: 30
