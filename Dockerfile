@@ -16,7 +16,9 @@ ENV U2NET_HOME=/tmp/rembg-models
 WORKDIR /app
 RUN apt-get update && apt-get upgrade -y --no-install-recommends \
   && apt-get install -y --no-install-recommends libpcre2-8-0 ffmpeg imagemagick python3 python3-pip \
-  && python3 -m pip install --no-cache-dir --break-system-packages "rembg[cpu]==2.0.81" \
+  && python3 -m pip install --no-cache-dir --break-system-packages "rembg[cpu]==2.0.86" "pillow==13.0.0" \
+  && python3 -m pip check \
+  && python3 -c "from importlib.metadata import version; from inspect import signature; from io import BytesIO; from PIL import Image; from rembg import new_session, remove; from rembg.sessions import sessions_class; assert version('rembg') == '2.0.86'; assert version('pillow') == '13.0.0'; assert callable(new_session); assert {'session', 'alpha_matting'} <= set(signature(remove).parameters); assert any(cls.name() == 'u2net_human_seg' for cls in sessions_class); image = Image.new('RGB', (2, 2), (17, 83, 149)); buffers = {fmt: BytesIO() for fmt in ('PNG', 'JPEG', 'WEBP')}; [image.save(buf, format=fmt) for fmt, buf in buffers.items()]; [Image.open(buf).load() for buf in buffers.values()]; assert Image.open(buffers['PNG']).tobytes() == image.tobytes(); print('segmentation dependency smoke passed (no model inference)')" \
   && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /root/.cache/pip /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
