@@ -1,3 +1,4 @@
+import { MCP_MAX_TOOL_INPUT_ELEMENTS } from './security-limits.js';
 import { McpServer, type AuthInfo } from '@modelcontextprotocol/server';
 import type * as z from 'zod/v4';
 import { ToolRegistry } from '../core/tool-registry.js';
@@ -20,7 +21,10 @@ export function createReadonlyMcpServer(
   authInfo: AuthInfo | undefined,
 ): McpServer {
   auth.resolveIdentity(authInfo);
-  const server = new McpServer({ name: 'toca-mcp-readonly', version: '0.2.0' });
+  const server = new McpServer(
+    { name: 'toca-mcp-readonly', version: '0.2.0' },
+    { maxToolInputElements: MCP_MAX_TOOL_INPUT_ELEMENTS },
+  );
   // Forward canonical registrations before they reach the SDK. Unlisted handlers never register.
   // This avoids copying the Core catalog, schemas, or search/describe implementations.
   const registration = {

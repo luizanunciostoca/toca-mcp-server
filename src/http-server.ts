@@ -1,3 +1,7 @@
+import {
+  MCP_MAX_REQUEST_BODY_BYTES,
+  MCP_READONLY_MAX_REQUEST_BODY_BYTES,
+} from './mcp/security-limits.js';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { toNodeHandler, type NodeIncomingMessageLike } from '@modelcontextprotocol/node';
 import { createMcpHandler } from '@modelcontextprotocol/server';
@@ -43,10 +47,16 @@ export interface TocaHttpServerOptions {
 }
 
 export function createTocaHttpServer(options: TocaHttpServerOptions = {}): Server {
-  const mcp = createMcpHandler((context) =>
-    options.readonlyMcpAuth
-      ? createReadonlyMcpServer(options.readonlyMcpAuth, context.authInfo)
-      : createArtistSafeTocaServer(),
+  const mcp = createMcpHandler(
+    (context) =>
+      options.readonlyMcpAuth
+        ? createReadonlyMcpServer(options.readonlyMcpAuth, context.authInfo)
+        : createArtistSafeTocaServer(),
+    {
+      maxRequestBodySize: options.readonlyMcpAuth
+        ? MCP_READONLY_MAX_REQUEST_BODY_BYTES
+        : MCP_MAX_REQUEST_BODY_BYTES,
+    },
   );
   const handleMcp = toNodeHandler(mcp, {
     onerror: (error) => {
