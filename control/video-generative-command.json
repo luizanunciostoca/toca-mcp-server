@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "action": "GENERATE",
+  "commandId": "VIDEO-GEN-TP-DUAS-PISTAS-20260903-V1",
+  "contentItemId": "VID-TP-20260904-DUAS-PISTAS-GEN-001",
+  "sourceAssetId": "TP-GEN-0001",
+  "expectedSourceSha256": "e16d4bc9dba27eb60a826d9be6fd3dade2f1e2e48445e1155a421cf52ca7d85b",
+  "routeType": "GENERATIVE_SCENE_CONTINUATION_VIDEO",
+  "overlayDriveFileId": "1KY8YLzEtX1w40WFImOyYyqwmI_52P69G",
+  "derivativeSeconds": 5,
+  "creativeDirection": "Create a premium cinematic scene continuation from the supplied The Party source. Animate only the photographic DJ-booth environment with a restrained smooth camera push-in, natural hand movement near the mixer, physically plausible LED flicker, subtle screen and equipment reflections, shallow depth breathing, soft bokeh motion, and controlled amber-purple nightclub light pulses. Preserve the factual source scene, equipment, materials, perspective and lighting identity. Do not invent crowd, faces, architecture, written content, logos or sponsor marks. Do not use aggressive shake, surreal motion, excessive particles, HDR or oversaturation. The source remains the factual anchor and the final static typography, information panels and brand marks will be restored deterministically after generation.",
+  "approvalRef": "CHAT:2026-09-03:GENERATIVE_MOTION_DUAS_PISTAS"
+}
