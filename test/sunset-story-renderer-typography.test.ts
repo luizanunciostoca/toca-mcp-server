@@ -31,6 +31,8 @@ function profile() {
     width: 1080,
     height: 1920,
     sourceAspectRatio: 9 / 16,
+    subjects: [],
+    protectedFeatures: [],
     primarySubject: null,
     primarySubjectZone: null,
     negativeSpaceZones: ['CENTER'] as const,
@@ -48,6 +50,8 @@ const cropPlan = {
   transformedPrimarySubject: null,
   subjectCoverage: 1,
   protectedOverlap: 0,
+  protectedFeatureOverlap: 0,
+  minimumProtectedFeatureCoverage: 1,
   placementScore: 1,
   planScore: 100,
 };
