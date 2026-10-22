@@ -346,7 +346,7 @@ run_provider_readback() {
     --set-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
     --command node \
     --args dist/src/instagram-first-publication-verify.js \
-    --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID~INSTAGRAM_FIRST_PUBLICATION_APPROVED_REQUEST_SHA256=$APPROVED_REQUEST_SHA256~INSTAGRAM_FIRST_PUBLICATION_CORRELATION_ID=$CORRELATION_ID~INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY=$IDEMPOTENCY_KEY~META_APP_ID=2281930145887404~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$REDIRECT_URI~META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$PROJECT_ID" \
+    --set-env-vars "^~^NODE_ENV=production~MCP_ENABLED=false~META_ENABLED=true~META_WEBHOOK_ENABLED=false~META_WEBHOOK_PERSISTENCE_ENABLED=false~INSTAGRAM_ENGAGEMENT_WRITES_ENABLED=false~INSTAGRAM_PUBLICATION_WRITES_ENABLED=false~INSTAGRAM_BUSINESS_ACCOUNT_ID=$INSTAGRAM_ACCOUNT_ID~INSTAGRAM_FIRST_PUBLICATION_APPROVED_REQUEST_SHA256=$APPROVED_REQUEST_SHA256~INSTAGRAM_FIRST_PUBLICATION_EXPECTED_ASSET_SHA256=$EXPECTED_ASSET_SHA256~INSTAGRAM_FIRST_PUBLICATION_CORRELATION_ID=$CORRELATION_ID~INSTAGRAM_FIRST_PUBLICATION_IDEMPOTENCY_KEY=$IDEMPOTENCY_KEY~META_APP_ID=2281930145887404~META_APP_SECRET_PROVIDER=env~META_APP_SECRET_KEY=META_APP_SECRET~META_AUTHORIZATION_ENDPOINT=https://www.facebook.com/dialog/oauth~META_TOKEN_ENDPOINT=https://graph.facebook.com/oauth/access_token~META_REDIRECT_URI=$REDIRECT_URI~META_REQUESTED_SCOPES=pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,business_management,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish~META_GRAPH_BASE_URL=https://graph.facebook.com~META_GRAPH_API_VERSION=v24.0~META_TOKEN_STORE_PROVIDER=gcp-secret-manager~META_TOKEN_SECRET_ID=$TOKEN_SECRET_ID~GCP_PROJECT_ID=$PROJECT_ID" \
     --set-secrets "META_APP_SECRET=toca-meta-app-secret:1,DATABASE_URL=$DATABASE_SECRET_ID:$DATABASE_SECRET_VERSION" \
     --tasks 1 \
     --max-retries 0 \
@@ -374,11 +374,23 @@ run_provider_readback() {
   result_json="${result_line#INSTAGRAM_FIRST_PUBLICATION_VERIFY_RESULT=}"
   printf '%s\n' "$result_json" | jq -e \
     --arg sha "$APPROVED_REQUEST_SHA256" \
-    --arg correlation "$CORRELATION_ID" '
+    --arg ig "$INSTAGRAM_ACCOUNT_ID" \
+    --arg assetSha "$EXPECTED_ASSET_SHA256" \
+    --arg media "$MEDIA_TYPE" \
+    --arg correlation "$CORRELATION_ID" \
+    --arg idempotency "$IDEMPOTENCY_KEY" '
       .requestSha256 == $sha and
       .status == "PUBLISHED" and
-      (.publicationId | length > 0) and
-      .correlationId == $correlation
+      (.publicationId | type == "string" and test("^[^[:space:]]+$")) and
+      .instagramAccountId == $ig and
+      .publicationAssetSha256 == $assetSha and
+      .requestMediaType == $media and
+      .correlationId == $correlation and
+      .idempotencyKey == $idempotency and
+      (if $media == "IMAGE" then
+        .providerMediaType == "IMAGE" and
+        (.permalink | type == "string" and test("^https://(www[.])?instagram[.]com/p/[A-Za-z0-9_-]+/?([?#].*)?$"))
+      else true end)
     ' >/dev/null || return $?
 
   printf '%s\n' "$result_json" | jq \
