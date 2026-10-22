@@ -18,13 +18,13 @@ This standard applies only when all of the following are true:
 - `channel=INSTAGRAM`;
 - `format=STORIES`.
 
-The standard identity is `SUNSET_STORY_V1`, version `1.0`, with reference set `SUNSET_STORY_REFERENCE_SET_20260817`.
+The standard identity is `SUNSET_STORY_V1`, version `1.3`, with reference set `SUNSET_STORY_REFERENCE_SET_20260817`. The active layout catalog is `control/creative-standards/sunset-story-reference-template-library.v1.json` (`SUNSET_REFERENCE_TEMPLATE_LIBRARY` v1.0), mirrored from the canonical Drive library `1gKsm3TGHlbqmC091TCbj7xXTzHfEgTHe` and described in `docs/architecture/sunset-story-reference-template-catalog.md`.
 
 ## Production contract
 
 The production path is:
 
-`CONTENT_ITEM` → resolve `SUNSET_STORY_V1` → select an approved template class → select a `MARKETING_READY` master → compose the final 1080×1920 derivative → insert copy, CTA and official logo assets → Brand Gate → Sunset Quality Gate → persist `STORY_CREATIVES` → `STORY_READY` → Review/Approval → Prepare → Publish.
+`CONTENT_ITEM` → resolve `SUNSET_STORY_V1` → resolve an explicit reference template from the library → analyze the photograph's safe/protected regions → select a `MARKETING_READY` master → render the pure template deterministically → insert copy, CTA and official logo assets → Template Gate → Brand Gate → Venue Gate → Sunset Quality Gate → persist `STORY_CREATIVES` → `STORY_READY` → Review/Approval → Prepare → Publish.
 
 `STORY_READY` means the final creative bytes already exist and passed the required creative gates. `PREPARE` and `PUBLISH` must consume that final Story asset and must never rebuild the graphic composition.
 
@@ -36,13 +36,13 @@ The production path is:
 - `SUNSET_DRINKS_EXPERIENCE`
 - `SUNSET_INFO_HOURS`
 
-The Marketing Autopilot should vary the template class and source asset according to the canonical anti-repeat policy. The goal is a stable visual grammar, not repeated identical layouts.
+The Marketing Autopilot should vary the explicit reference template and source asset according to the canonical anti-repeat policy. A template is a complete composition contract, not a loose style hint. The goal is a stable visual grammar without repeated identical layouts or hybrid combinations of unrelated templates.
 
 ## Visual invariants
 
 The final canvas is 1080×1920 / 9:16. The visual hierarchy is photography first, then headline, supporting copy, CTA and brand footer. Sunset photography should prioritize real approved assets with people, golden hour, social interaction, sea/view, Toca architecture/luminaires, drinks and lifestyle details.
 
-The standard uses an elegant editorial serif for primary headlines, a clean sans for supporting information and CTA, white as the default text/logo color, sunset orange and soft gold as supporting accents, and translucent black only when needed for contrast.
+The standard uses Bodoni/Didot-class editorial serif candidates for aspirational headlines and Montserrat/Avenir-class geometric sans candidates for supporting information, time and CTA. White is the default text/logo color, sunset orange and soft gold are supporting accents, and black is mandatory when the analyzed text region is light. Contrast is evaluated on the selected safe region, not on the whole image.
 
 The brand footer uses official Drive assets in the canonical order Toca do Morcego → Corona → Red Bull → Morro Digital. AI reconstruction of logos is prohibited.
 
@@ -57,7 +57,7 @@ The ten images supplied and approved by the user are stored under `01_REFERENCIA
 For Sunset Stories, `STORY_CREATIVES` must preserve at least:
 
 - `creative_standard_id=SUNSET_STORY_V1`;
-- `creative_standard_version=1.0`;
+- `creative_standard_version=1.3`;
 - `template_class`;
 - `reference_set_id=SUNSET_STORY_REFERENCE_SET_20260817`;
 - `source_asset_id`;
@@ -72,10 +72,10 @@ For Sunset Stories, `STORY_CREATIVES` must preserve at least:
 - `quality_gate_status`;
 - `lineage_verified`.
 
-If the standard cannot be resolved, required official brand assets are unavailable, lineage is incomplete, or any required Brand/Quality Gate fails, the worker must fail closed and must not mark the item `STORY_READY`.
+If the standard or explicit reference template cannot be resolved, required official brand assets are unavailable, lineage is incomplete, safe/protected-region analysis is missing, a required template element is absent, template purity/reference similarity fails, or any required Template/Brand/Venue/Quality Gate fails, the worker must fail closed and must not mark the item `STORY_READY`.
 
 ## Publication boundary
 
-This standard does not change Approval, Policy, capability or provider gates. A creative being visually compliant does not authorize external publication.
+This standard does not change Approval, Policy, capability or provider gates. A creative being visually compliant does not authorize external publication. The renderer is a pure-template engine: it may render only the explicit descriptor and plan supplied by the library, and it must not fall back to a generic layout for a Sunset reference template.
 
 The publication layer receives an immutable final asset. It must verify the approved descriptor/hash and existing execution gates exactly as before. No publication command is created by adding or changing this standard.

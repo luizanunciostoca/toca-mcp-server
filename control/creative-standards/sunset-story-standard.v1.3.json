@@ -1,0 +1,243 @@
+{
+  "schemaVersion": "1.3",
+  "standardId": "SUNSET_STORY_V1",
+  "standardVersion": "1.3",
+  "status": "ACTIVE_CANONICAL",
+  "validatedAt": "2026-08-20",
+  "parentPolicyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+  "scope": {
+    "operation": "SUNSET",
+    "channel": "INSTAGRAM",
+    "format": "STORIES"
+  },
+  "sourceOfTruth": {
+    "provider": "GOOGLE_DRIVE",
+    "driveDocumentId": "1gTFxCLWnsZIy2vRKHGglXILMAexXoIUzd5WDZvpOtsM",
+    "registrySpreadsheetId": "1bqF5zN5Lhesy_uls6gHMkOT-KLFRGo81OJMB_LPwXaU",
+    "referenceFolderId": "1kNN7WDKbdP_iJ7bBOztY3A1d2fBkapWY",
+    "originalReferencesFolderId": "1mT4NJdY4wQfbTP580lxvmJC9IbH-3ttz",
+    "derivedExamplesFolderId": "1oFEJBYjyZKPCLsnHfnbMul7hIv9N2BwK",
+    "referenceSetId": "SUNSET_STORY_REFERENCE_SET_20260817",
+    "venueReferenceSetId": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1",
+    "legacyVenueReferenceSetExecution": "DENY"
+  },
+  "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "aspectRatio": "9:16"
+  },
+  "safeArea": {
+    "sideMarginRecommendedPx": 90,
+    "sideMarginMinimumPx": 64,
+    "criticalTextTopPx": 180,
+    "criticalTextBottomPx": 1580,
+    "brandFooterTopPx": 1680,
+    "brandFooterBottomPx": 1830,
+    "bottomBreathingRoomMinimumPx": 70
+  },
+  "visualEssence": ["SOLAR", "SOPHISTICATED", "SOCIAL", "SENSORIAL", "PREMIUM", "HUMAN", "REAL"],
+  "photography": {
+    "venueVerifiedRequired": true,
+    "masterStatusRequired": "VENUE_VERIFIED_MARKETING_READY",
+    "preferredThemes": [
+      "PEOPLE_GOLDEN_HOUR",
+      "SOCIAL_INTERACTION",
+      "SEA_VIEW",
+      "TOCA_ARCHITECTURE_AND_LAMPS",
+      "DRINKS",
+      "LIFESTYLE_DETAILS"
+    ],
+    "preferredTreatment": [
+      "WARM_ORANGE",
+      "SOFT_GOLD",
+      "SUNLIT_SKIN",
+      "BACKLIGHT",
+      "SUNSET_REFLECTIONS",
+      "NATURAL_DEPTH_OF_FIELD"
+    ],
+    "forbidSyntheticReplacementWhenRealAssetExists": true,
+    "requireLineage": true
+  },
+  "typography": {
+    "headline": {
+      "familyClass": "ELEGANT_EDITORIAL_SERIF",
+      "defaultColor": "#FFFFFF",
+      "maxLines": 3
+    },
+    "support": {
+      "familyClass": "CLEAN_GEOMETRIC_SANS",
+      "weight": "REGULAR_OR_MEDIUM",
+      "maxLines": 3
+    },
+    "cta": {
+      "familyClass": "CLEAN_SANS",
+      "weight": "MEDIUM_OR_SEMIBOLD",
+      "container": "THIN_WHITE_OUTLINE",
+      "preferredTexts": ["Garanta seu ingresso", "Compre seu ingresso", "Vem pra Toca"]
+    },
+    "time": {
+      "familyClass": "CLEAN_SANS",
+      "weight": "BOLD_OR_SEMIBOLD",
+      "preferredContainer": "DISCREET_RECTANGULAR_STRIP"
+    },
+    "maxFontFamilies": 2,
+    "scriptUsage": "EXCEPTIONAL_ONLY",
+    "runtimeCandidates": {
+      "headline": "Bodoni Moda",
+      "functionalSans": "Montserrat"
+    },
+    "exactFontStatus": "VISUAL_MATCH_CANDIDATE_NOT_PROVEN_FROM_FLATTENED_PNG"
+  },
+  "palette": {
+    "white": "#FFFFFF",
+    "sunGlow": "#FFC84A",
+    "sunsetOrange": "#FF7A00",
+    "deepOrange": "#E65A00",
+    "softGold": "#F2C17A",
+    "deepBrown": "#3A1C0F",
+    "translucentBlackRange": "rgba(0,0,0,0.50)-rgba(0,0,0,0.65)"
+  },
+  "templateClasses": [
+    {
+      "id": "SUNSET_HERO_LIFESTYLE",
+      "focus": "PEOPLE_CONNECTION_FASHION_ATTITUDE_GOLDEN_HOUR"
+    },
+    {
+      "id": "SUNSET_VIEW_SCENERY",
+      "focus": "HORIZON_SUNSET_LAMPS_DECK_VIEW_ATMOSPHERE"
+    },
+    {
+      "id": "SUNSET_SOCIAL_EXPERIENCE",
+      "focus": "FRIENDS_COUPLE_GROUP_SHARED_MEMORY"
+    },
+    {
+      "id": "SUNSET_DRINKS_EXPERIENCE",
+      "focus": "DRINK_SERVICE_INGREDIENTS_RITUAL"
+    },
+    {
+      "id": "SUNSET_INFO_HOURS",
+      "focus": "FUNCTIONAL_EVENT_NAME_AND_HOURS"
+    }
+  ],
+  "brandFooter": {
+    "required": true,
+    "orderDefault": ["TOCA_DO_MORCEGO", "CORONA", "RED_BULL", "MORRO_DIGITAL"],
+    "partnerLogosOnlyWhenCampaignRequires": true,
+    "preferredColor": "#FFFFFF",
+    "logoSource": "OFFICIAL_DRIVE_ASSETS_ONLY",
+    "deterministicInsertionRequired": true,
+    "forbidAiLogoReconstruction": true
+  },
+  "creativeTruth": {
+    "policyId": "TOCA_CREATIVE_TRUTH_POLICY_V1",
+    "defaultModes": ["REAL_COMPOSITE", "REAL_PLUS_ENHANCEMENT"],
+    "generativeExceptionRequiresExplicitApproval": true,
+    "venueReferenceSetRequiredForGenerativeException": "TOCA_VENUE_REFERENCE_SET_SUNSET_V1",
+    "crossOperationReferenceReuse": "FORBIDDEN",
+    "venueFidelityGateRequired": true,
+    "brandIntegrityGateRequired": true,
+    "qualityGateRequired": true,
+    "exactApprovedAssetPublicationRequired": true
+  },
+  "antiRepeat": {
+    "allowSameTemplateClassConsecutivelyWhenAlternativesExist": false,
+    "headlineRepeatWindowDays": 14,
+    "preferredRotation": ["PEOPLE", "VIEW", "EXPERIENCE_OR_DRINK", "PEOPLE"],
+    "preserveGrammarNotExactLayout": true
+  },
+  "qualityGate": {
+    "failClosed": true,
+    "rejectOn": [
+      "AI_RECREATED_LOGO",
+      "ARCHITECTURE_DRIFT",
+      "ASSET_LINEAGE_MISSING",
+      "COPY_TIME_OR_FACT_ERROR",
+      "CREATIVE_STANDARD_ID_OR_VERSION_MISSING",
+      "EXCESSIVE_TEXT",
+      "INSUFFICIENT_CONTRAST",
+      "MULTIPLE_PRIMARY_CTAS",
+      "NOT_9_16_FINAL_DERIVATIVE",
+      "OUTPUT_NOT_1080X1920",
+      "REQUIRED_LOGOS_MISSING_OR_MISALIGNED",
+      "SYNTHETIC_PHOTO_REPLACES_REAL_ASSET",
+      "TEMPLATE_BACKGROUND_MISMATCH",
+      "TEMPLATE_CONTRAST_MISMATCH",
+      "TEMPLATE_ELEMENT_NOT_ALLOWED",
+      "TEMPLATE_ELEMENT_OVERLAP",
+      "TEMPLATE_FONT_ROLE_MISMATCH",
+      "TEMPLATE_FOOTER_MISMATCH",
+      "TEMPLATE_GEOMETRY_INVALID",
+      "TEMPLATE_NOT_RESOLVED",
+      "TEMPLATE_PROTECTED_REGION_INVALID",
+      "TEMPLATE_PURITY_FAILED",
+      "TEMPLATE_REFERENCE_MISMATCH",
+      "TEMPLATE_REQUIRED_ELEMENT_MISSING",
+      "TEMPLATE_SAFE_REGION_INVALID",
+      "TEMPLATE_SIMILARITY_NOT_REVIEWED",
+      "TEXT_COVERS_ESSENTIAL_SUBJECT",
+      "TEXT_ILLEGIBLE"
+    ]
+  },
+  "productionFlow": [
+    "RESOLVE_CREATIVE_TRUTH_POLICY",
+    "RESOLVE_STANDARD",
+    "SELECT_TEMPLATE_CLASS",
+    "RESOLVE_REFERENCE_TEMPLATE_LIBRARY",
+    "ANALYZE_SAFE_REGIONS_AND_PROTECTED_REGIONS",
+    "RENDER_PURE_TEMPLATE",
+    "SELECT_VENUE_VERIFIED_MARKETING_READY_MASTER",
+    "COMPOSE_1080X1920",
+    "APPLY_COPY_AND_CTA",
+    "INSERT_OFFICIAL_LOGOS_DETERMINISTICALLY",
+    "BRAND_INTEGRITY_GATE",
+    "VENUE_FIDELITY_GATE",
+    "QUALITY_GATE_SUNSET",
+    "PERSIST_EXACT_OUTPUT_AND_SHA256",
+    "STORY_READY",
+    "REVIEW_OR_APPROVAL",
+    "PREPARE",
+    "PUBLISH_EXACT_APPROVED_ASSET"
+  ],
+  "referencePolicy": {
+    "originalReferencesAreVisualStyleReferences": true,
+    "derivedExamplesClassification": "VISUAL_DIRECTION_REFERENCE_ONLY",
+    "derivedExamplesMayTeach": ["PALETTE", "TYPOGRAPHY", "LAYOUT", "CTA_STYLE"],
+    "derivedExamplesMayNotTeach": ["VENUE_GEOMETRY", "ARCHITECTURE", "FURNITURE", "SPATIAL_FACTS"],
+    "venueTruthComesOnlyFromVenueRegistry": true,
+    "templateLibraryIsAuthoritativeForLayout": true,
+    "referenceSelectionMustBeExplicit": true,
+    "genericCompositorForbidden": true
+  },
+  "referenceFiles": {
+    "originals": [
+      "1VyNGIt_KnJnd05igp3G4EPHuyIqi6y8U",
+      "19Ojllgh1Fw1kqM2G85l7DO5L8-YNNcXY",
+      "1uhixdJhlqdsVkeF5RA4lvqMHcfpIbJXx",
+      "1fV8j4f61X7mJdnAvpLVl-hENVgrP9fdV",
+      "1ODUwlyyJ2iHe6sh5e962bF2pGDjIEm6l",
+      "1yX_WRNhdfPX94B_iisurXeq0NeSyh1v_",
+      "1IR71Ycs8-O9fS-kxI2vTsLIWk4HsCv-l",
+      "1IewNgQP6LFECyubP8X-Qb2nDmABN_BOM",
+      "1i2znQ4lncW2Le_IURFhVCq8v3pTdKHTu",
+      "1yHYv5KLE2klUNT9rcJuTHnqg2mgU_SHi"
+    ],
+    "derivedExamples": [
+      "1n7TDSbbVBDm_89UyD-O0F52XgmwTL67O",
+      "1A_KACkc_hr5Q36lBP7eGGt_KTs5BsUWb",
+      "1WupkyaAV3IMNn3SniszcG2dv86mC3FoX",
+      "1ZF-a9F8_K6Vuek91XZO0uMCs9zHARn9A"
+    ]
+  },
+  "templateLibrary": {
+    "libraryId": "SUNSET_REFERENCE_TEMPLATE_LIBRARY",
+    "libraryVersion": "1.0",
+    "repoMirrorPath": "control/creative-standards/sunset-story-reference-template-library.v1.json",
+    "driveFileId": "1gKsm3TGHlbqmC091TCbj7xXTzHfEgTHe",
+    "reportDriveDocumentId": "1bnidj7jlQ3oUBa69O-qFwwQ-ZvAq8gDbROTqFHbQNAo",
+    "selectionRequired": true,
+    "pureTemplateRequired": true,
+    "individualSafeRegionAnalysisRequired": true,
+    "protectedRegionAnalysisRequired": true,
+    "referenceReviewRequired": true
+  }
+}
