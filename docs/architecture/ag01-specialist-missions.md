@@ -23,11 +23,12 @@ Flow (opt-in): `AG-01 checkpoint decision (existing) -> internal mission manifes
 | `CLAIMED` / `STARTED`                                                           | existing WorkflowStore atomic step claim immediately sets `claimedAt` **and** `startedAt`; STARTED is internal worker state, not provider ACK; no synthetic distinct claimed event |
 | `DONE`                                                                          | only after `Core.execute` returns a valid executionId/capability and `WorkflowStore.completeStep` persists it                                                                      |
 | `FAILED`                                                                        | Core exception followed by `WorkflowStore.failStep`; post-Core storage uncertainty stays RUNNING until reconciled                                                                  |
-| `providerReadbackVerified`                                                      | returned boolean from real Core execution; false is **not** provider verified                                                                                                      |
+| `providerReadbackVerified`                                                      | always false in this READ-only bridge: Core ACK is not independent provider verification                                                                                           |
 
 ### Fail-closed boundaries
 
-- AG-01-primary routes retain the existing direct Core path; the specialized branch is used only when an eligible non-AG-01 route owner exists.\n- **Only registered, READ-risk Core capabilities** with sideEffects=false and approvalRequired=false are currently eligible. Generated media, publishing, Direct/Comment, Meta campaign creation/spend and irreversible actions stay on their pre-existing pathways, awaiting separate scoped approvals and provider proof.
+- AG-01-primary routes retain the existing direct Core path; the specialized branch is used only when an eligible non-AG-01 route owner exists.
+- **Only registered, READ-risk Core capabilities** with sideEffects=false and approvalRequired=false are currently eligible. Generated media, publishing, Direct/Comment, Meta campaign creation/spend and irreversible actions stay on their pre-existing pathways, awaiting separate scoped approvals and provider proof.
 - Must pass route/capability catalog, runtime `Core.inspect`, tenant/principal/route/capability authorization, owner membership and unexpired TTL. No user prompt may grant itself a route or worker principal.
 - No `google_ads.*`, `whatsapp.*` or `email.*` dispatch.
 - At-most-one `Core.execute` attempt per claim (`maxAttempts=1`). No automatic reclaim from an ambiguous RUNNING state, no blind retry after timeout/disconnect. Core's existing idempotency/approval/provider reconciliation are not replaced.
@@ -54,3 +55,46 @@ Create a mission on its owning route, with a stable idempotency key per campaign
 5. Separately authorize change to existing AG-01 service if desired, with production identity, flag OFF/ON canary, Core runtime-bound READ-only proving real audit/readback without financial/provider writes, health and rollback. Any current GCP permissions or health blockers remain separate.
 
 **Evidence freshness:** This design document is not a source of current PR/CI/merge status; use GitHub PR #1051, Control Plane #639–#642 and current exact-HEAD checks. As of this integration work, the lane is owned by TOCA_AGENTE_17 with its exclusive lock HELD, the PR is tracked as a repository-only candidate, and actual production/runtime specialist executions remain NOT_PROVEN. No production action, paid operation, ChatGPT task modification, new scheduler or provider call is authorized by this change.
+
+## Recovery correction (source-only candidate, 2026-10-21)
+
+Base: `2fa462d1a43a6c011c5e192496106ae956ced5e8`. Lane:
+`AG01-SPECIALIST-BRIDGE-RECOVERY-20261021`, under the existing specialist
+WorkflowStore lock. Historical integration statements above are not current lane
+or deployment status.
+
+- Expiry limits new mission creation and READY claims. An exact immutable replay
+  may locate an expired mission; DONE recovery is authorized again using the
+  current identity, persisted payload, target-account inspection, route capability
+  membership and specialist owner membership. RUNNING remains pending; expired
+  READY cannot execute. A changed payload, scope or expiry is not a replay.
+- The checkpoint persists its current step's `executionPath` before invocation.
+  Turning the existing flag OFF prevents new specialist selection, but production
+  retains the same coordinator for existing SPECIALIST reconciliation. It never
+  substitutes direct Core for a persisted specialist path. No new flag, scheduler
+  or persistence schema is introduced.
+- Legacy attempted checkpoints without a path query the existing deterministic
+  WorkflowStore mission. If the branch cannot be proven, recovery stops for human
+  review rather than risking a second execution. No reclaim or lease takeover is
+  implemented. Missing coordinator/storage and changed authorization fail closed.
+- A timeout does not cancel the Core promise. The checkpoint remains RUNNING and
+  can reconcile the same claim or later DONE. Polling does not consume additional
+  tool attempts or open the failure circuit. Other specialist failures require
+  review rather than retrying a workflow whose single attempt may be terminal.
+  A process loss with an unresolved RUNNING claim can therefore remain pending;
+  this patch does not invent provider reconciliation evidence.
+- Core READ's default `providerReadbackVerified=true` is not provider proof.
+  Coordinator outputs, including replayed legacy results, expose false and do not
+  expose the old `ag01:provider-readback-verified` evidence label. DONE proves the
+  persisted Core execution ACK, not an independent provider readback. Global Core
+  semantics and side-effecting paths are unchanged. Generic WorkflowStore snapshots
+  remain raw historical records; this correction does not rewrite their legacy ACK
+  flags or evidence labels. They must not be interpreted as independent provider proof.
+
+These fixes do not connect the 20 external scheduled tasks. Their invocation and
+ACK contract remains **NOT_INTEGRATED** until authoritative task IDs, triggers,
+executor mapping and a supported invocation/status/ACK interface are established.
+In-memory/fake-provider regressions are source evidence only. Exact-HEAD CI,
+independent review, protected integration and separately authorized real Postgres
+contention/restart proof remain required. No provider, SQL, service, credential,
+deployment or external schedule is changed by these tests.

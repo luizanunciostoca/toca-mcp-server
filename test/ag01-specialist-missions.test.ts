@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as z from 'zod/v4';
+import * as routes from '../src/governance/route-catalog.js';
+import { ExistingCoreCapabilityGateway } from '../src/orchestrator/core-gateway.js';
+import { InMemoryAuditSink } from '../src/core/audit.js';
+import { createToolRegistry } from '../src/registry.js';
 import { createTrustedServiceExecutionIdentity } from '../src/core/identity.js';
 import {
   Ag01SpecialistMissionCoordinator,
   SPECIALIST_MISSION_MAX_TTL_MS,
-  type SpecialistMissionInput,
 } from '../src/orchestrator/specialist-missions.js';
 import type { CoreCapabilityGateway } from '../src/orchestrator/contracts.js';
 import { InMemoryWorkflowStore } from '../src/workflow/in-memory-workflow-store.js';
@@ -275,82 +279,6 @@ describe('AG-01 internal specialized missions — existing WorkflowStore, produc
     expect(h.execute).not.toHaveBeenCalled();
   });
 
-  it('keeps the opt-in planned mission expiry immutable after a failed execution and later resume', async () => {
-    let clock = T0;
-    const h = harness();
-    const dispatch = vi
-      .fn((input: SpecialistMissionInput): Promise<ExecutionResult> =>
-        Promise.reject(new Error(`UNEXPECTED_SPECIALIST_DISPATCH:${input.capabilityId}`)),
-      )
-      .mockRejectedValueOnce(new Error('TRANSIENT_READ_FAILURE'))
-      .mockResolvedValueOnce({
-        executionId: 'core-returned-on-retry',
-        capabilityId: 'media.scan',
-        result: { ok: true },
-        providerReadbackVerified: false,
-      });
-    const specialistMissions = {
-      supports: vi.fn(() => true),
-      executePlannedStep: dispatch,
-    } as unknown as SpecialistCoordinator;
-    const runtime = new TocaOrchestratorRuntime({
-      conversations: new InMemoryConversationStore(),
-      routeResolver: {
-        resolve: () =>
-          Promise.resolve({ routeId: 'R03', confidence: 1, evidence: ['route:readback'] }),
-      },
-      artifacts: {
-        resolveSop: () =>
-          Promise.resolve({
-            artifactId: 'SOP-R03',
-            version: '1.0',
-            sourceRef: 'toca-os:sop-r03',
-            evidence: ['sop:readback'],
-          }),
-        resolveTemplate: () => Promise.resolve(null),
-      },
-      planner: {
-        build: () =>
-          Promise.resolve([
-            {
-              stepId: 'scan',
-              name: 'Scan assets',
-              capabilityId: 'media.scan',
-              payload: { folderId: 'test-only' },
-              maxAttempts: 2,
-            },
-          ]),
-      },
-      core: h.core,
-      specialistMissions,
-      deadLetters: { put: vi.fn(() => Promise.resolve()) },
-      now: () => new Date(clock),
-      budget: {
-        maxToolCallsPerResume: 1,
-        toolTimeoutMs: 200,
-        circuitFailureThreshold: 100,
-      },
-    });
-    const first = await runtime.handle({
-      idempotencyKey: 'stable-runtime-ttl',
-      message: 'Classify this asset',
-      identity: identity(),
-    });
-    expect(first.status).toBe('READY');
-    expect(dispatch).toHaveBeenCalledTimes(1);
-    clock = '2026-10-14T20:05:00.000Z';
-    const recovered = await runtime.resume(first.conversationId, identity());
-    expect(recovered.status).toBe('SUCCEEDED');
-    expect(dispatch).toHaveBeenCalledTimes(2);
-    const initial = dispatch.mock.calls[0]?.[0] as { expiresAt: string } | undefined;
-    const resumed = dispatch.mock.calls[1]?.[0] as { expiresAt: string } | undefined;
-    expect(initial?.expiresAt).toBe(resumed?.expiresAt);
-    expect(initial?.expiresAt).toBe(
-      new Date(Date.parse(T0) + SPECIALIST_MISSION_MAX_TTL_MS).toISOString(),
-    );
-    expect(h.execute).not.toHaveBeenCalled();
-  });
-
   it('keeps AG-01-primary routes on the existing Core path when specialist opt-in is enabled', async () => {
     const coreExecute = vi.fn((input: Parameters<CoreCapabilityGateway['execute']>[0]) =>
       Promise.resolve({
@@ -417,5 +345,267 @@ describe('AG-01 internal specialized missions — existing WorkflowStore, produc
     expect(outcome.status).toBe('SUCCEEDED');
     expect(coreExecute).toHaveBeenCalledTimes(1);
     expect(specialistExecute).not.toHaveBeenCalled();
+  });
+});
+
+function runtimeHarness(
+  h: ReturnType<typeof harness>,
+  conversations = new InMemoryConversationStore(),
+  enabled = true,
+) {
+  return {
+    conversations,
+    runtime: new TocaOrchestratorRuntime({
+      conversations,
+      routeResolver: {
+        resolve: () =>
+          Promise.resolve({ routeId: 'R03', confidence: 1, evidence: ['route:readback'] }),
+      },
+      artifacts: {
+        resolveSop: () =>
+          Promise.resolve({
+            artifactId: 'SOP-R03',
+            version: '1.0',
+            sourceRef: 'toca-os:sop-r03',
+            evidence: ['sop:readback'],
+          }),
+        resolveTemplate: () => Promise.resolve(null),
+      },
+      planner: {
+        build: () =>
+          Promise.resolve([
+            {
+              stepId: 'scan',
+              name: 'Scan assets',
+              capabilityId: 'media.scan',
+              payload: { folderId: 'test-only' },
+              maxAttempts: 1,
+            },
+          ]),
+      },
+      core: h.core,
+      specialistMissions: h.coordinator,
+      specialistMissionsEnabled: enabled,
+      deadLetters: { put: vi.fn(() => Promise.resolve()) },
+      now: () => new Date(T0),
+      budget: {
+        maxToolCallsPerResume: 1,
+        toolTimeoutMs: 5,
+        maxTotalAttempts: 1,
+        circuitFailureThreshold: 1,
+      },
+    }),
+  };
+}
+
+describe('durable specialist recovery regressions', () => {
+  it('reconciles timeout across flag-OFF restarts without consuming attempts or calling Core twice', async () => {
+    let proceed!: () => void;
+    const h = harness({
+      wait: new Promise<void>((resolve) => {
+        proceed = resolve;
+      }),
+    });
+    const firstRuntime = runtimeHarness(h);
+    const first = await firstRuntime.runtime.handle({
+      idempotencyKey: 'timeout-recovery',
+      message: 'Inspect assets',
+      identity: identity(),
+    });
+    expect(first.status).toBe('RUNNING');
+    const restarted = runtimeHarness(h, firstRuntime.conversations, false);
+    for (let n = 0; n < 3; n++) {
+      const pending = await restarted.runtime.resume(first.conversationId, identity());
+      expect(pending.status).toBe('RUNNING');
+    }
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    expect(await firstRuntime.conversations.getCircuit('toca', 'media.scan')).toBeUndefined();
+    const pending = await firstRuntime.conversations.getConversation('toca', first.conversationId);
+    expect(pending?.checkpoint?.totalToolCalls).toBe(1);
+    expect(pending?.checkpoint?.currentAttempt).toBe(1);
+    proceed();
+    for (let n = 0; n < 50; n++) await Promise.resolve();
+    const done = await restarted.runtime.resume(first.conversationId, identity());
+    expect(done.status).toBe('SUCCEEDED');
+    expect(h.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['legacy', 'invalid', 'missing-anchor'] as const)(
+    'fails closed or reconciles the existing claim for %s checkpoint metadata',
+    async (mode) => {
+      let proceed!: () => void;
+      const h = harness({
+        wait: new Promise<void>((resolve) => {
+          proceed = resolve;
+        }),
+      });
+      const initial = runtimeHarness(h);
+      const first = await initial.runtime.handle({
+        idempotencyKey: `metadata-${mode}`,
+        message: 'Inspect assets',
+        identity: identity(),
+      });
+      const record = await initial.conversations.getConversation('toca', first.conversationId);
+      if (!record?.checkpoint) throw new Error('TEST_CHECKPOINT_MISSING');
+      const checkpoint = { ...record.checkpoint };
+      delete checkpoint.executionPath;
+      if (mode === 'invalid') Object.assign(checkpoint, { executionPath: 'UNTRUSTED_PATH' });
+      if (mode === 'missing-anchor') delete checkpoint.missionCreatedAt;
+      await initial.conversations.updateConversation({
+        ...record,
+        expectedVersion: record.version,
+        checkpoint,
+        now: T0,
+      });
+      const restarted = runtimeHarness(h, initial.conversations, false);
+      const response = await restarted.runtime.resume(first.conversationId, identity());
+      expect(response.status).toBe(mode === 'legacy' ? 'RUNNING' : 'HUMAN_REQUIRED');
+      expect(h.execute).toHaveBeenCalledTimes(1);
+      proceed();
+      for (let n = 0; n < 50; n++) await Promise.resolve();
+      if (mode === 'legacy')
+        expect((await restarted.runtime.resume(first.conversationId, identity())).status).toBe(
+          'SUCCEEDED',
+        );
+    },
+  );
+
+  it('keeps new work direct-Core while the existing opt-in flag is OFF', async () => {
+    const h = harness();
+    const dispatch = vi.spyOn(h.coordinator, 'dispatch');
+    const { runtime } = runtimeHarness(h, undefined, false);
+    expect(
+      (
+        await runtime.handle({
+          idempotencyKey: 'flag-off-new',
+          message: 'Inspect assets',
+          identity: identity(),
+        })
+      ).status,
+    ).toBe('SUCCEEDED');
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('recovers DONE after TTL without extending expiry, but still rejects changed payload or revoked access', async () => {
+    const h = harness();
+    const expected = await h.coordinator.executePlannedStep(h.request());
+    h.setNow(T2);
+    await expect(h.coordinator.executePlannedStep(h.request())).resolves.toEqual(expected);
+    await expect(
+      h.coordinator.executePlannedStep(h.request({ payload: { folderId: 'changed' } })),
+    ).rejects.toThrow('IDEMPOTENCY_CONFLICT');
+    await expect(
+      h.coordinator.executePlannedStep(h.request({ identity: identity({ capabilities: [] }) })),
+    ).rejects.toThrow('AUTHORIZATION_DENIED');
+    expect(h.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('never claims an expired READY mission even when replay finds its immutable record', async () => {
+    const h = harness();
+    await h.coordinator.dispatch(h.request());
+    h.setNow(T2);
+    await expect(h.coordinator.executePlannedStep(h.request())).rejects.toThrow('TTL_EXPIRED');
+    expect(h.execute).not.toHaveBeenCalled();
+  });
+
+  it('revalidates current route inspection before READY execution and DONE disclosure', async () => {
+    const h = harness();
+    const mission = await h.coordinator.dispatch(h.request());
+    const originalInspection = h.core.inspect({
+      capabilityId: 'media.scan',
+      payload: {},
+      identity: identity(),
+    });
+    const spy = vi
+      .spyOn(h.core, 'inspect')
+      .mockImplementation(() => ({ ...originalInspection, routeId: 'R08' }));
+    await expect(
+      h.coordinator.executeOwned(mission.mission_id, 'AG-06', identity()),
+    ).rejects.toThrow('CORE_ROUTE_MISMATCH');
+    expect(h.execute).not.toHaveBeenCalled();
+    spy.mockReturnValue(originalInspection);
+    await h.coordinator.executeOwned(mission.mission_id, 'AG-06', identity());
+    vi.spyOn(h.core, 'inspect').mockImplementation(() => ({
+      ...originalInspection,
+      routeId: 'R08',
+    }));
+    await expect(h.coordinator.status(mission.mission_id, identity())).rejects.toThrow(
+      'CORE_ROUTE_MISMATCH',
+    );
+  });
+
+  it('revalidates current catalog owner and capability membership before claim', async () => {
+    const h = harness();
+    const mission = await h.coordinator.dispatch(h.request());
+    const route = routes.getRouteDefinition('R03');
+    const spy = vi
+      .spyOn(routes, 'getRouteDefinition')
+      .mockReturnValue({ ...route, primaryAgent: 'AG-04', auxiliaryAgents: [] });
+    await expect(
+      h.coordinator.executeOwned(mission.mission_id, 'AG-06', identity()),
+    ).rejects.toThrow('OWNER_OUTSIDE_ROUTE');
+    spy.mockReturnValue({ ...route, capabilityIds: [] });
+    await expect(
+      h.coordinator.executeOwned(mission.mission_id, 'AG-06', identity()),
+    ).rejects.toThrow('CAPABILITY_ROUTE_MISMATCH');
+    spy.mockRestore();
+    expect(h.execute).not.toHaveBeenCalled();
+  });
+
+  it('does not promote the real Core READ-default flag into provider proof', async () => {
+    const execute = vi.fn(() => Promise.resolve({ rows: [] }));
+    const schema = z.object({ accountId: z.string() });
+    const core = new ExistingCoreCapabilityGateway({
+      registry: createToolRegistry({ metaAdsReadsEnabled: true }),
+      runtimeResolver: (capability) =>
+        capability === 'meta_ads.campaigns.list'
+          ? {
+              inputSchema: schema,
+              execute,
+              targetAccount: (input) => schema.parse(input).accountId,
+            }
+          : undefined,
+      auditSink: new InMemoryAuditSink(),
+    });
+    const caller = createTrustedServiceExecutionIdentity({
+      principalId: 'reader',
+      tenantId: 'toca',
+      workspaceId: 'workspace',
+      organizationId: 'organization',
+      roles: ['READER'],
+      allowedRouteIds: ['R08'],
+      allowedCapabilityIds: ['meta_ads.campaigns.list'],
+      allowedTargetAccounts: ['source-account'],
+      evidence: ['test:trusted'],
+      now: T0,
+    });
+    const coordinator = new Ag01SpecialistMissionCoordinator(
+      new InMemoryWorkflowStore(),
+      core,
+      () => new Date(T0),
+    );
+    const request = {
+      routeId: 'R08' as const,
+      capabilityId: 'meta_ads.campaigns.list',
+      payload: { accountId: 'source-account' },
+      owner: 'AG-09',
+      priority: 'P1' as const,
+      correlationId: 'real-core-read',
+      idempotencyKey: 'real-core-read',
+      expiresAt: T1,
+      identity: caller,
+    };
+    const result = await coordinator.executePlannedStep(request);
+    const mission = await coordinator.dispatch(request);
+    expect(result.providerReadbackVerified).toBe(false);
+    expect(mission.providerReadbackVerified).toBe(false);
+    expect(mission.evidence).not.toContain('ag01:provider-readback-verified');
+    const revoked = {
+      ...caller,
+      authorization: { ...caller.authorization, allowedTargetAccounts: [] },
+    };
+    await expect(coordinator.status(mission.mission_id, revoked)).rejects.toThrow();
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 });

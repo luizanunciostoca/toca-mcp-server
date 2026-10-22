@@ -89,7 +89,9 @@ export class Ag01SpecialistMissionCoordinator {
     requireText(input.correlationId, 'AG01_MISSION_CORRELATION_REQUIRED');
     if (!['P0', 'P1', 'P2'].includes(input.priority))
       throw new Error('AG01_MISSION_PRIORITY_INVALID');
-    const expiresAt = requireFutureTimestamp(input.expiresAt, now);
+    const expiry = Date.parse(input.expiresAt);
+    if (!Number.isFinite(expiry)) throw new Error('AG01_MISSION_TTL_EXPIRED_OR_INVALID');
+    const expiresAt = new Date(expiry).toISOString();
     if (Date.parse(expiresAt) - Date.parse(now) > SPECIALIST_MISSION_MAX_TTL_MS)
       throw new Error('AG01_MISSION_TTL_EXCEEDS_MAXIMUM');
     const route = getRouteDefinition(input.routeId);
@@ -163,6 +165,17 @@ export class Ag01SpecialistMissionCoordinator {
       payloadSha256: sourceContentSha256(JSON.stringify(input.payload ?? null)),
       immutableSha256,
     };
+    // Recovery is not a new claim: expired immutable missions can still be reconciled.
+    // Validate the full input and current scope/authorization before revealing saved state.
+    const existing = await this.workflows.get(mission_id);
+    if (existing) {
+      this.assertScope(existing, identity);
+      if (readManifest(existing).immutableSha256 !== immutableSha256)
+        throw new Error('AG01_MISSION_IDEMPOTENCY_CONFLICT');
+      this.assertCurrentBoundary(existing, identity);
+      return this.toView(existing, identity);
+    }
+    requireFutureTimestamp(expiresAt, now);
     const snapshot = await this.workflows.create(
       {
         workflowId: mission_id,
@@ -197,7 +210,7 @@ export class Ag01SpecialistMissionCoordinator {
   async status(missionId: string, identity: ExecutionIdentity): Promise<SpecialistMissionView> {
     const snapshot = await this.requireSnapshot(missionId);
     this.assertScope(snapshot, identity);
-    this.assertAuthorized(identity, readManifest(snapshot));
+    this.assertCurrentBoundary(snapshot, identity);
     return this.toView(snapshot, identity);
   }
 
@@ -211,21 +224,8 @@ export class Ag01SpecialistMissionCoordinator {
     const manifest = readManifest(snapshot);
     this.assertScope(snapshot, identity);
     if (owner !== manifest.owner) throw new Error('AG01_MISSION_WORKER_OWNER_MISMATCH');
-    this.assertAuthorized(identity, manifest);
+    this.assertCurrentBoundary(snapshot, identity);
     const step = onlyStep(snapshot);
-    // Saved results retain the current Core target-account authorization boundary.
-    const inspection = this.core.inspect({
-      capabilityId: manifest.capability,
-      payload: step.input,
-      identity,
-    });
-    if (
-      !this.supports(manifest.capability) ||
-      inspection.canonicalCapabilityId !== manifest.capability ||
-      inspection.sideEffects ||
-      inspection.approvalRequired
-    )
-      throw new Error('AG01_MISSION_CORE_READONLY_BOUNDARY');
     if (step.status === 'SUCCEEDED') return resultFrom(step.output);
     if (step.status === 'FAILED') throw new Error('AG01_MISSION_ALREADY_FAILED');
     if (step.status !== 'READY') throw new Error('AG01_MISSION_ALREADY_CLAIMED');
@@ -269,6 +269,9 @@ export class Ag01SpecialistMissionCoordinator {
       });
       throw error;
     }
+    // READ Core's boolean defaults to true even without a provider readback binding.
+    // This bridge proves only a Core ACK; never upgrade that flag to provider evidence.
+    execution = { ...execution, providerReadbackVerified: false };
     // A failed completion/readback leaves the claimed workflow uncertain: never reexecute blindly.
     await this.workflows.completeStep({
       workflowId: missionId,
@@ -278,9 +281,7 @@ export class Ag01SpecialistMissionCoordinator {
       evidence: [
         `ag01:worker:${owner}`,
         `ag01:core-execution:${execution.executionId}`,
-        execution.providerReadbackVerified
-          ? 'ag01:provider-readback-verified'
-          : 'ag01:provider-readback-not-verified',
+        'ag01:provider-readback-not-verified',
       ],
       now: this.now().toISOString(),
     });
@@ -291,6 +292,47 @@ export class Ag01SpecialistMissionCoordinator {
   async executePlannedStep(input: SpecialistMissionInput): Promise<CoreResult> {
     const mission = await this.dispatch(input);
     return this.executeOwned(mission.mission_id, input.owner, input.identity);
+  }
+
+  /** Locate a legacy checkpoint's durable mission without creating or claiming work. */
+  async findPlannedMission(
+    idempotencyKey: string,
+    identity: ExecutionIdentity,
+  ): Promise<SpecialistMissionView | null> {
+    assertExecutionIdentity(identity, this.now().toISOString());
+    const missionId = deterministicId('ag01mission', identity.principal.tenantId, idempotencyKey);
+    const snapshot = await this.workflows.get(missionId);
+    if (!snapshot) return null;
+    this.assertScope(snapshot, identity);
+    this.assertCurrentBoundary(snapshot, identity);
+    return this.toView(snapshot, identity);
+  }
+
+  private assertCurrentBoundary(snapshot: WorkflowSnapshot, identity: ExecutionIdentity): void {
+    const manifest = readManifest(snapshot);
+    this.assertAuthorized(identity, manifest);
+    const route = getRouteDefinition(manifest.routeId);
+    if (
+      manifest.owner === 'AG-01' ||
+      (manifest.owner !== route.primaryAgent && !route.auxiliaryAgents.includes(manifest.owner))
+    )
+      throw new Error('AG01_MISSION_OWNER_OUTSIDE_ROUTE');
+    if (!route.capabilityIds.includes(manifest.capability))
+      throw new Error('AG01_MISSION_CAPABILITY_ROUTE_MISMATCH');
+    const inspection = this.core.inspect({
+      capabilityId: manifest.capability,
+      payload: onlyStep(snapshot).input,
+      identity,
+    });
+    if (
+      !this.supports(manifest.capability) ||
+      inspection.canonicalCapabilityId !== manifest.capability ||
+      inspection.sideEffects ||
+      inspection.approvalRequired
+    )
+      throw new Error('AG01_MISSION_CORE_READONLY_BOUNDARY');
+    if (inspection.routeId && inspection.routeId !== manifest.routeId)
+      throw new Error('AG01_MISSION_CORE_ROUTE_MISMATCH');
   }
 
   private async requireSnapshot(missionId: string): Promise<WorkflowSnapshot> {
@@ -350,7 +392,7 @@ export class Ag01SpecialistMissionCoordinator {
       claimedBy: s.claimedBy,
       coreExecutionId: output?.executionId ?? null,
       providerReadbackVerified: output?.providerReadbackVerified ?? null,
-      evidence: s.evidence,
+      evidence: s.evidence.filter((item) => item !== 'ag01:provider-readback-verified'),
     };
   }
 }
@@ -384,7 +426,7 @@ function resultFrom(value: unknown): CoreResult {
     typeof result.providerReadbackVerified !== 'boolean'
   )
     throw new Error('AG01_MISSION_CORE_ACK_NOT_PROVEN');
-  return result;
+  return { ...result, providerReadbackVerified: false };
 }
 
 function requireFutureTimestamp(value: string, now: string): string {

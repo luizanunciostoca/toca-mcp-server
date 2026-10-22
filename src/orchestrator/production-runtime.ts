@@ -125,9 +125,18 @@ export function createAg01ProductionRuntime(
   });
   const secrets = new EnvironmentSecretResolver(env);
   const googleOAuth = new GoogleOAuthRefreshSecretResolver({
-    clientIdReference: { provider: 'env', key: config.googleOAuthClientIdEnvKey },
-    clientSecretReference: { provider: 'env', key: config.googleOAuthClientSecretEnvKey },
-    refreshTokenReference: { provider: 'env', key: config.googleOAuthRefreshTokenEnvKey },
+    clientIdReference: {
+      provider: 'env',
+      key: config.googleOAuthClientIdEnvKey,
+    },
+    clientSecretReference: {
+      provider: 'env',
+      key: config.googleOAuthClientSecretEnvKey,
+    },
+    refreshTokenReference: {
+      provider: 'env',
+      key: config.googleOAuthRefreshTokenEnvKey,
+    },
     secrets,
     tokenEndpoint: config.googleOAuthTokenEndpoint,
     timeoutMs: config.registryTimeoutMs,
@@ -203,17 +212,19 @@ export function createAg01ProductionRuntime(
   const artifacts = new TocaOsCanonicalArtifactResolver(tocaOs, decisionContext);
   const planner = new StructuredDecisionPlanBuilder(decisionContext, () => runtimeCapabilityIds);
   // Opt-in only: no new scheduler, ChatGPT Tasks API or externally callable worker route.
-  const specialistMissions =
-    env.TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED === 'true'
-      ? new Ag01SpecialistMissionCoordinator(coreComposition.workflowStore, core)
-      : undefined;
+  // Keep recovery available when the admission flag is OFF after a restart.
+  const specialistMissions = new Ag01SpecialistMissionCoordinator(
+    coreComposition.workflowStore,
+    core,
+  );
   const orchestrator = new TocaOrchestratorRuntime({
     conversations,
     routeResolver,
     artifacts,
     planner,
     core,
-    ...(specialistMissions ? { specialistMissions } : {}),
+    specialistMissions,
+    specialistMissionsEnabled: env.TOCA_AG01_INTERNAL_SPECIALISTS_ENABLED === 'true',
     deadLetters,
   });
 
