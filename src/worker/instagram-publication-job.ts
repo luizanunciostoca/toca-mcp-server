@@ -2,13 +2,38 @@ import { randomUUID } from 'node:crypto';
 import * as z from 'zod/v4';
 import { creativeTruthPublicationBindingSchema } from '../contracts/creative-truth.js';
 import type { Scheduler, ScheduledJob } from '../scheduler/scheduler-contracts.js';
-import type { InstagramPublishRequest } from '../providers/instagram/instagram-contracts.js';
+import {
+  deriveInstagramOneOffIdempotencyKey,
+  type InstagramPublishRequest,
+} from '../providers/instagram/instagram-contracts.js';
 import type { InstagramPublicationExecutor } from '../providers/instagram/instagram-publication-executor.js';
 import type { JobHandler } from './worker.js';
 
 export const INSTAGRAM_PUBLICATION_JOB = 'internal.instagram.publication.execute';
 
+const oneOffDescriptorSchema = z
+  .object({
+    mode: z.literal('ONE_OFF'),
+    authorizationRef: z
+      .string()
+      .min(1)
+      .refine((value) => value === value.trim()),
+    authorizationId: z
+      .string()
+      .min(1)
+      .refine((value) => value === value.trim()),
+    commandEnvelopeSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+    validFrom: z.iso.datetime({ offset: true }),
+    validUntil: z.iso.datetime({ offset: true }),
+    maxPublications: z.literal(1),
+  })
+  .strict()
+  .refine((value) => Date.parse(value.validFrom) < Date.parse(value.validUntil), {
+    message: 'INSTAGRAM_PUBLICATION_ONE_OFF_AUTHORIZATION_WINDOW_INVALID',
+  });
+
 const instagramPublishRequestSchema = z.object({
+  oneOff: oneOffDescriptorSchema.optional(),
   account: z.object({
     pageId: z.string().min(1),
     instagramAccountId: z.string().min(1),
@@ -88,7 +113,11 @@ export class InstagramPublicationJobHandler implements JobHandler {
     const request = parseInstagramPublishRequest(payload);
     const result = await this.executor.execute(request);
     if (!result.completed) {
-      throw new Error('INSTAGRAM_PUBLICATION_PROCESSING_PENDING');
+      throw new Error(
+        request.oneOff
+          ? 'INSTAGRAM_PUBLICATION_ONE_OFF_CONSUMED_RECONCILIATION_REQUIRED'
+          : 'INSTAGRAM_PUBLICATION_PROCESSING_PENDING',
+      );
     }
   }
 }
@@ -101,7 +130,14 @@ function assertPublicationJob(job: ScheduledJob): void {
 
 export function parseInstagramPublishRequest(value: unknown): InstagramPublishRequest {
   const parsed = instagramPublishRequestSchema.parse(value);
+  if (
+    parsed.oneOff &&
+    parsed.idempotencyKey !== deriveInstagramOneOffIdempotencyKey(parsed.oneOff)
+  ) {
+    throw new Error('INSTAGRAM_PUBLICATION_ONE_OFF_IDEMPOTENCY_KEY_MISMATCH');
+  }
   return {
+    ...(parsed.oneOff ? { oneOff: parsed.oneOff } : {}),
     account: parsed.account,
     mediaType: parsed.mediaType,
     mediaUrls: parsed.mediaUrls,

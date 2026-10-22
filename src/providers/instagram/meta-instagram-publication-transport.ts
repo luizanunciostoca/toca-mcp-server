@@ -1,4 +1,8 @@
-import type { MetaApiClient } from '../meta/meta-api-client.js';
+import {
+  assertMetaApiRequestActive,
+  type MetaApiClient,
+  type MetaApiRequestContext,
+} from '../meta/meta-api-client.js';
 import type { InstagramPublishRequest } from './instagram-contracts.js';
 import {
   buildInstagramContainerPlan,
@@ -18,15 +22,23 @@ export class MetaInstagramPublicationTransport implements InstagramPublicationTr
 
   async createContainer(
     request: InstagramPublishRequest,
+    context?: MetaApiRequestContext,
   ): Promise<{ readonly containerId: string }> {
+    assertMetaApiRequestActive(context);
     const plan = buildInstagramContainerPlan(request);
-    const containerId = await this.createPlannedContainer(plan);
+    const containerId = await this.createPlannedContainer(plan, context);
     return { containerId };
   }
 
-  async getContainerStatus(containerId: string): Promise<'IN_PROGRESS' | 'FINISHED' | 'ERROR'> {
+  async getContainerStatus(
+    containerId: string,
+    context?: MetaApiRequestContext,
+  ): Promise<'IN_PROGRESS' | 'FINISHED' | 'ERROR'> {
+    assertMetaApiRequestActive(context);
     const response = requireObject(
-      await this.client.get(containerId, { fields: 'status_code' }),
+      await (context
+        ? this.client.get(containerId, { fields: 'status_code' }, context)
+        : this.client.get(containerId, { fields: 'status_code' })),
       'META_INSTAGRAM_STATUS_INVALID',
     );
     const status = response.status_code;
@@ -40,17 +52,26 @@ export class MetaInstagramPublicationTransport implements InstagramPublicationTr
   async publishContainer(
     instagramAccountId: string,
     containerId: string,
+    context?: MetaApiRequestContext,
   ): Promise<{ readonly mediaId: string }> {
+    assertMetaApiRequestActive(context);
     const call = buildInstagramPublishCall(instagramAccountId, containerId);
-    const response = requireId(await this.client.post(call.path, call.body));
+    const response = requireId(
+      await (context
+        ? this.client.post(call.path, call.body, context)
+        : this.client.post(call.path, call.body)),
+    );
     return { mediaId: response.id };
   }
 
-  async getPublishedMedia(mediaId: string): Promise<PublishedMediaEvidence> {
+  async getPublishedMedia(
+    mediaId: string,
+    context?: MetaApiRequestContext,
+  ): Promise<PublishedMediaEvidence> {
+    assertMetaApiRequestActive(context);
+    const query = { fields: 'id,caption,media_type,permalink,timestamp' };
     return parseMediaEvidence(
-      await this.client.get(mediaId, {
-        fields: 'id,caption,media_type,permalink,timestamp',
-      }),
+      await (context ? this.client.get(mediaId, query, context) : this.client.get(mediaId, query)),
     );
   }
 
@@ -83,16 +104,26 @@ export class MetaInstagramPublicationTransport implements InstagramPublicationTr
     return response.data.map(parseMediaEvidence);
   }
 
-  private async createPlannedContainer(plan: InstagramContainerCreate): Promise<string> {
+  private async createPlannedContainer(
+    plan: InstagramContainerCreate,
+    context?: MetaApiRequestContext,
+  ): Promise<string> {
+    assertMetaApiRequestActive(context);
     let body = plan.body;
     if (plan.children?.length) {
       const childIds: string[] = [];
       for (const child of plan.children) {
-        childIds.push(await this.createPlannedContainer(child));
+        childIds.push(await this.createPlannedContainer(child, context));
       }
       body = { ...body, children: childIds.join(',') };
     }
-    return requireId(await this.client.post(plan.path, body)).id;
+    // A late child response cannot authorize its siblings or the parent container.
+    assertMetaApiRequestActive(context);
+    return requireId(
+      await (context
+        ? this.client.post(plan.path, body, context)
+        : this.client.post(plan.path, body)),
+    ).id;
   }
 }
 

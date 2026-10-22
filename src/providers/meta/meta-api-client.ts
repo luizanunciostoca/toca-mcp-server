@@ -11,6 +11,19 @@ export interface MetaApiResponse {
   json(): Promise<unknown>;
 }
 
+/** Optional lifetime guard, not authorization. Callers retain their existing policy gates. */
+export interface MetaApiRequestContext {
+  readonly signal?: AbortSignal;
+  /** Synchronous check immediately before dispatch, including after credential waits. */
+  readonly assertActive?: () => void;
+}
+
+export function assertMetaApiRequestActive(context?: MetaApiRequestContext): void {
+  context?.signal?.throwIfAborted();
+  context?.assertActive?.();
+  context?.signal?.throwIfAborted();
+}
+
 export interface MetaApiTransport {
   request(url: string, init: RequestInit): Promise<MetaApiResponse>;
 }
@@ -56,35 +69,50 @@ export class MetaApiClient {
     private readonly transport: MetaApiTransport = new FetchMetaApiTransport(),
   ) {}
 
-  async get(path: string, query: Readonly<Record<string, string>> = {}): Promise<unknown> {
-    return this.requestForm('GET', path, query);
+  async get(
+    path: string,
+    query: Readonly<Record<string, string>> = {},
+    context?: MetaApiRequestContext,
+  ): Promise<unknown> {
+    return this.requestForm('GET', path, query, context);
   }
 
-  async post(path: string, body: Readonly<Record<string, string>>): Promise<unknown> {
-    return this.requestForm('POST', path, body);
+  async post(
+    path: string,
+    body: Readonly<Record<string, string>>,
+    context?: MetaApiRequestContext,
+  ): Promise<unknown> {
+    return this.requestForm('POST', path, body, context);
   }
 
-  async postJson(path: string, body: unknown): Promise<unknown> {
+  async postJson(path: string, body: unknown, context?: MetaApiRequestContext): Promise<unknown> {
+    assertMetaApiRequestActive(context);
     const token = await this.secrets.resolve(this.accessToken);
-    return this.postJsonWithAccessToken(path, body, token);
+    return this.postJsonWithAccessToken(path, body, token, context);
   }
 
   async postJsonWithAccessToken(
     path: string,
     body: unknown,
     accessToken: string,
+    context?: MetaApiRequestContext,
   ): Promise<unknown> {
+    assertMetaApiRequestActive(context);
     if (accessToken.length === 0) throw new Error('META_ACCESS_TOKEN_EMPTY');
 
     const url = this.buildUrl(path);
+    const serializedBody = JSON.stringify(body);
+    // No await may separate this check from actual HTTP dispatch.
+    assertMetaApiRequestActive(context);
     const response = await this.transport.request(url.toString(), {
       method: 'POST',
+      ...(context?.signal ? { signal: context.signal } : {}),
       headers: {
         Accept: 'application/json',
         Authorization: `Bearer ${accessToken}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify(body),
+      body: serializedBody,
     });
 
     if (!response.ok) await throwMetaApiError(response);
@@ -101,7 +129,9 @@ export class MetaApiClient {
     method: 'GET' | 'POST',
     path: string,
     values: Readonly<Record<string, string>>,
+    context?: MetaApiRequestContext,
   ): Promise<unknown> {
+    assertMetaApiRequestActive(context);
     const token = await this.secrets.resolve(this.accessToken);
     const url = this.buildUrl(path);
     const headers: Record<string, string> = {
@@ -117,9 +147,13 @@ export class MetaApiClient {
       body = new URLSearchParams(values).toString();
     }
 
+    // Credential resolution can outlive the calling operation. Recheck here,
+    // synchronously, so a late secret never starts a new GET or POST.
+    assertMetaApiRequestActive(context);
     const response = await this.transport.request(url.toString(), {
       method,
       headers,
+      ...(context?.signal ? { signal: context.signal } : {}),
       ...(body ? { body } : {}),
     });
 
