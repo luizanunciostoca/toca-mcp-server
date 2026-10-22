@@ -1,6 +1,9 @@
 import type { ScheduledJob } from '../scheduler/scheduler-contracts.js';
 import { hashInstagramPublicationApprovalPayload } from './instagram-publication-boundary.js';
-import { INSTAGRAM_PUBLICATION_JOB } from './instagram-publication-job.js';
+import {
+  INSTAGRAM_PUBLICATION_JOB,
+  parseInstagramPublishRequest,
+} from './instagram-publication-job.js';
 import type { JobHandler } from './worker.js';
 
 export interface ControlledInstagramPublicationOptions {
@@ -15,7 +18,8 @@ export interface ControlledInstagramPublicationOptions {
 export async function runControlledInstagramPublication(
   options: ControlledInstagramPublicationOptions,
 ): Promise<void> {
-  const maxAttempts = options.maxAttempts ?? 20;
+  const oneOff = parseInstagramPublishRequest(options.payload).oneOff;
+  const maxAttempts = oneOff ? 1 : (options.maxAttempts ?? 20);
   const pollIntervalMs = options.pollIntervalMs ?? 3_000;
   const sleep = options.sleep ?? defaultSleep;
   const now = options.now ?? (() => new Date().toISOString());
@@ -40,6 +44,9 @@ export async function runControlledInstagramPublication(
     } catch (error) {
       const message = error instanceof Error ? error.message : 'UNKNOWN_PUBLICATION_ERROR';
       if (message !== 'INSTAGRAM_PUBLICATION_PROCESSING_PENDING') throw error;
+      if (oneOff) {
+        throw new Error('INSTAGRAM_PUBLICATION_ONE_OFF_CONSUMED_RECONCILIATION_REQUIRED');
+      }
       if (attempt === maxAttempts) {
         throw new Error('INSTAGRAM_PUBLICATION_PROCESSING_TIMEOUT');
       }

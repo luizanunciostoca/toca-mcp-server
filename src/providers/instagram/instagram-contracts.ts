@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { CreativeTruthPublicationBinding } from '../../contracts/creative-truth.js';
 
 export type InstagramMediaType = 'IMAGE' | 'CAROUSEL' | 'REEL' | 'STORY';
@@ -58,7 +59,46 @@ export interface InstagramReadProvider {
   ): Promise<readonly InstagramInsightMetric[]>;
 }
 
+/** Provenance only, never authority. The runtime writes gate and externally approved
+ * whole-request hash remain required. A controller must authenticate the owner grant.
+ * The envelope digest describes that protected command, not this request (no hash cycle).
+ */
+export interface InstagramOneOffDescriptor {
+  readonly mode: 'ONE_OFF';
+  readonly authorizationRef: string;
+  readonly authorizationId: string;
+  readonly commandEnvelopeSha256: string;
+  readonly validFrom: string;
+  readonly validUntil: string;
+  readonly maxPublications: 1;
+}
+
+/** Mutable content, account, envelope and validity must never mint another consumption key. */
+export function deriveInstagramOneOffIdempotencyKey(
+  descriptor: Pick<InstagramOneOffDescriptor, 'authorizationRef' | 'authorizationId'>,
+): string {
+  const identity = JSON.stringify([descriptor.authorizationRef, descriptor.authorizationId]);
+  return `instagram:one-off:${createHash('sha256').update(identity, 'utf8').digest('hex')}`;
+}
+
+export function assertInstagramOneOffWindow(
+  descriptor: InstagramOneOffDescriptor,
+  nowIso: string,
+): void {
+  const now = Date.parse(nowIso);
+  const start = Date.parse(descriptor.validFrom);
+  const end = Date.parse(descriptor.validUntil);
+  if (![now, start, end].every(Number.isFinite) || start >= end) {
+    throw new Error('INSTAGRAM_PUBLICATION_ONE_OFF_AUTHORIZATION_WINDOW_INVALID');
+  }
+  if (now < start) {
+    throw new Error('INSTAGRAM_PUBLICATION_ONE_OFF_AUTHORIZATION_NOT_YET_VALID');
+  }
+  if (now >= end) throw new Error('INSTAGRAM_PUBLICATION_ONE_OFF_AUTHORIZATION_EXPIRED');
+}
+
 export interface InstagramPublishRequest {
+  readonly oneOff?: InstagramOneOffDescriptor;
   readonly account: InstagramAccountRef;
   readonly mediaType: InstagramMediaType;
   readonly mediaUrls: readonly string[];

@@ -23,6 +23,8 @@ on:
       - 'test/omnichannel-prepared-content-postgres-e2e.test.ts'
       - 'test/scheduler-multitenancy-postgres-e2e.test.ts'
       - 'test/instagram-engagement-postgres-e2e.test.ts'
+      - 'test/instagram-publication-oneoff-postgres-e2e.test.ts'
+      - 'test/fixtures/instagram-publication-oneoff-crash-worker.ts'
       - 'test/finops-postgres-e2e.test.ts'
       - 'test/finops-runtime-cost-postgres-e2e.test.ts'
       - 'test/finops-billing-postgres-e2e.test.ts'
@@ -41,6 +43,8 @@ on:
       - 'src/omnichannel/**'
       - 'src/instagram-engagement/**'
       - 'src/providers/whatsapp/**'
+      - 'src/providers/instagram/**'
+      - 'src/providers/meta/**'
       - 'src/measurement/**'
       - 'src/scheduler/**'
       - 'src/worker/**'
@@ -73,6 +77,9 @@ jobs:
     env:
       DATABASE_URL: postgres://toca:toca-m12-local-only@127.0.0.1:5432/toca_m12
       DATABASE_SSL: 'false'
+      INSTAGRAM_ONEOFF_E2E_DATABASE_URL: postgres://toca:toca-m12-local-only@127.0.0.1:5432/toca_m12
+      INSTAGRAM_ONEOFF_E2E_DISPOSABLE_DATABASE: 'true'
+      INSTAGRAM_ONEOFF_E2E_REQUIRED: 'true'
     steps:
       - name: Checkout exact candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -112,6 +119,7 @@ jobs:
           test/tenant-approval-postgres-e2e.test.ts
           test/omnichannel-prepared-content-postgres-e2e.test.ts
           test/instagram-engagement-postgres-e2e.test.ts
+          test/instagram-publication-oneoff-postgres-e2e.test.ts
           test/scheduler-multitenancy-postgres-e2e.test.ts
           test/finops-postgres-e2e.test.ts
           test/finops-runtime-cost-postgres-e2e.test.ts
