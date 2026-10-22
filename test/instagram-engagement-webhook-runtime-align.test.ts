@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const helper = resolve('.github/scripts/instagram-engagement-webhook-runtime-align.sh');
@@ -84,20 +85,28 @@ function runCaptured(
   }
 }
 
-function invokeModel(action: string, input: unknown) {
-  const path = join(tempDirectory(), 'input.json');
-  writeFileSync(path, JSON.stringify(input));
-  return runCaptured([helper, 'model', action, path]);
+function clockEnvironment(now: number): NodeJS.ProcessEnv {
+  const path = join(tempDirectory(), 'clock.mjs');
+  writeFileSync(path, 'Date.now = () => ' + String(now) + ';\n');
+  return { ...process.env, NODE_OPTIONS: '--import=' + pathToFileURL(path).href };
 }
 
-function model<T>(action: string, input: unknown): T {
-  const result = invokeModel(action, input);
+function invokeModel(action: string, input: unknown, now?: number) {
+  const path = join(tempDirectory(), 'input.json');
+  writeFileSync(path, JSON.stringify(input));
+  return runCaptured([helper, 'model', action, path], {
+    ...(now === undefined ? {} : { env: clockEnvironment(now) }),
+  });
+}
+
+function model<T>(action: string, input: unknown, now?: number): T {
+  const result = invokeModel(action, input, now);
   if (result.status !== 0) throw new Error(result.stderr || 'Model failed');
   return JSON.parse(result.stdout) as T;
 }
 
-function rejects(action: string, input: unknown, code: string): void {
-  const result = invokeModel(action, input);
+function rejects(action: string, input: unknown, code: string, now?: number): void {
+  const result = invokeModel(action, input, now);
   expect(result.status).toBe(1);
   expect(result.stdout).toBe('');
   expect(result.stderr.trim()).toBe('WEBHOOK_RECOVERY_' + code);
@@ -262,6 +271,17 @@ interface Revision {
   status: { conditions: Array<{ type: string; status: string }> };
 }
 
+type DeployEnvironmentRepair =
+  | { enabled: false }
+  | {
+      enabled: true;
+      key: 'TOCA_DEPLOY_ENVIRONMENT';
+      before: 'ABSENT';
+      value: 'production';
+      issueCreatedAt: string;
+      expiresAt: string;
+    };
+
 interface Authorization {
   repository: string;
   sourceSha: string;
@@ -272,6 +292,8 @@ interface Authorization {
   ledgerComment: string;
   issue: number;
   issueBodyHash: string;
+  consumedBodyHash: string;
+  deployEnvironmentRepair: DeployEnvironmentRepair;
   expectedWebhookRevision: string;
   expectedWebhookDigest: string;
   expectedDaemonRevision: string;
@@ -293,11 +315,13 @@ interface RecoveryState {
   preRevisionUid: string;
   baseUrl: string;
   preServiceSpec: Service['spec'];
+  preRevisionTemplate: Template;
   preTraffic: {
     percentages: Record<string, number>;
     tags: Record<string, string>;
   };
   candidateTemplate: Template;
+  candidatePlan?: Record<string, unknown>;
   candidateUid?: string;
   candidateUrl?: string;
   stageVerified?: boolean;
@@ -352,6 +376,7 @@ function authorizationInput() {
     runAttempt: '1',
     issue: {
       number: 9999,
+      created_at: new Date(Date.now() - 5 * 60_000).toISOString(),
       state: 'open',
       user: { login: owner },
       title: 'PRODUCTION AUTHORIZATION — Instagram webhook runtime alignment AUTO test',
@@ -414,8 +439,23 @@ function receiptInput(auth: Authorization) {
   };
 }
 
-function fixtures() {
-  const auth = model<Authorization>('authorize', authorizationInput());
+function repairAuthorizationInput(now = Date.now()) {
+  const input = authorizationInput();
+  input.issue.created_at = new Date(now - 5 * 60_000).toISOString();
+  input.issue.body +=
+    '\n' +
+    [
+      'WEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_AUTHORIZED=true',
+      'WEBHOOK_DEPLOY_ENVIRONMENT_PRESTATE=ABSENT',
+      'WEBHOOK_DEPLOY_ENVIRONMENT_VALUE=production',
+      'WEBHOOK_DEPLOY_ENVIRONMENT_OTHER_CHANGES_AUTHORIZED=false',
+      'WEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_EXPIRES_AT=' + new Date(now + 5 * 60_000).toISOString(),
+    ].join('\n');
+  return input;
+}
+
+function fixtures(input = authorizationInput()) {
+  const auth = model<Authorization>('authorize', input);
   const certified = model<Authorization>('receipt', receiptInput(auth));
   const revision: Revision = {
     metadata: {
@@ -627,10 +667,14 @@ function applyRequest(current: Service, transition: Transition, latest: string):
   return next;
 }
 
-function stagedFixture() {
-  const input = fixtures();
+function stagedFixture(input = fixtures()) {
   const state = model<RecoveryState>('prestate', input);
-  const stage = model<Transition>('stage', { state, service: input.service });
+  const stage = model<Transition>('stage', {
+    state,
+    auth: input.auth,
+    service: input.service,
+    previous: input.revision,
+  });
   const service = applyRequest(input.service, stage, state.candidate);
   const candidate: Revision = {
     metadata: {
@@ -645,7 +689,7 @@ function stagedFixture() {
     spec: structuredClone(state.candidateTemplate.spec),
     status: { conditions: [{ type: 'Ready', status: 'True' }] },
   };
-  Object.assign(state, model('candidate', { state, service, candidate }));
+  Object.assign(state, model('candidate', { state, auth: input.auth, service, candidate }));
   const probes = model('probe-body', {
     state,
     healthStatus: '200',
@@ -653,11 +697,20 @@ function stagedFixture() {
     health: { status: 'ok' },
     ready: { status: 'ready', checks: readinessChecks },
   });
-  return { input, state, stage, service, candidate, probes };
+  return {
+    input,
+    auth: input.auth,
+    previous: input.revision,
+    state,
+    stage,
+    service,
+    candidate,
+    probes,
+  };
 }
 
-function promotedFixture() {
-  const fixture = stagedFixture();
+function promotedFixture(input = fixtures()) {
+  const fixture = stagedFixture(input);
   const transition = model<Transition>('promote', fixture);
   fixture.service = applyRequest(fixture.service, transition, fixture.state.candidate);
   return fixture;
@@ -776,6 +829,373 @@ describe('webhook authorization and exact artifact provenance', () => {
       verified: true,
     });
     expect(consumed.body).not.toContain('AUTHORIZATION_STATE=ACTIVE');
+  });
+});
+
+describe('explicit absent-only production environment repair', () => {
+  it.each(['absent', 'false'])(
+    'keeps opt-in %s restricted to the existing image/release change',
+    (mode) => {
+      const authorization = authorizationInput();
+      if (mode === 'false')
+        authorization.issue.body += '\nWEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_AUTHORIZED=false';
+      const input = fixtures(authorization);
+      input.revision.spec.containers[0]!.env!.push({
+        name: 'TOCA_DEPLOY_ENVIRONMENT',
+        valueFrom: { secretKeyRef: { name: 'existing-environment', key: '1' } },
+      });
+      const state = model<RecoveryState>('prestate', input);
+      const expected = structuredClone(input.revision.spec);
+      expected.containers[0]!.image = imagePrefix + digest;
+      expected.containers[0]!.env!.find((entry) => entry.name === 'TOCA_RELEASE_SHA')!.value = sha;
+      expect(state.auth.deployEnvironmentRepair).toEqual({ enabled: false });
+      expect(state.candidateTemplate.spec).toEqual(expected);
+    },
+  );
+
+  it('adds exactly one production literal from the serving prestate and binds the complete plan to this instance', () => {
+    const input = fixtures(repairAuthorizationInput());
+    const state = model<RecoveryState>('prestate', input);
+    const expected = structuredClone(input.revision.spec);
+    expected.containers[0]!.image = imagePrefix + digest;
+    expected.containers[0]!.env!.find((entry) => entry.name === 'TOCA_RELEASE_SHA')!.value = sha;
+    expected.containers[0]!.env!.push({ name: 'TOCA_DEPLOY_ENVIRONMENT', value: 'production' });
+    expect(state.candidateTemplate.spec).toEqual(expected);
+    expect(state.candidateTemplate.metadata).toEqual(state.preRevisionTemplate.metadata);
+    expect(state.candidatePlan).toMatchObject({
+      schemaVersion: 1,
+      serviceUid: 'service-uid',
+      preRevision: previous,
+      preRevisionUid: 'previous-uid',
+      candidate: candidateName,
+      tag,
+      deployEnvironmentRepair: input.auth.deployEnvironmentRepair,
+    });
+    expect(state.candidatePlan!.candidateTemplateHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(input.revision.spec.containers[0]!.env).not.toContainEqual({
+      name: 'TOCA_DEPLOY_ENVIRONMENT',
+      value: 'production',
+    });
+    expect(readFileSync('.github/workflows/deploy-gcp.yml', 'utf8')).toContain(
+      '"TOCA_DEPLOY_ENVIRONMENT=${{ inputs.environment }}"',
+    );
+  });
+
+  it.each([
+    ['no-opt-in', 'DEPLOY_ENVIRONMENT_REPAIR_OPT_IN_REQUIRED'],
+    ['false-opt-in', 'DEPLOY_ENVIRONMENT_REPAIR_OPT_IN_REQUIRED'],
+    ['invalid-opt-in', 'DEPLOY_ENVIRONMENT_REPAIR_OPT_IN_INVALID'],
+    ['duplicate-opt-in', 'MARKER_NOT_UNIQUE_WEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_AUTHORIZED'],
+    ['duplicate-value', 'MARKER_NOT_UNIQUE_WEBHOOK_DEPLOY_ENVIRONMENT_VALUE'],
+    ['no-prestate', 'MARKER_NOT_UNIQUE_WEBHOOK_DEPLOY_ENVIRONMENT_PRESTATE'],
+    ['existing-prestate', 'MARKER_MISMATCH_WEBHOOK_DEPLOY_ENVIRONMENT_PRESTATE'],
+    ['other-value', 'MARKER_MISMATCH_WEBHOOK_DEPLOY_ENVIRONMENT_VALUE'],
+    ['other-changes', 'MARKER_MISMATCH_WEBHOOK_DEPLOY_ENVIRONMENT_OTHER_CHANGES_AUTHORIZED'],
+    ['no-deadline', 'MARKER_NOT_UNIQUE_WEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_EXPIRES_AT'],
+    ['unknown-key', 'DEPLOY_ENVIRONMENT_REPAIR_UNKNOWN_MARKER'],
+    ['spaced-marker', 'DEPLOY_ENVIRONMENT_REPAIR_UNKNOWN_MARKER'],
+    ['indented-marker', 'DEPLOY_ENVIRONMENT_REPAIR_UNKNOWN_MARKER'],
+  ])('rejects incomplete or ambiguous live opt-in: %s', (change, code) => {
+    const input = repairAuthorizationInput();
+    const remove = (key: string) => {
+      input.issue.body = input.issue.body
+        .split('\n')
+        .filter((line) => !line.startsWith(key + '='))
+        .join('\n');
+    };
+    if (change === 'no-opt-in') remove('WEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_AUTHORIZED');
+    if (change === 'false-opt-in')
+      input.issue.body = input.issue.body.replace(
+        'REPAIR_AUTHORIZED=true',
+        'REPAIR_AUTHORIZED=false',
+      );
+    if (change === 'invalid-opt-in')
+      input.issue.body = input.issue.body.replace(
+        'REPAIR_AUTHORIZED=true',
+        'REPAIR_AUTHORIZED=TRUE',
+      );
+    if (change === 'duplicate-opt-in')
+      input.issue.body += '\nWEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_AUTHORIZED=true';
+    if (change === 'duplicate-value')
+      input.issue.body += '\nWEBHOOK_DEPLOY_ENVIRONMENT_VALUE=production';
+    if (change === 'no-prestate') remove('WEBHOOK_DEPLOY_ENVIRONMENT_PRESTATE');
+    if (change === 'existing-prestate')
+      input.issue.body = input.issue.body.replace('PRESTATE=ABSENT', 'PRESTATE=production');
+    if (change === 'other-value')
+      input.issue.body = input.issue.body.replace('VALUE=production', 'VALUE=staging');
+    if (change === 'other-changes')
+      input.issue.body = input.issue.body.replace(
+        'OTHER_CHANGES_AUTHORIZED=false',
+        'OTHER_CHANGES_AUTHORIZED=true',
+      );
+    if (change === 'no-deadline') remove('WEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_EXPIRES_AT');
+    if (change === 'unknown-key')
+      input.issue.body += '\nWEBHOOK_DEPLOY_ENVIRONMENT_ANY_ENV_ALLOWED=true';
+    if (change === 'spaced-marker')
+      input.issue.body = input.issue.body.replace(
+        'REPAIR_AUTHORIZED=true',
+        'REPAIR_AUTHORIZED =true',
+      );
+    if (change === 'indented-marker')
+      input.issue.body = input.issue.body.replace(
+        '\nWEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_AUTHORIZED=',
+        '\n WEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_AUTHORIZED=',
+      );
+    rejects('authorize', input, code);
+  });
+
+  it.each([
+    ['expired', 'DEPLOY_ENVIRONMENT_REPAIR_EXPIRED'],
+    ['over-one-hour', 'DEPLOY_ENVIRONMENT_REPAIR_WINDOW_INVALID'],
+    ['before-creation', 'DEPLOY_ENVIRONMENT_REPAIR_WINDOW_INVALID'],
+    ['future-creation', 'DEPLOY_ENVIRONMENT_REPAIR_EXPIRED'],
+    ['missing-creation', 'DEPLOY_ENVIRONMENT_REPAIR_TIME_INVALID'],
+    ['invalid-date', 'DEPLOY_ENVIRONMENT_REPAIR_TIME_INVALID'],
+    ['offset-time', 'DEPLOY_ENVIRONMENT_REPAIR_TIME_INVALID'],
+  ])(
+    'requires an unambiguous UTC deadline within one hour of issue creation: %s',
+    (change, code) => {
+      const now = Date.now();
+      const input = repairAuthorizationInput(now);
+      let deadline = new Date(now + 5 * 60_000).toISOString();
+      if (change === 'expired') deadline = new Date(now - 1_000).toISOString();
+      if (change === 'over-one-hour') deadline = new Date(now + 60 * 60_000).toISOString();
+      if (change === 'before-creation') deadline = new Date(now - 6 * 60_000).toISOString();
+      if (change === 'future-creation')
+        input.issue.created_at = new Date(now + 60_000).toISOString();
+      if (change === 'missing-creation')
+        delete (input.issue as Partial<typeof input.issue>).created_at;
+      if (change === 'invalid-date') deadline = '2026-02-30T00:00:00Z';
+      if (change === 'offset-time') deadline = '2026-10-19T21:00:00-03:00';
+      input.issue.body = input.issue.body.replace(
+        /WEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_EXPIRES_AT=.*/,
+        'WEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_EXPIRES_AT=' + deadline,
+      );
+      rejects('authorize', input, code, now);
+    },
+  );
+
+  it('binds consumed live markers and issue creation time to both authorization hashes, including CRLF', () => {
+    const input = repairAuthorizationInput();
+    input.issue.body = input.issue.body.replaceAll('\n', '\r\n');
+    const auth = model<Authorization>('authorize', input);
+    const consumed = model<{ body: string }>('consume', { auth, issue: input.issue });
+    const issue = { ...input.issue, state: 'closed', body: consumed.body };
+    expect(model('consumed', { auth, issue, consumed })).toEqual({ verified: true });
+    const changedAuth = { ...auth, deployEnvironmentRepair: { enabled: false } };
+    rejects(
+      'consumed',
+      { auth: changedAuth, issue, consumed },
+      'DEPLOY_ENVIRONMENT_AUTH_CONTEXT_CHANGED',
+    );
+    issue.created_at = new Date(Date.parse(issue.created_at) - 1_000).toISOString();
+    rejects('consumed', { auth, issue, consumed }, 'DEPLOY_ENVIRONMENT_AUTH_CONTEXT_CHANGED');
+    const changed = { body: consumed.body.replace('VALUE=production', 'VALUE=staging') };
+    rejects(
+      'consumed',
+      { auth, issue: { ...issue, body: changed.body }, consumed: changed },
+      'AUTHORIZATION_CONSUMPTION_NOT_PROVEN',
+    );
+  });
+
+  it.each(['production', 'staging', 'empty', 'secret', 'duplicate', 'sidecar', 'service-template'])(
+    'rejects an existing or ambiguous environment prestate: %s',
+    (change) => {
+      const input = fixtures(repairAuthorizationInput());
+      const container =
+        change === 'service-template'
+          ? input.service.spec.template.spec.containers[0]!
+          : input.revision.spec.containers[change === 'sidecar' ? 1 : 0]!;
+      const entry =
+        change === 'secret'
+          ? {
+              name: 'TOCA_DEPLOY_ENVIRONMENT',
+              valueFrom: { secretKeyRef: { name: 'existing', key: '1' } },
+            }
+          : { name: 'TOCA_DEPLOY_ENVIRONMENT', value: change === 'empty' ? '' : change };
+      container.env!.push(entry);
+      if (change === 'duplicate') container.env!.push(structuredClone(entry));
+      rejects(
+        'prestate',
+        input,
+        change === 'duplicate' ? 'ENV_NAME_DUPLICATE' : 'DEPLOY_ENVIRONMENT_PRESTATE_NOT_ABSENT',
+      );
+    },
+  );
+
+  it.each(['stage', 'candidate', 'promote', 'promoted', 'accepted'])(
+    'rejects an omitted plan before %s can use a candidate',
+    (action) => {
+      const fixture = stagedFixture(fixtures(repairAuthorizationInput()));
+      delete fixture.state.candidatePlan;
+      rejects(action, fixture, 'CANDIDATE_PLAN_REQUIRED');
+    },
+  );
+
+  it.each(['plan', 'prestate', 'candidate', 'instance', 'auth', 'missing-auth'])(
+    'reconstructs the candidate and rejects drift in %s',
+    (change) => {
+      const fixture = stagedFixture(fixtures(repairAuthorizationInput()));
+      let code = 'CANDIDATE_PLAN_CHANGED';
+      if (change === 'plan') fixture.state.candidatePlan!.candidateTemplateHash = '0'.repeat(64);
+      if (change === 'prestate')
+        fixture.state.preRevisionTemplate.spec.containers[1]!.env![0]!.value = 'changed';
+      if (change === 'candidate') {
+        fixture.state.candidateTemplate.spec.containers[0]!.env!.push({
+          name: 'EXTRA_WRITE',
+          value: 'true',
+        });
+        code = 'CANDIDATE_CONFIGURATION_CHANGED';
+      }
+      if (change === 'instance') {
+        fixture.state.tag = 'another-instance';
+        code = 'CANDIDATE_INSTANCE_CHANGED';
+      }
+      if (change === 'auth') {
+        fixture.auth = { ...fixture.auth, runId: '999999' };
+        code = 'DEPLOY_ENVIRONMENT_AUTH_CONTEXT_CHANGED';
+      }
+      if (change === 'missing-auth') {
+        delete (fixture as Partial<typeof fixture>).auth;
+        code = 'DEPLOY_ENVIRONMENT_AUTH_CONTEXT_CHANGED';
+      }
+      rejects('candidate', fixture, code);
+    },
+  );
+
+  it.each(['uid', 'config'])(
+    'checks the actual previous revision again before stage and promotion: %s',
+    (change) => {
+      const fixture = stagedFixture(fixtures(repairAuthorizationInput()));
+      if (change === 'uid') fixture.previous.metadata.uid = 'recreated-revision';
+      else fixture.previous.spec.containers[1]!.env![0]!.value = 'changed';
+      rejects(
+        'stage',
+        { ...fixture, service: fixture.input.service },
+        'DEPLOY_ENVIRONMENT_PRESTATE_CHANGED',
+      );
+      rejects('promote', fixture, 'DEPLOY_ENVIRONMENT_PRESTATE_CHANGED');
+    },
+  );
+
+  it.each(['stage', 'promote'])(
+    'validates the exact request immediately before the %s PUT',
+    (phase) => {
+      const fixture = stagedFixture(fixtures(repairAuthorizationInput()));
+      const transition = phase === 'stage' ? fixture.stage : model<Transition>('promote', fixture);
+      const input = { state: fixture.state, auth: fixture.auth, request: transition.request };
+      expect(model(phase + '-write-gate', input)).toEqual({ verified: true });
+      const extraEnv = structuredClone(input);
+      extraEnv.request.spec.template.spec.containers[0]!.env!.push({
+        name: 'EXTRA_ENV',
+        value: 'not-authorized',
+      });
+      rejects(phase + '-write-gate', extraEnv, 'FORWARD_REQUEST_PLAN_CHANGED');
+      const secret = structuredClone(input);
+      secret.request.spec.template.spec.containers[0]!.env!.find(
+        (entry) => entry.name === 'DATABASE_URL',
+      )!.valueFrom = { secretKeyRef: { name: 'changed-secret', key: '1' } };
+      rejects(phase + '-write-gate', secret, 'FORWARD_REQUEST_PLAN_CHANGED');
+      const sidecar = structuredClone(input);
+      sidecar.request.spec.template.spec.containers[1]!.image = 'changed-sidecar';
+      rejects(phase + '-write-gate', sidecar, 'FORWARD_REQUEST_PLAN_CHANGED');
+      const traffic = structuredClone(input);
+      traffic.request.spec.traffic[0] = { latestRevision: true, percent: 100 };
+      rejects(phase + '-write-gate', traffic, 'FORWARD_REQUEST_TRAFFIC_CHANGED');
+    },
+  );
+
+  it('does not allow a default-off request to smuggle in the environment repair', () => {
+    const fixture = stagedFixture();
+    fixture.stage.request.spec.template.spec.containers[0]!.env!.push({
+      name: 'TOCA_DEPLOY_ENVIRONMENT',
+      value: 'production',
+    });
+    rejects(
+      'stage-write-gate',
+      { state: fixture.state, auth: fixture.auth, request: fixture.stage.request },
+      'FORWARD_REQUEST_PLAN_CHANGED',
+    );
+  });
+
+  it('rejects a saved authorization downgrade against the independent live authorization context', () => {
+    const fixture = stagedFixture(fixtures(repairAuthorizationInput()));
+    fixture.state.auth.deployEnvironmentRepair = { enabled: false };
+    rejects(
+      'stage',
+      { ...fixture, service: fixture.input.service },
+      'DEPLOY_ENVIRONMENT_AUTH_CONTEXT_CHANGED',
+    );
+    rejects('promote', fixture, 'DEPLOY_ENVIRONMENT_AUTH_CONTEXT_CHANGED');
+    rejects(
+      'stage-write-gate',
+      { ...fixture, request: fixture.stage.request },
+      'DEPLOY_ENVIRONMENT_AUTH_CONTEXT_CHANGED',
+    );
+  });
+
+  it('rejects a changed current service prestate before an opted-in stage', () => {
+    const fixture = stagedFixture(fixtures(repairAuthorizationInput()));
+    fixture.input.service.spec.template.spec.containers[0]!.env!.push({
+      name: 'TOCA_DEPLOY_ENVIRONMENT',
+      value: 'staging',
+    });
+    rejects('stage', { ...fixture, service: fixture.input.service }, 'PRESTATE_CHANGED');
+  });
+
+  it('expires every forward mutation gate while allowing factual readback after expiry', () => {
+    const authorization = repairAuthorizationInput();
+    const fixture = stagedFixture(fixtures(authorization));
+    if (!fixture.auth.deployEnvironmentRepair.enabled) throw new Error('Repair expected');
+    const expires = Date.parse(fixture.auth.deployEnvironmentRepair.expiresAt);
+    const transition = model<Transition>('promote', fixture);
+    const promoted = {
+      ...fixture,
+      service: applyRequest(fixture.service, transition, candidateName),
+    };
+    const consumed = model<{ body: string }>('consume', {
+      auth: fixture.auth,
+      issue: authorization.issue,
+    });
+    const closed = { ...authorization.issue, state: 'closed', body: consumed.body };
+    rejects('authorize', authorization, 'DEPLOY_ENVIRONMENT_REPAIR_EXPIRED', expires);
+    rejects('prestate', fixture.input, 'DEPLOY_ENVIRONMENT_REPAIR_EXPIRED', expires);
+    rejects(
+      'consume',
+      { auth: fixture.auth, issue: authorization.issue },
+      'DEPLOY_ENVIRONMENT_REPAIR_EXPIRED',
+      expires,
+    );
+    rejects(
+      'consumed',
+      { auth: fixture.auth, issue: closed, consumed },
+      'DEPLOY_ENVIRONMENT_REPAIR_EXPIRED',
+      expires,
+    );
+    rejects(
+      'stage',
+      { ...fixture, service: fixture.input.service },
+      'DEPLOY_ENVIRONMENT_REPAIR_EXPIRED',
+      expires,
+    );
+    rejects('promote', fixture, 'DEPLOY_ENVIRONMENT_REPAIR_EXPIRED', expires);
+    rejects(
+      'stage-write-gate',
+      { ...fixture, request: fixture.stage.request },
+      'DEPLOY_ENVIRONMENT_REPAIR_EXPIRED',
+      expires,
+    );
+    rejects(
+      'promote-write-gate',
+      { ...fixture, request: transition.request },
+      'DEPLOY_ENVIRONMENT_REPAIR_EXPIRED',
+      expires,
+    );
+    expect(model('candidate', fixture, expires)).toMatchObject({ stageVerified: true });
+    expect(model('promoted', promoted, expires)).toEqual({ promoted: true });
+    const cleanup = model<Transition>('cleanup', promoted, expires);
+    promoted.service = applyRequest(promoted.service, cleanup, candidateName);
+    expect(model('accepted', promoted, expires)).toEqual({ accepted: true });
   });
 });
 
@@ -1279,6 +1699,37 @@ fs.copyFileSync(args[args.indexOf('--body-file') + 1], path.join(process.env.MOC
 }
 
 describe('actual controller phases with isolated mocked cloud transport', () => {
+  it('cleans the tag and restores traffic even after repair expiry with no forward plan or repair context', () => {
+    const fixture = promotedFixture(fixtures(repairAuthorizationInput()));
+    if (!fixture.auth.deployEnvironmentRepair.enabled) throw new Error('Repair expected');
+    const expires = Date.parse(fixture.auth.deployEnvironmentRepair.expiresAt);
+    const env = { NODE_OPTIONS: clockEnvironment(expires + 1_000).NODE_OPTIONS! };
+    delete fixture.state.candidatePlan;
+    delete (fixture.state.auth as Partial<Authorization>).deployEnvironmentRepair;
+    const harness = runtimeHarness(
+      fixture.service,
+      fixture.state,
+      fixture.candidate,
+      fixture.previous,
+    );
+    const cleanup = harness.run('cleanup', env);
+    expect(cleanup.status, cleanup.stderr).toBe(0);
+    const rollback = harness.run('rollback', env);
+    expect(rollback.status, rollback.stderr).toBe(0);
+    expect(harness.calls().filter((call) => call.method === 'PUT')).toHaveLength(2);
+    const restored = JSON.parse(
+      readFileSync(join(harness.root, 'service.json'), 'utf8'),
+    ) as Service;
+    expect(restored.spec.template).toEqual(fixture.service.spec.template);
+    expect(restored.spec.traffic).toEqual([
+      { revisionName: previous, percent: 100 },
+      { revisionName: previous, percent: 0, tag: 'support' },
+    ]);
+    expect(existsSync(join(harness.statePath, 'stage-write-gate.json'))).toBe(false);
+    expect(existsSync(join(harness.statePath, 'promote-write-gate.json'))).toBe(false);
+    expect(existsSync(join(harness.statePath, 'request-headers'))).toBe(false);
+  });
+
   it('retains only failing check names on a real 503 probe and still rejects promotion', () => {
     const fixture = promotedFixture();
     const harness = runtimeHarness(fixture.service, fixture.state);
