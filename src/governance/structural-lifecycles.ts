@@ -100,40 +100,46 @@ export const META_ADS_LIFECYCLE: StateMachineDefinition<MetaAdsLifecycleState> =
   },
 };
 
+/**
+ * Canonical content lifecycle.
+ *
+ * The normal path is intentionally linear and is shared by TOCA OS, the
+ * Marketing Autopilot registry and the durable content-item store:
+ * PLANNED -> SOURCE_BOUND -> BRIEFED -> PRODUCED -> QA_PASS -> APPROVED ->
+ * SCHEDULER_READY -> TOCA_SCHEDULED -> PUBLISHED -> RECONCILED.
+ *
+ * CANCELED is an exceptional terminal off-ramp, not a normal production stage.
+ * Missed windows and supersession are operational dispositions and must not be
+ * encoded as lifecycle states.
+ */
 export type ContentItemState =
   | 'PLANNED'
+  | 'SOURCE_BOUND'
   | 'BRIEFED'
-  | 'ASSET_SELECTED'
-  | 'MASTER_READY'
-  | 'COPY_READY'
-  | 'CREATIVE_READY'
-  | 'QUALITY_PASSED'
+  | 'PRODUCED'
+  | 'QA_PASS'
   | 'APPROVED'
-  | 'READY_FOR_SCHEDULING'
+  | 'SCHEDULER_READY'
   | 'TOCA_SCHEDULED'
   | 'PUBLISHED'
-  | 'MEASURED'
-  | 'ARCHIVED'
+  | 'RECONCILED'
   | 'CANCELED';
 
 export const CONTENT_ITEM_LIFECYCLE: StateMachineDefinition<ContentItemState> = {
   id: 'R29_CONTENT_ITEM_LIFECYCLE',
   initialState: 'PLANNED',
-  terminalStates: ['ARCHIVED', 'CANCELED'],
+  terminalStates: ['RECONCILED', 'CANCELED'],
   transitions: {
-    PLANNED: ['BRIEFED', 'CANCELED'],
-    BRIEFED: ['ASSET_SELECTED', 'CANCELED'],
-    ASSET_SELECTED: ['MASTER_READY', 'CANCELED'],
-    MASTER_READY: ['COPY_READY', 'CANCELED'],
-    COPY_READY: ['CREATIVE_READY', 'CANCELED'],
-    CREATIVE_READY: ['QUALITY_PASSED', 'CANCELED'],
-    QUALITY_PASSED: ['APPROVED', 'CREATIVE_READY', 'CANCELED'],
-    APPROVED: ['READY_FOR_SCHEDULING', 'CANCELED'],
-    READY_FOR_SCHEDULING: ['TOCA_SCHEDULED', 'CANCELED'],
-    TOCA_SCHEDULED: ['PUBLISHED', 'READY_FOR_SCHEDULING', 'CANCELED'],
-    PUBLISHED: ['MEASURED'],
-    MEASURED: ['ARCHIVED'],
-    ARCHIVED: [],
+    PLANNED: ['SOURCE_BOUND', 'CANCELED'],
+    SOURCE_BOUND: ['BRIEFED', 'CANCELED'],
+    BRIEFED: ['PRODUCED', 'CANCELED'],
+    PRODUCED: ['QA_PASS', 'CANCELED'],
+    QA_PASS: ['APPROVED', 'CANCELED'],
+    APPROVED: ['SCHEDULER_READY', 'CANCELED'],
+    SCHEDULER_READY: ['TOCA_SCHEDULED', 'CANCELED'],
+    TOCA_SCHEDULED: ['PUBLISHED', 'SCHEDULER_READY', 'CANCELED'],
+    PUBLISHED: ['RECONCILED'],
+    RECONCILED: [],
     CANCELED: [],
   },
 };

@@ -46,7 +46,7 @@ describe('scheduling guards', () => {
         tocaManagedSchedulerAvailable: true,
         providerNativeApiAvailable: false,
       }),
-    ).toBe('READY_FOR_SCHEDULING');
+    ).toBe('SCHEDULER_READY');
     expect(
       deriveSchedulingDisposition({
         policy: 'TOCA_MANAGED_SCHEDULING',

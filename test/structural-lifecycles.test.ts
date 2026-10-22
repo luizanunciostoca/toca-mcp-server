@@ -56,6 +56,31 @@ describe('R24-R26 and R28-R32 structural lifecycles', () => {
     ).toThrow('STATE_TRANSITION_NOT_ALLOWED');
   });
 
+  it('pins the canonical content path end to end', () => {
+    let content = startStateMachine(CONTENT_ITEM_LIFECYCLE);
+    const states = [
+      'SOURCE_BOUND',
+      'BRIEFED',
+      'PRODUCED',
+      'QA_PASS',
+      'APPROVED',
+      'SCHEDULER_READY',
+      'TOCA_SCHEDULED',
+      'PUBLISHED',
+      'RECONCILED',
+    ] as const;
+
+    for (const state of states) {
+      content = transitionState(CONTENT_ITEM_LIFECYCLE, content, state, {
+        correlationId: 'corr-content-canonical',
+      });
+    }
+
+    expect(content.state).toBe('RECONCILED');
+    expect(isTerminalState(CONTENT_ITEM_LIFECYCLE, content.state)).toBe(true);
+    expect(content.history.map((entry) => entry.to)).toEqual(states);
+  });
+
   it('requires actual restore proof before declaring recovery validated', () => {
     expect(
       evaluateRecoveryReadiness([
