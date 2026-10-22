@@ -136,3 +136,91 @@ describe('Marketing Publish Now hardening contract', () => {
     expect(script).toContain('prepareImage:$prepareImage');
   });
 });
+
+const readback = script.slice(
+  script.indexOf('run_provider_readback() {'),
+  script.indexOf('\nexecute_and_reconcile() {'),
+);
+const receiptGateStart = readback.indexOf('  printf \'%s\\n\' "$result_json" | jq -e \\\n');
+const receiptGateEnd = readback.indexOf("' >/dev/null || return $?", receiptGateStart);
+const receiptGate = readback.slice(receiptGateStart, receiptGateEnd + "' >/dev/null".length);
+const approvedReceipt = {
+  status: 'PUBLISHED',
+  requestSha256: 'b'.repeat(64),
+  publicationId: '18000000000000001',
+  instagramAccountId: '17841400000000001',
+  publicationAssetSha256: 'a'.repeat(64),
+  requestMediaType: 'IMAGE',
+  providerMediaType: 'IMAGE',
+  correlationId: 'approved-correlation',
+  idempotencyKey: 'approved-idempotency',
+  permalink: 'https://www.instagram.com/p/Approved_123/',
+};
+function validateReceipt(value: unknown, mediaType = 'IMAGE'): number | null {
+  return spawnSync('bash', ['-c', 'set -euo pipefail\n' + receiptGate], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      result_json: JSON.stringify(value),
+      APPROVED_REQUEST_SHA256: approvedReceipt.requestSha256,
+      INSTAGRAM_ACCOUNT_ID: approvedReceipt.instagramAccountId,
+      EXPECTED_ASSET_SHA256: approvedReceipt.publicationAssetSha256,
+      MEDIA_TYPE: mediaType,
+      CORRELATION_ID: approvedReceipt.correlationId,
+      IDEMPOTENCY_KEY: approvedReceipt.idempotencyKey,
+    },
+  }).status;
+}
+
+describe('Marketing Publish Now persisted readback receipt gate', () => {
+  it('binds the read-only verifier to the command asset and validates an observed receipt', () => {
+    expect(readback).toContain(
+      'INSTAGRAM_FIRST_PUBLICATION_EXPECTED_ASSET_SHA256=$EXPECTED_ASSET_SHA256',
+    );
+    expect(readback).toContain('INSTAGRAM_PUBLICATION_WRITES_ENABLED=false');
+    expect(receiptGateStart).toBeGreaterThan(-1);
+    expect(receiptGateEnd).toBeGreaterThan(receiptGateStart);
+    expect(validateReceipt(approvedReceipt)).toBe(0);
+  });
+
+  it.each([
+    ['status', 'RECONCILIATION_REQUIRED'],
+    ['requestSha256', 'c'.repeat(64)],
+    ['instagramAccountId', 'other-account'],
+    ['publicationAssetSha256', 'c'.repeat(64)],
+    ['correlationId', 'other-correlation'],
+    ['idempotencyKey', 'other-idempotency'],
+    ['requestMediaType', 'STORY'],
+    ['providerMediaType', 'VIDEO'],
+    ['publicationId', ''],
+    ['publicationId', '   '],
+    ['publicationId', 123],
+    ['permalink', ''],
+    ['permalink', null],
+    ['permalink', 'not-a-url'],
+    ['permalink', 'https://instagram.com.evil.invalid/p/Approved_123/'],
+    ['permalink', 'https://www.instagram.com/stories/Approved_123/'],
+  ])('rejects mismatched or invalid %s without publishing again', (field, value) => {
+    expect(validateReceipt({ ...approvedReceipt, [field]: value })).not.toBe(0);
+  });
+
+  it.each(Object.keys(approvedReceipt))('rejects a missing feed receipt field %s', (field) => {
+    const value: Record<string, unknown> = { ...approvedReceipt };
+    delete value[field];
+    expect(validateReceipt(value)).not.toBe(0);
+  });
+
+  it('preserves STORY semantics instead of imposing a FEED permalink requirement', () => {
+    expect(
+      validateReceipt({ ...approvedReceipt, requestMediaType: 'STORY', permalink: null }, 'STORY'),
+    ).toBe(0);
+  });
+
+  it('routes failed readback to reconciliation rather than executing another publication', () => {
+    const reconcile = script.slice(script.indexOf('\nexecute_and_reconcile() {'));
+    expect(reconcile.match(/gcloud run jobs execute "\$EXECUTE_JOB_NAME"/g)).toHaveLength(1);
+    expect(reconcile).toContain('readback_rc=$?');
+    expect(reconcile).toContain('outcome="RECONCILIATION_REQUIRED"');
+    expect(reconcile).toContain('[ "$readback_rc" -ne 0 ]');
+  });
+});

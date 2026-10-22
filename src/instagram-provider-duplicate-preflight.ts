@@ -22,8 +22,9 @@ if (config.INSTAGRAM_PUBLICATION_WRITES_ENABLED) {
   throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_WRITES_MUST_BE_DISABLED');
 }
 
-const scheduledAtMs = Date.parse(env.INSTAGRAM_DUPLICATE_PREFLIGHT_SCHEDULED_AT);
-if (!Number.isFinite(scheduledAtMs))
+const scheduledAtMs = parseTimestamp(env.INSTAGRAM_DUPLICATE_PREFLIGHT_SCHEDULED_AT);
+const upperBound = Date.now() + 5 * 60 * 1000;
+if (!Number.isFinite(scheduledAtMs) || scheduledAtMs > upperBound)
   throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_SCHEDULE_INVALID');
 const caption = env.INSTAGRAM_DUPLICATE_PREFLIGHT_CAPTION_BASE64
   ? Buffer.from(env.INSTAGRAM_DUPLICATE_PREFLIGHT_CAPTION_BASE64, 'base64').toString('utf8')
@@ -36,13 +37,15 @@ const response = await client.get(`${env.INSTAGRAM_BUSINESS_ACCOUNT_ID}/${edge}`
 });
 const items = requireData(response);
 const lowerBound = scheduledAtMs - 72 * 60 * 60 * 1000;
-const upperBound = Date.now() + 5 * 60 * 1000;
 let inspectedMediaCount = 0;
 let duplicate: { id: string; permalink?: string; sha256?: string; reason: string } | undefined;
 
 for (const item of items) {
-  const timestamp = typeof item.timestamp === 'string' ? Date.parse(item.timestamp) : Number.NaN;
-  if (!Number.isFinite(timestamp) || timestamp < lowerBound || timestamp > upperBound) continue;
+  const timestamp = parseTimestamp(item.timestamp);
+  if (!Number.isFinite(timestamp) || timestamp > upperBound) {
+    throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_PROVIDER_TIMESTAMP_INVALID');
+  }
+  if (timestamp < lowerBound) continue;
   inspectedMediaCount += 1;
 
   if (typeof item.media_url === 'string' && item.media_url.length > 0) {
@@ -56,24 +59,27 @@ for (const item of items) {
       };
       break;
     }
-    continue;
   }
 
   if (
     env.INSTAGRAM_DUPLICATE_PREFLIGHT_FORMAT === 'FEED_IMAGE' &&
-    caption.length > 0 &&
-    item.caption === caption
+    normalizeCaption(caption).length > 0 &&
+    typeof item.caption === 'string' &&
+    normalizeCaption(item.caption) === normalizeCaption(caption)
   ) {
     duplicate = {
       id: requireId(item),
       ...(typeof item.permalink === 'string' ? { permalink: item.permalink } : {}),
-      reason: 'EXACT_CAPTION_MATCH_WITHOUT_MEDIA_URL',
+      reason:
+        typeof item.media_url === 'string' && item.media_url.length > 0
+          ? 'NORMALIZED_CAPTION_MATCH'
+          : 'EXACT_CAPTION_MATCH_WITHOUT_MEDIA_URL',
     };
     break;
   }
 
-  if (env.INSTAGRAM_DUPLICATE_PREFLIGHT_FORMAT === 'STORY_IMAGE') {
-    throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_STORY_MEDIA_URL_MISSING');
+  if (typeof item.media_url !== 'string' || item.media_url.length === 0) {
+    throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_MEDIA_URL_MISSING');
   }
 }
 
@@ -112,15 +118,93 @@ function requireData(value: unknown): Array<Record<string, unknown>> {
   }
   const data = (value as { data?: unknown }).data;
   if (!Array.isArray(data)) throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_PROVIDER_DATA_INVALID');
-  return data.filter(
-    (item): item is Record<string, unknown> =>
-      typeof item === 'object' && item !== null && !Array.isArray(item),
-  );
+  // Never infer coverage from timestamp ordering or follow provider-supplied URLs.
+  // A full page without a continuation marker is still ambiguous at this bound.
+  if (data.length >= 100) {
+    throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_PROVIDER_COVERAGE_INCOMPLETE');
+  }
+  const root = value as Record<string, unknown>;
+  if ('error' in root) throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_PROVIDER_RESPONSE_INVALID');
+  if ('paging' in root) {
+    const paging = root.paging;
+    if (typeof paging !== 'object' || paging === null || Array.isArray(paging)) {
+      throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_PROVIDER_PAGING_INVALID');
+    }
+    if ('next' in paging || 'previous' in paging) {
+      throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_PROVIDER_COVERAGE_INCOMPLETE');
+    }
+    if (Object.keys(paging).some((key) => key !== 'cursors')) {
+      throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_PROVIDER_PAGING_INVALID');
+    }
+    if ('cursors' in paging) {
+      const cursors = paging.cursors;
+      if (
+        typeof cursors !== 'object' ||
+        cursors === null ||
+        Array.isArray(cursors) ||
+        Object.entries(cursors).some(
+          ([key, value]) =>
+            !['before', 'after'].includes(key) || typeof value !== 'string' || value.length === 0,
+        )
+      ) {
+        throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_PROVIDER_PAGING_INVALID');
+      }
+    }
+  }
+  return data.map((item: unknown) => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_PROVIDER_ITEM_INVALID');
+    }
+    const record = item as Record<string, unknown>;
+    requireId(record);
+    if (
+      !Number.isFinite(parseTimestamp(record.timestamp)) ||
+      parseTimestamp(record.timestamp) > upperBound
+    ) {
+      throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_PROVIDER_TIMESTAMP_INVALID');
+    }
+    for (const field of ['caption', 'media_url', 'permalink', 'media_type']) {
+      if (field in record && typeof record[field] !== 'string') {
+        throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_PROVIDER_ITEM_INVALID');
+      }
+    }
+    if (typeof record.media_url === 'string' && record.media_url.length > 0) {
+      let url: URL;
+      try {
+        url = new URL(record.media_url);
+      } catch {
+        throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_MEDIA_URL_INVALID');
+      }
+      if (url.protocol !== 'https:' || url.username || url.password) {
+        throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_MEDIA_URL_INVALID');
+      }
+    }
+    return record;
+  });
 }
 
 function requireId(item: Record<string, unknown>): string {
-  if (typeof item.id !== 'string' || item.id.length === 0) {
+  if (typeof item.id !== 'string' || item.id.trim().length === 0) {
     throw new Error('INSTAGRAM_DUPLICATE_PREFLIGHT_PROVIDER_ID_INVALID');
   }
   return item.id;
+}
+
+function normalizeCaption(value: string): string {
+  return value.normalize('NFC').replace(/\s+/gu, ' ').trim();
+}
+
+function parseTimestamp(value: unknown): number {
+  if (typeof value !== 'string') return Number.NaN;
+  // Require explicit timezone and a real calendar date; Date.parse alone rolls
+  // invalid dates such as February 30 forward and accepts timezone-less input.
+  const match =
+    /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|[+-]\d{2}:?\d{2})$/.exec(
+      value,
+    );
+  if (!match) return Number.NaN;
+  const day = Date.parse(`${match[1]}T00:00:00Z`);
+  if (!Number.isFinite(day) || new Date(day).toISOString().slice(0, 10) !== match[1])
+    return Number.NaN;
+  return Date.parse(value);
 }

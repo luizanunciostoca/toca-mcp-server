@@ -18,6 +18,8 @@ const imagePrefix = 'southamerica-east1-docker.pkg.dev/' + project + '/toca-mcp/
 const shaPattern = /^[a-f0-9]{40}$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const positive = /^[1-9][0-9]*$/;
+const deployEnvironmentKey = 'TOCA_DEPLOY_ENVIRONMENT';
+const repairWindowMs = 60 * 60 * 1000;
 const readinessNames = new Set([
   'db', 'migrations', 'schema', 'audit', 'outbox', 'approval_store', 'crm', 'privacy',
   'workflow', 'ag01', 'meta', 'whatsapp', 'email', 'google_ads', 'provider_credentials',
@@ -38,8 +40,9 @@ const lines = (body) => {
     const match = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line);
     if (match) values.set(match[1], [...(values.get(match[1]) ?? []), match[2]]);
   }
-  return (key, expected) => {
+  return (key, expected, optional = false) => {
     const entries = values.get(key);
+    if (optional && entries === undefined) return undefined;
     check(entries?.length === 1, 'MARKER_NOT_UNIQUE_' + key);
     if (expected !== undefined) check(entries[0] === expected, 'MARKER_MISMATCH_' + key);
     return entries[0];
@@ -48,6 +51,68 @@ const lines = (body) => {
 const requireMarkers = (get, markers) => {
   for (const [key, value] of Object.entries(markers)) get(key, value);
 };
+const consumedBody = (body) => body.replace(/^AUTHORIZATION_STATE=ACTIVE\r?$/m,
+  'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED');
+function repairTimestamp(value) {
+  check(typeof value === 'string' &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value),
+    'DEPLOY_ENVIRONMENT_REPAIR_TIME_INVALID');
+  const parsed = Date.parse(value);
+  check(Number.isFinite(parsed) && new Date(parsed).toISOString() ===
+    (value.includes('.') ? value : value.replace(/Z$/, '.000Z')),
+    'DEPLOY_ENVIRONMENT_REPAIR_TIME_INVALID');
+  return parsed;
+}
+function validateRepairAuthorization(repair, fresh = false) {
+  check(object(repair), 'DEPLOY_ENVIRONMENT_REPAIR_AUTHORIZATION_MISSING');
+  if (repair.enabled === false) {
+    check(equal(repair, { enabled: false }), 'DEPLOY_ENVIRONMENT_REPAIR_AUTHORIZATION_INVALID');
+    return;
+  }
+  check(repair.enabled === true && equal(repair, {
+    enabled: true, key: deployEnvironmentKey, before: 'ABSENT', value: 'production',
+    issueCreatedAt: repair.issueCreatedAt, expiresAt: repair.expiresAt,
+  }), 'DEPLOY_ENVIRONMENT_REPAIR_AUTHORIZATION_INVALID');
+  const created = repairTimestamp(repair.issueCreatedAt);
+  const expires = repairTimestamp(repair.expiresAt);
+  check(expires > created && expires - created <= repairWindowMs,
+    'DEPLOY_ENVIRONMENT_REPAIR_WINDOW_INVALID');
+  if (fresh) check(Date.now() >= created && Date.now() < expires,
+    'DEPLOY_ENVIRONMENT_REPAIR_EXPIRED');
+}
+function repairAuthorization(issue) {
+  const get = lines(issue.body);
+  const keys = [
+    'WEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_AUTHORIZED',
+    'WEBHOOK_DEPLOY_ENVIRONMENT_PRESTATE',
+    'WEBHOOK_DEPLOY_ENVIRONMENT_VALUE',
+    'WEBHOOK_DEPLOY_ENVIRONMENT_OTHER_CHANGES_AUTHORIZED',
+    'WEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_EXPIRES_AT',
+  ];
+  for (const line of issue.body.split(/\r?\n/)) {
+    if (!line.trimStart().startsWith('WEBHOOK_DEPLOY_ENVIRONMENT')) continue;
+    const key = /^(WEBHOOK_DEPLOY_ENVIRONMENT[A-Z0-9_]*)=/.exec(line)?.[1];
+    check(key !== undefined && keys.includes(key), 'DEPLOY_ENVIRONMENT_REPAIR_UNKNOWN_MARKER');
+  }
+  const optIn = get(keys[0], undefined, true);
+  check(optIn === undefined || optIn === 'false' || optIn === 'true',
+    'DEPLOY_ENVIRONMENT_REPAIR_OPT_IN_INVALID');
+  if (optIn !== 'true') {
+    check(keys.slice(1).every((key) => get(key, undefined, true) === undefined),
+      'DEPLOY_ENVIRONMENT_REPAIR_OPT_IN_REQUIRED');
+    return { enabled: false };
+  }
+  requireMarkers(get, {
+    WEBHOOK_DEPLOY_ENVIRONMENT_PRESTATE: 'ABSENT',
+    WEBHOOK_DEPLOY_ENVIRONMENT_VALUE: 'production',
+    WEBHOOK_DEPLOY_ENVIRONMENT_OTHER_CHANGES_AUTHORIZED: 'false',
+  });
+  const repair = { enabled: true, key: deployEnvironmentKey, before: 'ABSENT', value: 'production',
+    issueCreatedAt: new Date(repairTimestamp(issue.created_at)).toISOString(),
+    expiresAt: new Date(repairTimestamp(get(keys[4]))).toISOString() };
+  validateRepairAuthorization(repair, true);
+  return repair;
+}
 const generatedAnnotations = new Set([
   'serving.knative.dev/creator', 'serving.knative.dev/lastModifier',
   'run.googleapis.com/operation-id', 'run.googleapis.com/ingress-status',
@@ -160,6 +225,61 @@ function specWithoutTraffic(spec) {
   result.template = { name: spec.template.metadata?.name, ...templateView(spec.template) };
   return result;
 }
+function requireAbsentDeployEnvironment(template) {
+  check(Array.isArray(template.spec?.containers), 'DEPLOY_ENVIRONMENT_PRESTATE_INVALID');
+  for (const container of template.spec.containers) {
+    check(container.env === undefined || Array.isArray(container.env), 'DEPLOY_ENVIRONMENT_PRESTATE_INVALID');
+    check(!(container.env ?? []).some((entry) => entry?.name === deployEnvironmentKey),
+      'DEPLOY_ENVIRONMENT_PRESTATE_NOT_ABSENT');
+  }
+}
+function plannedCandidate(auth, previousTemplate, preServiceSpec) {
+  validateRepairAuthorization(auth.deployEnvironmentRepair);
+  check(object(previousTemplate?.spec) && object(preServiceSpec?.template), 'CANDIDATE_PRESTATE_MISSING');
+  const target = runtimeContainer(previousTemplate);
+  if (auth.deployEnvironmentRepair.enabled) {
+    requireAbsentDeployEnvironment(previousTemplate);
+    requireAbsentDeployEnvironment(preServiceSpec.template);
+  }
+  const template = copy(previousTemplate);
+  const container = template.spec.containers[target.index];
+  container.image = auth.image;
+  const env = container.env ?? [];
+  const release = env.find((entry) => entry.name === 'TOCA_RELEASE_SHA');
+  if (release) { delete release.valueFrom; release.value = auth.sourceSha; }
+  else env.push({ name: 'TOCA_RELEASE_SHA', value: auth.sourceSha });
+  if (auth.deployEnvironmentRepair.enabled) env.push({ name: deployEnvironmentKey, value: 'production' });
+  container.env = env;
+  return template;
+}
+function candidatePlan(state, template) {
+  return {
+    schemaVersion: 1, authorizationHash: hash(state.auth),
+    serviceUid: state.serviceUid, preRevision: state.preRevision, preRevisionUid: state.preRevisionUid,
+    candidate: state.candidate, tag: state.tag,
+    previousTemplateHash: hash(state.preRevisionTemplate), preServiceSpecHash: hash(state.preServiceSpec),
+    candidateTemplateHash: hash(template), deployEnvironmentRepair: copy(state.auth.deployEnvironmentRepair),
+  };
+}
+function assertCandidatePlan(state, auth, fresh = false) {
+  check(object(state.candidatePlan) && object(state.preRevisionTemplate), 'CANDIDATE_PLAN_REQUIRED');
+  validateRepairAuthorization(state.auth.deployEnvironmentRepair, fresh);
+  if (auth !== undefined || state.auth.deployEnvironmentRepair.enabled) {
+    check(object(auth) && equal(auth, state.auth), 'DEPLOY_ENVIRONMENT_AUTH_CONTEXT_CHANGED');
+  }
+  check(state.candidate === state.auth.candidate && state.tag === state.auth.tag &&
+    state.preRevision === state.auth.expectedWebhookRevision, 'CANDIDATE_INSTANCE_CHANGED');
+  const expected = plannedCandidate(state.auth, state.preRevisionTemplate, state.preServiceSpec);
+  check(equal(state.candidatePlan, candidatePlan(state, expected)), 'CANDIDATE_PLAN_CHANGED');
+  check(equal(state.candidateTemplate, expected), 'CANDIDATE_CONFIGURATION_CHANGED');
+  return expected;
+}
+function assertRepairPrestate(state, previous) {
+  if (!state.auth.deployEnvironmentRepair.enabled) return;
+  check(previous?.metadata?.uid === state.preRevisionUid, 'DEPLOY_ENVIRONMENT_PRESTATE_CHANGED');
+  validateRevision(previous, state.preRevision, state.auth.expectedWebhookDigest);
+  check(equal(templateView(previous), state.preRevisionTemplate), 'DEPLOY_ENVIRONMENT_PRESTATE_CHANGED');
+}
 function runtimeContainer(revision) {
   const containers = revision.spec?.containers;
   check(Array.isArray(containers) && containers.length > 0, 'CONTAINERS_MISSING');
@@ -256,6 +376,7 @@ function assertContext(state, service, view) {
 }
 function candidateContext(input) {
   const { state, service, candidate } = input;
+  assertCandidatePlan(state, input.auth);
   const view = serviceView(service);
   assertContext(state, service, view);
   validateRevision(candidate, state.candidate, state.auth.digest);
@@ -310,7 +431,8 @@ try {
     });
     result = { repository: repo, sourceSha: input.sha, treeSha: input.tree, digest,
       image: imagePrefix + digest, buildRun, ledgerComment, issue: issue.number,
-      issueBodyHash: hash(issue.body), expectedWebhookRevision, expectedWebhookDigest,
+      issueBodyHash: hash(issue.body), consumedBodyHash: hash(consumedBody(issue.body)),
+      deployEnvironmentRepair: repairAuthorization(issue), expectedWebhookRevision, expectedWebhookDigest,
       expectedDaemonRevision, expectedDaemonDigest,
       runId: String(input.runId), runAttempt: String(input.runAttempt),
       candidate: serviceName + '-wr' + input.runId + 'a' + input.runAttempt,
@@ -347,24 +469,23 @@ try {
     check(view.traffic.tags[auth.tag] === undefined &&
       service.spec.template.metadata?.name !== auth.candidate &&
       service.status.latestCreatedRevisionName !== auth.candidate, 'INSTANCE_ALREADY_EXISTS');
-    const target = validateRevision(revision, auth.expectedWebhookRevision, auth.expectedWebhookDigest);
-    const candidateTemplate = templateView(revision);
-    candidateTemplate.spec.containers[target.index].image = auth.image;
-    const env = candidateTemplate.spec.containers[target.index].env ?? [];
-    const release = env.find((entry) => entry.name === 'TOCA_RELEASE_SHA');
-    if (release) { delete release.valueFrom; release.value = auth.sourceSha; }
-    else env.push({ name: 'TOCA_RELEASE_SHA', value: auth.sourceSha });
-    candidateTemplate.spec.containers[target.index].env = env;
+    validateRevision(revision, auth.expectedWebhookRevision, auth.expectedWebhookDigest);
+    validateRepairAuthorization(auth.deployEnvironmentRepair, true);
+    const preRevisionTemplate = templateView(revision);
+    const candidateTemplate = plannedCandidate(auth, preRevisionTemplate, service.spec);
     result = { schemaVersion: 1, auth, candidate: auth.candidate, tag: auth.tag,
       serviceUid: service.metadata.uid, preRevision: revision.metadata.name,
       preRevisionUid: revision.metadata.uid, baseUrl: serviceUrl(service.status.url),
       serviceConfig: view.config, preServiceSpec: copy(service.spec), preTraffic: view.traffic,
-      candidateTemplate, auxiliary: auxiliary(input), capturedAt: new Date().toISOString() };
+      preRevisionTemplate, candidateTemplate, auxiliary: auxiliary(input), capturedAt: new Date().toISOString() };
+    result.candidatePlan = candidatePlan(result, candidateTemplate);
   } else if (action === 'auxiliary') {
     result = { preserved: equal(auxiliary({ ...input, auth: input.state.auth }), input.state.auxiliary) };
     check(result.preserved, 'AUXILIARY_CONFIGURATION_CHANGED');
   } else if (action === 'stage') {
     const { state, service } = input;
+    assertCandidatePlan(state, input.auth, true);
+    assertRepairPrestate(state, input.previous);
     const view = serviceView(service);
     assertContext(state, service, view);
     check(singleRevision(view.traffic) === state.preRevision &&
@@ -387,6 +508,8 @@ try {
   } else if (action === 'promote') {
     const { state, service, probes } = input;
     const view = candidateContext(input);
+    validateRepairAuthorization(state.auth.deployEnvironmentRepair, true);
+    assertRepairPrestate(state, input.previous);
     check(state.stageVerified === true && typeof state.candidateUid === 'string', 'STAGE_CONTEXT_INCOMPLETE');
     check(singleRevision(view.traffic) === state.preRevision &&
       equal(view.traffic.tags, { ...state.preTraffic.tags, [state.tag]: state.candidate }), 'PRE_PROMOTION_TRAFFIC_CHANGED');
@@ -408,6 +531,23 @@ try {
     check(singleRevision(view.traffic) === input.state.candidate &&
       equal(view.traffic.tags, input.state.preTraffic.tags), 'FINAL_ACCEPTANCE_NOT_PROVEN');
     result = { accepted: true };
+  } else if (action === 'stage-write-gate' || action === 'promote-write-gate') {
+    const { state, request } = input;
+    const template = assertCandidatePlan(state, input.auth, true);
+    const expectedSpec = copy(state.preServiceSpec);
+    expectedSpec.template = { metadata: { name: state.candidate, ...copy(template.metadata) }, spec: copy(template.spec) };
+    check(request.apiVersion === 'serving.knative.dev/v1' && request.kind === 'Service' &&
+      request.metadata?.name === serviceName &&
+      [project, '990081828836'].includes(request.metadata.namespace) &&
+      typeof request.metadata.resourceVersion === 'string' && request.metadata.resourceVersion.length > 0 &&
+      equal(configurationMetadata(request.metadata), state.serviceConfig.metadata) &&
+      equal(specWithoutTraffic(request.spec), specWithoutTraffic(expectedSpec)), 'FORWARD_REQUEST_PLAN_CHANGED');
+    const serving = action === 'stage-write-gate' ? state.preRevision : state.candidate;
+    check(request.spec.traffic.every((entry) => entry.latestRevision !== true) &&
+      equal(routeMap(request.spec.traffic, undefined, false), {
+        percentages: { [serving]: 100 }, tags: { ...state.preTraffic.tags, [state.tag]: state.candidate },
+      }), 'FORWARD_REQUEST_TRAFFIC_CHANGED');
+    result = { verified: true };
   } else if (action === 'rollback') {
     const { state, service } = input;
     const view = serviceView(service, true);
@@ -472,13 +612,17 @@ try {
     check(issue.number === auth.issue && issue.state === 'open' &&
       issue.user?.login === 'luizanunciostoca' && hash(issue.body) === auth.issueBodyHash, 'AUTHORIZATION_CHANGED');
     lines(issue.body)('AUTHORIZATION_STATE', 'ACTIVE');
+    check(equal(repairAuthorization(issue), auth.deployEnvironmentRepair), 'DEPLOY_ENVIRONMENT_AUTH_CONTEXT_CHANGED');
     result = { state: 'closed', state_reason: 'completed',
-      body: issue.body.replace(/^AUTHORIZATION_STATE=ACTIVE\r?$/m, 'AUTHORIZATION_STATE=CONSUMED_AND_CLOSED') };
+      body: consumedBody(issue.body) };
+    check(hash(result.body) === auth.consumedBodyHash, 'AUTHORIZATION_CHANGED');
   } else if (action === 'consumed') {
     check(input.issue.number === input.auth.issue && input.issue.state === 'closed' &&
       input.issue.user?.login === 'luizanunciostoca' &&
-      input.issue.body === input.consumed.body, 'AUTHORIZATION_CONSUMPTION_NOT_PROVEN');
+      input.issue.body === input.consumed.body && hash(input.issue.body) === input.auth.consumedBodyHash,
+      'AUTHORIZATION_CONSUMPTION_NOT_PROVEN');
     lines(input.issue.body)('AUTHORIZATION_STATE', 'CONSUMED_AND_CLOSED');
+    check(equal(repairAuthorization(input.issue), input.auth.deployEnvironmentRepair), 'DEPLOY_ENVIRONMENT_AUTH_CONTEXT_CHANGED');
     result = { verified: true };
   } else if (action === 'probe-diagnostics') {
     const checks = input?.checks;
@@ -631,6 +775,14 @@ live_service() {
 live_candidate() {
   cloud_read "$STATE/candidate-live.json" run revisions describe "$CANDIDATE"
 }
+live_repair_prestate() {
+  if [[ "$(jq -r '.deployEnvironmentRepair.enabled' "$STATE/auth.json")" == true ]]; then
+    cloud_read "$STATE/repair-previous-live.json" run revisions describe "$PREVIOUS" ||
+      fail 'DEPLOY_ENVIRONMENT_PRESTATE_READ_FAILED'
+  else
+    printf '{}\n' > "$STATE/repair-previous-live.json"
+  fi
+}
 live_auxiliary() {
   cloud_read "$STATE/daemon-live.json" run services describe "$DAEMON" ||
     fail 'DAEMON_READ_FAILED'
@@ -650,12 +802,18 @@ verify_auxiliary() {
     "iam=$STATE/iam-live.json" "scheduler=$STATE/scheduler-live.json"
 }
 api_request() {
-  local method="$1" url="$2" output="$3" body="${4:-}"
+  local method="$1" url="$2" output="$3" body="${4:-}" forward_phase="${5:-}"
   local token status
   token="$(gcloud auth print-access-token 2> "$STATE/command-error")" ||
     fail 'ACCESS_TOKEN_UNAVAILABLE'
   [[ -n "$token" && "$token" != *$'\n'* && "$token" != *$'\r'* ]] ||
     fail 'ACCESS_TOKEN_INVALID'
+  # Forward writes recheck the exact local plan and deadline after token acquisition.
+  # Compensation deliberately does not enter this gate, including after expiry.
+  if [[ "$method" == PUT && ( "$forward_phase" == stage || "$forward_phase" == promote ) ]]; then
+    require_model "$forward_phase-write-gate" "$STATE/$forward_phase-write-gate.json" \
+      "auth=$STATE/auth.json" "state=$STATE/state.json" "request=$body"
+  fi
   printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$token" > "$STATE/request-headers"
   unset token
   local args=(--silent --show-error --proto '=https' --connect-timeout 5 --max-time 35
@@ -674,7 +832,7 @@ put_once() {
   jq '.request' "$transition" > "$STATE/request-$phase.json"
   printf 'ATTEMPTED\n' > "$STATE/$phase-attempted"
   local status
-  status="$(api_request PUT "$API/services/$SERVICE" "$STATE/response-$phase.json" "$STATE/request-$phase.json")"
+  status="$(api_request PUT "$API/services/$SERVICE" "$STATE/response-$phase.json" "$STATE/request-$phase.json" "$phase")"
   printf '%s\n' "$status" > "$STATE/$phase-http-status"
   case "$status" in
     409|412) fail 'CAS_CONFLICT' ;;
@@ -687,7 +845,7 @@ wait_candidate() {
   for attempt in $(seq 1 12); do
     if live_service && live_candidate &&
        run_model "$action" "$output" "state=$STATE/state.json" \
-         "service=$STATE/service-live.json" "candidate=$STATE/candidate-live.json"; then
+         "auth=$STATE/auth.json" "service=$STATE/service-live.json" "candidate=$STATE/candidate-live.json"; then
       return 0
     fi
     [[ "$attempt" == 12 ]] || sleep 5
@@ -784,6 +942,8 @@ case "$PHASE" in
       runId:.auth.runId, runAttempt:.auth.runAttempt, authorizationIssue:.auth.issue,
       serviceUid, preRevision, preRevisionUid, previousImageDigest:.auth.expectedWebhookDigest,
       candidate, tag, capturedAt, plannedCandidateTrafficPercent:0, rollbackOnlyOwnCandidate:true,
+      deployEnvironmentRepair:.auth.deployEnvironmentRepair,
+      candidatePlanSha256:.candidatePlan.candidateTemplateHash,
       rawRuntimePayloadIncluded:false
     }' "$STATE/state.json" > "$STATE/sanitized-context.json"
     ;;
@@ -806,7 +966,9 @@ case "$PHASE" in
     consumed_authorization
     verify_auxiliary
     live_service || fail 'SERVICE_READ_FAILED'
-    require_model stage "$STATE/stage-transition.json" "state=$STATE/state.json" "service=$STATE/service-live.json"
+    live_repair_prestate
+    require_model stage "$STATE/stage-transition.json" "state=$STATE/state.json" \
+      "auth=$STATE/auth.json" "service=$STATE/service-live.json" "previous=$STATE/repair-previous-live.json"
     [[ "$(api_request GET "$API/revisions/$CANDIDATE" "$STATE/candidate-absence.json")" == 404 ]] ||
       fail 'CANDIDATE_ABSENCE_NOT_PROVEN'
     put_once stage "$STATE/stage-transition.json"
@@ -826,8 +988,10 @@ case "$PHASE" in
     consumed_authorization
     verify_auxiliary
     live_service && live_candidate || fail 'PRE_PROMOTION_READ_FAILED'
+    live_repair_prestate
     require_model promote "$STATE/promote-transition.json" "state=$STATE/state.json" \
-      "service=$STATE/service-live.json" "candidate=$STATE/candidate-live.json" "probes=$STATE/candidate-probes.json"
+      "auth=$STATE/auth.json" "service=$STATE/service-live.json" "candidate=$STATE/candidate-live.json" \
+      "previous=$STATE/repair-previous-live.json" "probes=$STATE/candidate-probes.json"
     put_once promote "$STATE/promote-transition.json"
     wait_candidate promoted "$STATE/promote-readback.json"
     printf 'APPLIED_CONFIRMED_BY_READBACK\n' > "$STATE/promote-status"
@@ -875,7 +1039,7 @@ case "$PHASE" in
           "$(cat "$STATE/runtime-acceptance-status")" == PASS ]]; then
       live_service && live_candidate || fail 'FINAL_ACCEPTANCE_READ_FAILED'
       require_model accepted "$STATE/final-readback.json" "state=$STATE/state.json" \
-        "service=$STATE/service-live.json" "candidate=$STATE/candidate-live.json"
+        "auth=$STATE/auth.json" "service=$STATE/service-live.json" "candidate=$STATE/candidate-live.json"
       verify_auxiliary
     fi
     ;;
@@ -895,6 +1059,8 @@ case "$PHASE" in
       printf 'RUNTIME_IMAGE_DIGEST=%s\n' "$(jq -er '.digest' "$STATE/auth.json")"
       printf 'RUNTIME_BUILD_RUN_ID=%s\n' "$(jq -er '.buildRun' "$STATE/auth.json")"
       printf 'RUNTIME_BUILD_LEDGER_COMMENT_ID=%s\n' "$(jq -er '.ledgerComment' "$STATE/auth.json")"
+      printf 'WEBHOOK_DEPLOY_ENVIRONMENT_REPAIR_ENABLED=%s\n' \
+        "$(jq -r 'if (.deployEnvironmentRepair.enabled | type) == "boolean" then .deployEnvironmentRepair.enabled | tostring else "NOT_PROVEN" end' "$STATE/auth.json")"
       printf 'PREVIOUS_WEBHOOK_REVISION=%s\nCANDIDATE_REVISION=%s\n' "$PREVIOUS" "$CANDIDATE"
       printf 'STAGE_STATUS=%s\nPROMOTION_STATUS=%s\n' "$(value stage-status)" "$(value promote-status)"
       printf 'CANDIDATE_HEALTH_HTTP_STATUS=%s\nCANDIDATE_READY_HTTP_STATUS=%s\n' "$(value candidate-health-status)" "$(value candidate-ready-status)"

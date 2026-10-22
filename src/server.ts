@@ -1,3 +1,4 @@
+import { MCP_MAX_TOOL_INPUT_ELEMENTS } from './mcp/security-limits.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import { PostgresVideoContentRuntime } from './content/runtime.js';
 import { loadConfig, type RuntimeConfig } from './config.js';
@@ -115,11 +116,14 @@ export function createTocaServer(options: TocaServerOptions = {}): McpServer {
       ...(fallbackIdentity ? { fallbackIdentity } : {}),
     });
 
-  const server = new McpServer({
-    name: SERVER_NAME,
-    version: SERVER_VERSION,
-    description: 'Deterministic TOCA Core execution facade for ChatGPT governed by TOCA_OS.',
-  });
+  const server = new McpServer(
+    {
+      name: SERVER_NAME,
+      version: SERVER_VERSION,
+      description: 'Deterministic TOCA Core execution facade for ChatGPT governed by TOCA_OS.',
+    },
+    { maxToolInputElements: MCP_MAX_TOOL_INPUT_ELEMENTS },
+  );
   const secrets = new EnvironmentSecretResolver(env);
   const pool = config.DATABASE_URL
     ? createPostgresPool({ connectionString: config.DATABASE_URL })

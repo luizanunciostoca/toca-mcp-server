@@ -748,16 +748,24 @@ describe('actual WorkflowStore / specialist / Core / native Meta proof', () => {
     ).toThrow();
   });
 
-  it('rejects an invalid ledger regardless of providerReadbackVerified=true', async () => {
-    const f = await actualProof();
-    expect(f.result.providerReadbackVerified).toBe(true);
-    expect(() =>
-      api.verifyMission(f.snapshot, scope, identity, f.records, {
-        ...f.verification,
-        valid: false,
-      }),
-    ).toThrow('CORE_AUDIT_CHAIN_NOT_VERIFIED');
-  });
+  it.each([false, true])(
+    'rejects an invalid ledger regardless of a stored providerReadbackVerified=%s',
+    async (providerReadbackVerified) => {
+      const f = await actualProof();
+      // A READ-only coordinator ACK never establishes independent provider proof.
+      expect(f.result.providerReadbackVerified).toBe(false);
+      expect(f.view.providerReadbackVerified).toBe(false);
+      expect(() =>
+        api.verifyMission(
+          changed(f.snapshot, 'steps.0.output.providerReadbackVerified', providerReadbackVerified),
+          scope,
+          identity,
+          f.records,
+          { ...f.verification, valid: false },
+        ),
+      ).toThrow('CORE_AUDIT_CHAIN_NOT_VERIFIED');
+    },
+  );
 
   it.each([{ account_id: '999' }, { account_currency: 'USD' }, { date_stop: '2026-10-19' }])(
     'rejects native rows outside account, currency or read window (%j)',
