@@ -113,7 +113,9 @@ class C01InventoryTests(unittest.TestCase):
     def test_workflow_never_uploads_plaintext_topology_to_public_repository(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("openssl cms -encrypt -binary -aes-256-cbc", workflow)
-        self.assertIn("rm -- toca-c01-readback.json", workflow)
+        self.assertIn("trap 'rm -f -- toca-c01-readback.json' EXIT", workflow)
+        self.assertIn("umask 077", workflow)
+        self.assertLess(workflow.index("Validate owner's short-lived encryption certificate before GCP access"), workflow.index("Authenticate existing GCP identity through WIF"))
         artifact_step = workflow.split("- name: Store encrypted inventory and public-safe receipt only", 1)[1]
         self.assertIn("toca-c01-readback.p7m", artifact_step)
         self.assertIn("toca-c01-public-receipt.json", artifact_step)

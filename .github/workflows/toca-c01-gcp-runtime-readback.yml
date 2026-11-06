@@ -57,6 +57,29 @@ jobs:
           test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
           python3 -m unittest discover -s tests -p 'test_toca_c01_gcp_inventory.py' -v
 
+      - name: Validate owner's short-lived encryption certificate before GCP access
+        shell: bash
+        env:
+          C01_RECIPIENT_CERTIFICATE_BASE64: ${{ inputs.recipient_certificate_base64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$C01_RECIPIENT_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/toca-c01-recipient.pem"
+          openssl x509 -in "$RUNNER_TEMP/toca-c01-recipient.pem" -noout -checkend 0
+          cert_expiry="$(openssl x509 -in "$RUNNER_TEMP/toca-c01-recipient.pem" -enddate -noout | cut -d= -f2-)"
+          expiry_epoch="$(date -u -d "$cert_expiry" +%s)"
+          now_epoch="$(date -u +%s)"
+          test "$expiry_epoch" -gt "$now_epoch"
+          test "$expiry_epoch" -le "$((now_epoch + 259200))"
+          printf 'TOCA-C01-synthetic-certificate-preflight' > "$RUNNER_TEMP/toca-c01-test-plain"
+          openssl cms -encrypt -binary -aes-256-cbc \
+            -in "$RUNNER_TEMP/toca-c01-test-plain" \
+            -out "$RUNNER_TEMP/toca-c01-test.p7m" \
+            -outform DER \
+            "$RUNNER_TEMP/toca-c01-recipient.pem"
+          test -s "$RUNNER_TEMP/toca-c01-test.p7m"
+          rm -- "$RUNNER_TEMP/toca-c01-test-plain" "$RUNNER_TEMP/toca-c01-test.p7m"
+
       - name: Authenticate existing GCP identity through WIF
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
@@ -66,36 +89,26 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
-      - name: Capture sanitized Cloud Run services, revisions, and jobs
+      - name: Capture and encrypt GCP inventory before any public artifact
         shell: bash
         run: |
           set -euo pipefail
+          umask 077
+          trap 'rm -f -- toca-c01-readback.json' EXIT
           python3 scripts/toca-c01-gcp-runtime-inventory.py \
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
             --main-sha "$GITHUB_SHA" \
             --output toca-c01-readback.json \
             --receipt-output toca-c01-public-receipt.json
-
-      - name: Encrypt full provider inventory for owner before any public artifact
-        shell: bash
-        env:
-          C01_RECIPIENT_CERTIFICATE_BASE64: ${{ inputs.recipient_certificate_base64 }}
-        run: |
-          set -euo pipefail
-          umask 077
           test -s toca-c01-readback.json
           test -s toca-c01-public-receipt.json
-          printf '%s' "$C01_RECIPIENT_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/toca-c01-recipient.pem"
-          openssl x509 -in "$RUNNER_TEMP/toca-c01-recipient.pem" -noout -checkend 0
           openssl cms -encrypt -binary -aes-256-cbc \
             -in toca-c01-readback.json \
             -out toca-c01-readback.p7m \
             -outform DER \
             "$RUNNER_TEMP/toca-c01-recipient.pem"
           test -s toca-c01-readback.p7m
-          rm -- toca-c01-readback.json
-          test ! -e toca-c01-readback.json
 
       - name: Reject concurrent main drift
         shell: bash
