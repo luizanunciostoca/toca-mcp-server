@@ -189,6 +189,27 @@ describe('MCP security budgets', () => {
       expect(fixture.callback).toHaveBeenCalledTimes(1);
     });
   }
+  it('enforces 100-item JSON-RPC batch cap before callbacks', async () => {
+    const fixture = await probeEndpoint(() => createTocaServer({ env: {} }));
+    const sendBatch = (count: number) =>
+      fetch(`${fixture.url}/mcp`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(
+          Array.from({ length: count }, (_, index) => rpc({ payload: index }, index + 1)),
+        ),
+        signal: AbortSignal.timeout(15_000),
+      });
+    const accepted = await sendBatch(100);
+    expect(accepted.status).toBe(200);
+    await accepted.text();
+    expect(fixture.callback).toHaveBeenCalledTimes(100);
+
+    const rejected = await sendBatch(101);
+    expect(rejected.status).toBe(400);
+    await rejected.text();
+    expect(fixture.callback).toHaveBeenCalledTimes(100);
+  });
   it('allows the bounded 200-step / 100-dependency workflow shape and a realistic inline asset', async () => {
     const fixture = await probeEndpoint(() => createTocaServer({ env: {} }));
     const steps = Array.from({ length: 200 }, (_, index) => ({

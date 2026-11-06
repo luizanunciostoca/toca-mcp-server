@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -203,24 +204,50 @@ def collect(main_sha: str) -> dict:
     }
 
 
+def public_receipt(report: dict, raw_payload: bytes, run_id: str, run_attempt: str) -> dict:
+    """Public commitment to a private report, without provider topology or secret fields."""
+    if not run_id.isdigit() or not run_attempt.isdigit() or int(run_id) <= 0 or int(run_attempt) != 1:
+        raise ValueError("C01_INVALID_WORKFLOW_RUN_ID_OR_REPLAY_ATTEMPT")
+    return {
+        "schemaVersion": "toca.c01.public-receipt.v1",
+        "capturedUtc": report["capturedUtc"],
+        "controllerMainSha": report["controllerMainSha"],
+        "workflowRunId": run_id,
+        "workflowRunAttempt": int(run_attempt),
+        "gcpMetadataReadCalls": True,
+        "gcpProviderMutations": False,
+        "gcpListAndDescribeCompleted": True,
+        "privateReportSha256": hashlib.sha256(raw_payload).hexdigest(),
+        "privateReportContents": "ENCRYPTED_ONLY_NOT_PUBLIC",
+        "httpHealthAndReady": "NOT_PROVEN_PRIVATE_ENDPOINTS_NOT_INVOKED",
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
     parser.add_argument("--region", required=True)
     parser.add_argument("--main-sha", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--receipt-output", required=True)
     args = parser.parse_args()
     if args.project != PROJECT or args.region != REGION or not SHA.fullmatch(args.main_sha):
         raise ValueError("C01_UNAUTHORIZED_PROJECT_REGION_OR_SHA")
     path = Path(args.output)
-    if path.is_absolute() or ".." in path.parts or path.suffix != ".json":
+    receipt_path = Path(args.receipt_output)
+    if (path.is_absolute() or ".." in path.parts or path.suffix != ".json"
+            or receipt_path.is_absolute() or ".." in receipt_path.parts
+            or receipt_path.suffix != ".json" or receipt_path == path):
         raise ValueError("C01_INVALID_OUTPUT_TARGET")
     report = collect(args.main_sha)
-    path.write_text(json.dumps(report, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    raw_payload = (json.dumps(report, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    receipt = public_receipt(
+        report, raw_payload, os.getenv("GITHUB_RUN_ID", ""), os.getenv("GITHUB_RUN_ATTEMPT", "")
+    )
+    path.write_bytes(raw_payload)
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     print("C01_GCP_METADATA_READBACK=CAPTURED")
-    print(f"C01_SERVICE_COUNT={report['servicesCount']}")
-    print(f"C01_JOB_COUNT={report['jobsCount']}")
-    print(f"C01_JOB_DETAILS_COMPLETE={str(report['jobDetailsComplete']).lower()}")
+    print("C01_PUBLIC_RECEIPT_ONLY=true")
     print("C01_HTTP_HEALTH_READY=NOT_PROVEN")
     return 0
 
