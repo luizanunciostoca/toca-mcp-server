@@ -1,0 +1,128 @@
+name: TOCA C01 GCP Runtime Readback (Read Only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorization:
+        description: Exact owner authorization for a single GCP metadata read
+        required: true
+        type: choice
+        options:
+          - NOT_AUTHORIZED
+          - TOCA_C01_READ_ONLY_AUTHORIZED
+        default: NOT_AUTHORIZED
+      recipient_certificate_base64:
+        description: Base64 of the owner's short-lived public X.509 evidence-encryption certificate (never the private key)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: toca-c01-gcp-runtime-readback
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner &&
+      github.run_attempt == 1 &&
+      inputs.recipient_certificate_base64 != '' &&
+      inputs.authorization == 'TOCA_C01_READ_ONLY_AUTHORIZED'
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 15
+    env:
+      GCP_PROJECT_ID: toca-mcp-production
+      GCP_REGION: southamerica-east1
+      WIF_PROVIDER: projects/990081828836/locations/global/workloadIdentityPools/github/providers/github-toca-mcp
+      READBACK_SERVICE_ACCOUNT: toca-mcp-deployer@toca-mcp-production.iam.gserviceaccount.com
+    steps:
+      - name: Checkout exact main controller without persistent credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify exact main and local read-only contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+          python3 -m unittest discover -s tests -p 'test_toca_c01_gcp_inventory.py' -v
+
+      - name: Validate owner's short-lived encryption certificate before GCP access
+        shell: bash
+        env:
+          C01_RECIPIENT_CERTIFICATE_BASE64: ${{ inputs.recipient_certificate_base64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$C01_RECIPIENT_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/toca-c01-recipient.pem"
+          openssl x509 -in "$RUNNER_TEMP/toca-c01-recipient.pem" -noout -checkend 0
+          cert_expiry="$(openssl x509 -in "$RUNNER_TEMP/toca-c01-recipient.pem" -enddate -noout | cut -d= -f2-)"
+          expiry_epoch="$(date -u -d "$cert_expiry" +%s)"
+          now_epoch="$(date -u +%s)"
+          test "$expiry_epoch" -gt "$now_epoch"
+          test "$expiry_epoch" -le "$((now_epoch + 259200))"
+          printf 'TOCA-C01-synthetic-certificate-preflight' > "$RUNNER_TEMP/toca-c01-test-plain"
+          openssl cms -encrypt -binary -aes-256-cbc \
+            -in "$RUNNER_TEMP/toca-c01-test-plain" \
+            -out "$RUNNER_TEMP/toca-c01-test.p7m" \
+            -outform DER \
+            "$RUNNER_TEMP/toca-c01-recipient.pem"
+          test -s "$RUNNER_TEMP/toca-c01-test.p7m"
+          rm -- "$RUNNER_TEMP/toca-c01-test-plain" "$RUNNER_TEMP/toca-c01-test.p7m"
+
+      - name: Authenticate existing GCP identity through WIF
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.READBACK_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Capture and encrypt GCP inventory before any public artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f -- toca-c01-readback.json' EXIT
+          python3 scripts/toca-c01-gcp-runtime-inventory.py \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --main-sha "$GITHUB_SHA" \
+            --output toca-c01-readback.json \
+            --receipt-output toca-c01-public-receipt.json
+          test -s toca-c01-readback.json
+          test -s toca-c01-public-receipt.json
+          openssl cms -encrypt -binary -aes-256-cbc \
+            -in toca-c01-readback.json \
+            -out toca-c01-readback.p7m \
+            -outform DER \
+            "$RUNNER_TEMP/toca-c01-recipient.pem"
+          test -s toca-c01-readback.p7m
+
+      - name: Reject concurrent main drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+          echo 'C01_EXACT_MAIN_STILL_CURRENT=true' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Store encrypted inventory and public-safe receipt only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: toca-c01-encrypted-readback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            toca-c01-readback.p7m
+            toca-c01-public-receipt.json
+          if-no-files-found: error
+          retention-days: 14
