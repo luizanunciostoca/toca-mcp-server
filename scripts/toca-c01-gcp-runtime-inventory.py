@@ -185,7 +185,10 @@ def collect(main_sha: str) -> dict:
         "region": REGION,
         "controllerMainSha": main_sha,
         "readOnly": True,
-        "providerCalls": False,
+        # This report is evidence from real GCP provider metadata READ calls.
+        # A read must not be recorded as an absence of provider interaction.
+        "gcpMetadataReadCalls": True,
+        "providerMutations": False,
         "serviceMutations": False,
         "databaseMutations": False,
         "iamMutations": False,

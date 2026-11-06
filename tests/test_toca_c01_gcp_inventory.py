@@ -72,6 +72,15 @@ class C01InventoryTests(unittest.TestCase):
         for forbidden in ["gcloud run jobs execute", "gcloud run jobs deploy", "gcloud run services update", "gcloud iam roles"]:
             self.assertNotIn(forbidden, source)
 
+    def test_provider_readback_does_not_misrepresent_real_gcp_queries(self):
+        with patch.object(c01, "run_gcloud", return_value=[]) as call:
+            report = c01.collect(MAIN)
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(report["schemaVersion"], "toca.c01.gcp-readback.v1")
+        self.assertTrue(report["gcpMetadataReadCalls"])
+        self.assertFalse(report["providerMutations"])
+        self.assertNotIn("providerCalls", report)
+
 
 if __name__ == "__main__":
     unittest.main()
