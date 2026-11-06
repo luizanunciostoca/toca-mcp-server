@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 
 SOURCE = Path(__file__).resolve().parents[1] / "scripts/toca-c01-gcp-runtime-inventory.py"
+WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/toca-c01-gcp-runtime-readback.yml"
 spec = importlib.util.spec_from_file_location("c01_inventory", SOURCE)
 c01 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(c01)
@@ -71,6 +72,15 @@ class C01InventoryTests(unittest.TestCase):
         self.assertIn('verb not in {"list", "describe"}', source)
         for forbidden in ["gcloud run jobs execute", "gcloud run jobs deploy", "gcloud run services update", "gcloud iam roles"]:
             self.assertNotIn(forbidden, source)
+
+    def test_workflow_rejects_reruns_and_non_owner_triggering_actor(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("github.ref == 'refs/heads/main'", workflow)
+        self.assertIn("github.actor == github.repository_owner", workflow)
+        self.assertIn("github.triggering_actor == github.repository_owner", workflow)
+        self.assertIn("github.run_attempt == 1", workflow)
+        self.assertIn("environment: production", workflow)
+        self.assertIn("TOCA_C01_READ_ONLY_AUTHORIZED", workflow)
 
     def test_provider_readback_does_not_misrepresent_real_gcp_queries(self):
         with patch.object(c01, "run_gcloud", return_value=[]) as call:
